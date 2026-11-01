@@ -30,14 +30,15 @@ an emulator: the game's code runs natively, and Xbox 360 graphics are translated
 2. Download **`SSX-Installer.exe`** from the [latest release](../../releases/latest).
 3. Run it. Windows SmartScreen may warn you because the installer isn't code-signed. Click
    **More info → Run anyway**. The installer's source is [`installer/SSXInstaller.cs`](installer/SSXInstaller.cs).
-4. Select your ISO, tick the ownership box, and click **Build SSX**.
+4. Click **Next**, select your ISO, tick the ownership box, and click **Install**.
 
 The installer then, entirely on your PC:
 - checks that the ISO is the supported release,
 - installs the build tools through `winget` (Git, CMake, Ninja, LLVM, and the Visual Studio 2022
   Build Tools; Windows asks for administrator permission once),
 - downloads the ReXGlue SDK and recompiles the game,
-- produces the playable folder `SSX-PC\source\dist\SSX`. Click **Play** or start `ssx.exe`.
+- produces the playable folder `SSX-PC\source\dist\SSX`. Click **Play SSX**, use the desktop
+  shortcut, or start `ssx.exe`.
 
 It needs Windows 10/11 x64, about **30 GB** of free space, an internet connection and roughly
 **30–60 minutes**. Running it again later updates and rebuilds only what changed.

@@ -130,3 +130,10 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   (SsxReadPadForUI in ssx_input_lock.cpp - an unlocked read would reintroduce the device-list
   race), feeds ImGui gamepad nav keys; Back+Start toggles, LB/RB tabs, B closes. Not testable
   with SSX_TEST_INPUT (that only feeds the guest); needs a real pad.
+- 2026-11-01: Fresh-install link failure (undefined PPCImageConfig / sub_*): generated/rexglue.cmake
+  only adds the recompiled sources if generated/default/sources.cmake exists at configure time,
+  and on a fresh tree codegen first runs during the build. package.ps1 now configures, builds
+  ssx_codegen, then configures again (verified on a tree with generated/default removed).
+  Installer redesigned as a wizard (Welcome / Your game / Install / Play): painted header, step
+  rail, determinate progress from "==> " stage lines plus ninja [n/N] counters, stage checklist,
+  collapsible log, desktop shortcut (icon = dist/SSX/ssx.ico), taskkill /T on cancel.
