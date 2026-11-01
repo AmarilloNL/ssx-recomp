@@ -27,9 +27,16 @@ Keyboard (default)
   WASD steer, Space jump (A), arrow keys = trick stick, Q/E triggers,
   1/3 bumpers, Enter start, Tab back. Change them in F1 > Controls.
 
-DLC
-  Copy the DLC package files (the ones inside 4541096D\00000002\) into
-  Documents\ssx\dlc. They are installed the next time the game starts.
+DLC (optional, not included - you need it from your own Xbox 360)
+  SSX's DLC packages are files with long hexadecimal names and no extension,
+  e.g. 8A7D066F7125F0B02BF4D8F520A12607DD5CB41B45 (Mt. Eddie pack, ~250 MB).
+  On the console they are in Content\0000000000000000\4541096D\00000002\;
+  copy them to your PC with an Xbox 360 file tool (FATXplorer, Velocity, Horizon).
+  1. Close the game.
+  2. Copy the package FILES (not the folder) into Documents\ssx\dlc.
+  3. Start the game: new packages are installed automatically, once.
+  Check: Mt. Eddie shows on the world map, and logs\ssx_*.log has a line
+  "DLC: installed ...". The files in the dlc folder can be deleted afterwards.
 
 Saves, DLC and shader cache live in Documents\ssx.
 If a setting stops the game from starting, delete ssx.toml next to ssx.exe

@@ -22,7 +22,7 @@ an emulator: the game's code runs natively, and Xbox 360 graphics are translated
 - In-game settings menu (**F1**, or **Back + Start** on a controller)
 - Keyboard controls with rebinding, controller vibration, deadzone
 - Runs straight from your ISO; saves stay in `Documents\ssx`
-- DLC support (Mt. Eddie & Classic Characters pack, from your own download)
+- DLC support (Mt. Eddie & Classic Characters pack, from your own console: see [Adding DLC](#adding-dlc))
 
 ## Installing
 
@@ -59,11 +59,52 @@ to this exact executable.
 |---|---|
 | **F1** / **Esc** | Settings menu (controller: **Back + Start**, LB/RB tabs, B closes) |
 | Keyboard | WASD steer, Space jump, arrow keys = trick stick, Q/E triggers, 1/3 bumpers, Enter start, Tab back |
-| DLC | copy your DLC package files (from `4541096D\00000002\`) into `Documents\ssx\dlc` |
+| DLC | see [Adding DLC](#adding-dlc) below |
 
 **Tip:** 1× + FSR runs at very high frame rates and looks sharp. 2× is the sharpest but the GPU
 emulation limits it to roughly 60 fps. If a setting ever stops the game from starting, delete
 `ssx.toml` next to `ssx.exe`.
+
+## Adding DLC
+
+The base game works without DLC. Like the game itself, **DLC is not included**: you need the
+DLC packages from your own Xbox 360, bought on your own Xbox Live account.
+
+**What the files look like.** Xbox 360 DLC is stored as package files with a long hexadecimal
+name and no extension, for example `8A7D066F7125F0B02BF4D8F520A12607DD5CB41B45`. SSX's DLC
+lives in a folder named after the game's title ID and the content type "marketplace":
+
+```
+Content\0000000000000000\4541096D\00000002\
+```
+
+| Package | Size | Contents |
+|---|---|---|
+| Mt. Eddie & Classic Characters Pack | ~250 MB | the Mt. Eddie region and classic riders |
+| Pre-order bonus pack | ~9 MB | extra gear (if you had it) |
+
+**Getting them off your console.** Copy the game's DLC from your console's hard drive to a USB
+drive (*Settings → System → Storage*), or connect the console's drive to your PC. Xbox 360
+storage uses its own file system, so use an Xbox 360 file tool (for example *FATXplorer*,
+*Velocity* or *Horizon*) to open it and copy the package files out of the
+`4541096D\00000002` folder. Copy the package files themselves, not the folder.
+
+**Installing them.**
+
+1. Close the game.
+2. Open the folder `Documents\ssx\dlc`. The game creates it the first time it starts, or you
+   can create it yourself.
+3. Copy the package files (the long-named files) into it. The result looks like
+   `Documents\ssx\dlc\8A7D066F7125F0B02BF4D8F520A12607DD5CB41B45`.
+4. Start the game. On startup it unpacks each new package into
+   `Documents\ssx\0000000000000000\4541096D\00000002\`. This only happens once per package,
+   and the files in `dlc` can be deleted afterwards.
+
+**Checking it worked.** Mt. Eddie appears on the world map and the classic riders are
+selectable. The game's log (`logs` folder next to `ssx.exe`) shows a line like
+`DLC: installed 8A7D066F...` for each package. If it says `failed to install`, the file is not
+an Xbox 360 content package. Check that you copied the long-named package file, not a folder or
+an archive.
 
 ## Known limitations
 
