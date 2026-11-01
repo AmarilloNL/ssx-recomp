@@ -57,6 +57,7 @@ class InstallerForm : Form {
     BackColor = Bg;
     ForeColor = TextColor;
     Font = new Font("Segoe UI", 10f);
+    Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);  // ssx.ico, embedded at compile time
 
     var title = new Label { Text = "SSX  PC PORT", Font = new Font("Segoe UI", 22f, FontStyle.Bold),
                             ForeColor = Accent, AutoSize = true, Location = new Point(24, 18) };
