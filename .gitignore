@@ -1,0 +1,18 @@
+# Game data and anything derived from it is never committed.
+game-dump/
+generated/default/
+out/
+tools/
+*.log
+run.png
+ssx.log
+codegen.out
+dist/
+test-userdata/
+bin/
+build*.log
+bench-*.log
+configure*.log
+package.log
+installer/SSX-Installer.exe
+build-ssx.log

@@ -1,0 +1,57 @@
+diff --git a/src/graphics/d3d12/texture_cache.cpp b/src/graphics/d3d12/texture_cache.cpp
+index 2be0e8e..34d4ba9 100644
+--- a/src/graphics/d3d12/texture_cache.cpp
++++ b/src/graphics/d3d12/texture_cache.cpp
+@@ -1889,6 +1889,7 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+   copy_buffer_state = D3D12_RESOURCE_STATE_COPY_SOURCE;
+   command_processor_.SubmitBarriers();
+   uint32_t texture_level_count = texture_key.mip_max_level + 1;
++  const D3D12_RESOURCE_DESC texture_desc = texture_resource->GetDesc();
+   D3D12_TEXTURE_COPY_LOCATION location_source, location_dest;
+   location_source.pResource = copy_buffer;
+   location_source.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+@@ -1923,6 +1924,44 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+     } else {
+       source_box_ptr = nullptr;
+     }
++    // Never copy past the destination subresource. The footprint is sized as
++    // the guest mip reduced then scaled while the host mip is the base scaled
++    // then reduced, so the deepest mips of scaled textures can be a row or
++    // column larger (Xenia clamps this too); clamp against the actual
++    // resource size, which also covers a scaled upload into a texture created
++    // smaller. Either way an out-of-bounds copy removes the device.
++    {
++      uint32_t dst_width =
++          rex::align(std::max(uint32_t(texture_desc.Width >> level), uint32_t(1)), host_block_width);
++      uint32_t dst_height =
++          rex::align(std::max(uint32_t(texture_desc.Height >> level), uint32_t(1)), host_block_height);
++      uint32_t dst_depth = texture_desc.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D
++                               ? std::max(uint32_t(texture_desc.DepthOrArraySize) >> level, uint32_t(1))
++                               : 1;
++      if (!source_box_ptr) {
++        const D3D12_SUBRESOURCE_FOOTPRINT& footprint = location_source.PlacedFootprint.Footprint;
++        source_box = {0, 0, 0, footprint.Width, footprint.Height, footprint.Depth};
++      }
++      uint32_t copy_width = source_box.right - source_box.left;
++      uint32_t copy_height = source_box.bottom - source_box.top;
++      uint32_t copy_depth = source_box.back - source_box.front;
++      if (copy_width > dst_width || copy_height > dst_height || copy_depth > dst_depth) {
++        static bool warned = false;
++        if (!warned && (copy_width > dst_width + host_block_width ||
++                        copy_height > dst_height + host_block_height)) {
++          warned = true;
++          REXGPU_WARN(
++              "Texture upload larger than its texture: copy {}x{} into level {} of {}x{} "
++              "(guest {}x{}, scaled_resolve {}, format {})",
++              copy_width, copy_height, level, uint32_t(texture_desc.Width), texture_desc.Height,
++              width, height, texture_resolution_scaled, uint32_t(guest_format));
++        }
++        source_box.right = source_box.left + std::min(copy_width, dst_width);
++        source_box.bottom = source_box.top + std::min(copy_height, dst_height);
++        source_box.back = source_box.front + std::min(copy_depth, dst_depth);
++        source_box_ptr = &source_box;
++      }
++    }
+     for (uint32_t slice = 0; slice < array_size; ++slice) {
+       command_list.D3DCopyTextureRegion(&location_dest, 0, 0, 0, &location_source, source_box_ptr);
+       location_dest.SubresourceIndex += texture_level_count;

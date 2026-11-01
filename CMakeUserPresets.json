@@ -1,0 +1,25 @@
+{
+    "version": 6,
+    "configurePresets": [
+        {
+            "name": "ssx",
+            "displayName": "SSX dev (SDK built from tools/rexglue-src)",
+            "inherits": "win-amd64-relwithdebinfo",
+            "binaryDir": "${sourceDir}/out/build/ssx",
+            "cacheVariables": {
+                "REXSDK_DIR": "${sourceDir}/tools/rexglue-src",
+                "REXGLUE_ENABLE_FIDELITYFX": "ON"
+            }
+        },
+        {
+            "name": "ssx-release",
+            "displayName": "SSX release (SDK built from tools/rexglue-src)",
+            "inherits": "win-amd64-release",
+            "binaryDir": "${sourceDir}/out/build/ssx-release",
+            "cacheVariables": {
+                "REXSDK_DIR": "${sourceDir}/tools/rexglue-src",
+                "REXGLUE_ENABLE_FIDELITYFX": "ON"
+            }
+        }
+    ]
+}

@@ -1,0 +1,22 @@
+diff --git a/cmake/rexglue_fidelityfx.cmake b/cmake/rexglue_fidelityfx.cmake
+index af35fa8..f2aaf94 100644
+--- a/cmake/rexglue_fidelityfx.cmake
++++ b/cmake/rexglue_fidelityfx.cmake
+@@ -112,6 +112,17 @@ else()
+ endif()
+ add_subdirectory("${fidelityfx_SOURCE_DIR}/ffx-api" "${fidelityfx_BINARY_DIR}/ffx-api" EXCLUDE_FROM_ALL)
+ 
++# The ffx-api DLL's version resource is UTF-16, which llvm-rc can't read; it only
++# carries version info, so build the DLL without it.
++foreach(_rexglue_ffx_target amd_fidelityfx_vk amd_fidelityfx_dx12)
++    if(TARGET ${_rexglue_ffx_target})
++        get_target_property(_rexglue_ffx_sources ${_rexglue_ffx_target} SOURCES)
++        list(FILTER _rexglue_ffx_sources EXCLUDE REGEX "[.]rc$")
++
++        set_target_properties(${_rexglue_ffx_target} PROPERTIES SOURCES "${_rexglue_ffx_sources}")
++    endif()
++endforeach()
++
+ # The upstream FidelityFX targets expose source-tree include paths in
+ # INTERFACE_INCLUDE_DIRECTORIES, which breaks our install export checks.
+ # We only link against these targets internally, so no public includes are
