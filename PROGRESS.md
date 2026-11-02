@@ -137,3 +137,13 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   Installer redesigned as a wizard (Welcome / Your game / Install / Play): painted header, step
   rail, determinate progress from "==> " stage lines plus ninja [n/N] counters, stage checklist,
   collapsible log, desktop shortcut (icon = dist/SSX/ssx.ico), taskkill /T on cancel.
+- 2026-11-02: Hard-edged light/shadow rectangles on the snow (user report, also at 1x). Cause: the
+  720p render size. The renderer uses fixed EDRAM bases (color 0, depth 720, half-res buffers
+  1440/1624/1808) and one pass binds a full-width depth buffer at tile 1440: at 1280 wide that
+  leaves 608 rows before wrapping past tile 2048 onto the lighting buffer at tile 0, so rows
+  608-719 and the top ~112 rows of the light pre-pass broke (both edges seen in screenshots and
+  in a RenderDoc capture of the light buffer). Found with RenderDoc (RTV-path capture, per-draw
+  light buffer dumps) plus a temporary RB_SURFACE_INFO / RB_*_INFO base log in the render target
+  cache. New render size "high" = 1200x640 (15 x 40 = 600 tiles at 1440, every pass fits; log
+  verified); old "720p" configs map to it. The xenia-canary 720p patch has the same overflow.
+  Note: frame-rate measurements that day were contaminated by another game running on the PC.

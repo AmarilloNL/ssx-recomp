@@ -26,9 +26,9 @@
 REXCVAR_DEFINE_INT32(ssx_framerate, 60, "SSX",
                      "Frame rate: 30 (original) to 360, or 0 = match the main display")
     .range(0, 360);
-REXCVAR_DEFINE_STRING(ssx_render_resolution, "720p", "SSX",
-                      "3D render size: original (1120x584) or 720p (restart)")
-    .allowed({"original", "720p"})
+REXCVAR_DEFINE_STRING(ssx_render_resolution, "high", "SSX",
+                      "3D render size: original (1120x584) or high (1200x640) (restart)")
+    .allowed({"original", "high", "720p"})  // 720p: older configs, now means high
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 REXCVAR_DEFINE_INT32(ssx_volume, 100, "SSX", "Master volume (0-100)").range(0, 100);
 
@@ -86,7 +86,10 @@ void SsxApplyStartupSettings() {
   if (rex::cvar::GetFlagSource("render_target_path_d3d12") == rex::cvar::Source::kDefault) {
     rex::cvar::SetFlagByName("render_target_path_d3d12", "rov");
   }
-  // FSR 1 upscales the 720p output to the window much more sharply than bilinear,
+  if (REXCVAR_GET(ssx_render_resolution) == "720p") {  // replaced by high, see sub_82FB6120
+    rex::cvar::SetFlagByName("ssx_render_resolution", "high");
+  }
+  // FSR 1 upscales the game's output to the window much more sharply than bilinear,
   // at almost no cost.
   if (rex::cvar::GetFlagSource("present_effect") == rex::cvar::Source::kDefault) {
     rex::cvar::SetFlagByName("present_effect", "fsr");
@@ -147,10 +150,12 @@ static uint64_t SchedulerClockNs() {
 REX_HOOK(sub_83047368, SchedulerClockNs)
 
 // sub_82FB6120(r4 = quality mode 1-8, r5/r6 = fallback size, r7/r8 = out width/height).
-// Modes 2-7 are the reduced sizes the 360 used to fit 2x MSAA in 10 MB of EDRAM
-// (gameplay uses mode 4, 1120x584). Larger than 720p breaks the game's own
-// buffer layout: 1440p glitches everywhere and crashes on race load, 2160p
-// crashes at boot.
+// Gameplay uses mode 4, 1120x584. The renderer places its targets at fixed EDRAM
+// tiles (color 0, depth 720, half-res buffers 1440-2048) and one pass puts a
+// full-width depth buffer at tile 1440, leaving 608 of the 2048 tiles (80x16
+// pixels each) for it. 1280x720 needs 16 x 45 = 720 there: rows 608-719 wrap onto
+// the top of the lighting buffer, giving hard-edged light/shadow rectangles on
+// the snow. 1200x640 needs 15 x 40 = 600 and fits every pass in the layout.
 REX_EXTERN(__imp__sub_82FB6120);
 REX_HOOK_RAW(sub_82FB6120) {
   static std::set<uint32_t> seen;
@@ -159,9 +164,9 @@ REX_HOOK_RAW(sub_82FB6120) {
     REXLOG_INFO("Render size query: mode {} (fallback {}x{})", mode, ctx.r5.u32, ctx.r6.u32);
   }
   static const std::string setting = REXCVAR_GET(ssx_render_resolution);
-  if (setting == "720p" && mode >= 2 && mode <= 7) {
-    REX_STORE_U32(ctx.r7.u32, 1280);
-    REX_STORE_U32(ctx.r8.u32, 720);
+  if (setting == "high" && mode >= 2 && mode <= 7) {
+    REX_STORE_U32(ctx.r7.u32, 1200);
+    REX_STORE_U32(ctx.r8.u32, 640);
     return;
   }
   __imp__sub_82FB6120(ctx, base);

@@ -17,7 +17,7 @@ an emulator: the game's code runs natively, and Xbox 360 graphics are translated
 
 - Native Windows build, no emulator
 - **Up to 300 fps** (or match your monitor) with real-time game speed. The original runs at 30.
-- Native 720p rendering (the 360 renders 1120×584), optional 2× resolution (1440p)
+- Sharper 1200×640 rendering (the 360 renders 1120×584), optional 2× resolution scale (2400×1280)
 - **AMD FSR 1** upscaling (default), CAS sharpening, FXAA, anisotropic filtering
 - In-game settings menu (**F1**, or **Back + Start** on a controller)
 - Keyboard controls with rebinding, controller vibration, deadzone
@@ -110,7 +110,7 @@ an archive.
 ## Known limitations
 
 - Only SSX (USA) is supported.
-- 3× resolution scale and render sizes above 720p are not available: they crash or break the
+- 3× resolution scale and render sizes above 1200×640 are not available: they crash or break the
   game's own render buffers.
 - Online features (RiderNet, global events) don't work. EA's servers are gone.
 
@@ -129,7 +129,7 @@ recompilation overrides, and `src/` holds the PC-side code (settings, launcher, 
 - [ReXGlue SDK](https://github.com/rexglue/rexglue-sdk) by Tom Clay: the static recompilation toolkit and runtime
 - [Xenia](https://xenia.jp): the Xbox 360 research the ReXGlue runtime is derived from
 - [XenonRecomp](https://github.com/hedge-dev/XenonRecomp) (hedge-dev): the codegen approach ReXGlue builds on
-- [xenia-canary game patches](https://github.com/xenia-canary/game-patches) (Margen67): the SSX 60 fps and 720p findings
+- [xenia-canary game patches](https://github.com/xenia-canary/game-patches) (Margen67): the SSX 60 fps and render size findings
 - AMD FidelityFX (FSR / CAS)
 
 ## Legal

@@ -46,12 +46,12 @@ const ImVec4 kWarn(1.0f, 0.78f, 0.30f, 1.0f);
 const Choice kFramerates[] = {{"30  (original)", "30"}, {"60", "60"},   {"120", "120"},
                               {"144", "144"},           {"165", "165"}, {"240", "240"},
                               {"300", "300"},           {"Match main display", "0"}};
-const Choice kScales[] = {{"1x   1280 x 720   (fast)", "1"},
-                          {"2x   2560 x 1440   (sharpest, ~60 fps)", "2"}};
+const Choice kScales[] = {{"1x   (fast)", "1"},
+                          {"2x   (sharpest, much heavier)", "2"}};
 const Choice kUpscaling[] = {{"Bilinear  (soft)", "bilinear"},
                              {"AMD CAS  (sharpen)", "cas"},
                              {"AMD FSR 1  (upscale + sharpen)", "fsr"}};
-const Choice kRenderSizes[] = {{"Original  1120 x 584", "original"}, {"Native  1280 x 720", "720p"}};
+const Choice kRenderSizes[] = {{"Original  1120 x 584", "original"}, {"High  1200 x 640", "high"}};
 const Choice kAntiAliasing[] = {{"Off", "none"}, {"FXAA", "fxaa"}, {"FXAA  (strong)", "fxaa_extreme"}};
 const Choice kAniso[] = {{"Game default", "-1"}, {"Off", "0"}, {"2x", "2"},
                          {"4x", "3"},            {"8x", "4"},  {"16x", "5"}};
@@ -334,7 +334,7 @@ void SsxSettingsDialog::DrawDisplayTab() {
 
 void SsxSettingsDialog::DrawGraphicsTab() {
   if (!BeginRows("##graphics")) return;
-  Row("Resolution scale", "2x renders at 1440p: sharpest, but much heavier on the GPU.");
+  Row("Resolution scale", "2x draws four times as many pixels: sharpest, but much heavier on the GPU.");
   Combo("##scale", "resolution_scale", kScales, std::size(kScales));
 
   Row("Upscaling", "How the image is scaled to your screen. FSR is sharpest at 1x.");
@@ -356,7 +356,7 @@ void SsxSettingsDialog::DrawGraphicsTab() {
   Combo("##aa", "swap_post_effect", kAntiAliasing, std::size(kAntiAliasing));
   Row("Texture filtering", "Sharper textures at steep angles.");
   Combo("##aniso", "anisotropic_override", kAniso, std::size(kAniso));
-  Row("3D render size", "Native 720p is sharper than the 360's 1120 x 584.");
+  Row("3D render size", "High is the sharpest size the game's renderer supports without glitches.");
   Combo("##render", "ssx_render_resolution", kRenderSizes, std::size(kRenderSizes));
   ImGui::EndTable();
 }
