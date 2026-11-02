@@ -184,12 +184,16 @@ if (-not (Test-Path "$sdk\.ssx-ready")) {
         }
     }
 
-    foreach ($patch in Get-ChildItem "$root\patches\*.patch" | Sort-Object Name) {
-        git -C $sdk apply --ignore-whitespace $patch.FullName
-        if ($LASTEXITCODE) { Fail "Applying $($patch.Name) failed." }
-    }
     Set-Content "$sdk\.ssx-ready" $SdkCommit
 } else { Step "ReXGlue SDK already prepared" }
+
+# Every run, so patches added in an update reach SDKs prepared by an older version.
+foreach ($patch in Get-ChildItem "$root\patches\*.patch" | Sort-Object Name) {
+    git -C $sdk apply --check --reverse --ignore-whitespace $patch.FullName 2>$null
+    if (-not $LASTEXITCODE) { continue }  # already applied
+    git -C $sdk apply --ignore-whitespace $patch.FullName
+    if ($LASTEXITCODE) { Fail "Applying $($patch.Name) failed." }
+}
 
 # ---------------------------------------------------------------- 4. recompile + build
 Step "Recompiling SSX and building the PC version (this takes a while)"

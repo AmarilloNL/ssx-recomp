@@ -1,0 +1,64 @@
+diff --git a/include/rex/graphics/pipeline/texture/cache.h b/include/rex/graphics/pipeline/texture/cache.h
+index d26cd4f..e6cf6c6 100644
+--- a/include/rex/graphics/pipeline/texture/cache.h
++++ b/include/rex/graphics/pipeline/texture/cache.h
+@@ -579,6 +579,8 @@ class TextureCache {
+   void ScaledResolveGlobalWatchCallback(const std::unique_lock<std::recursive_mutex>& global_lock,
+                                         uint32_t address_first, uint32_t address_last,
+                                         bool invalidated_by_gpu);
++  // Marks the 4 KB pages as not containing scaled resolve data (global lock held).
++  void ClearScaledResolvePages(uint32_t page_first, uint32_t page_last);
+ 
+   const RegisterFile& register_file_;
+   SharedMemory& shared_memory_;
+@@ -596,6 +598,8 @@ class TextureCache {
+   // >> 12 for 4 KB pages, >> 5 for uint32_t level 1 bits, >> 6 for uint64_t
+   // level 2 bits.
+   uint64_t scaled_resolve_pages_l2_[SharedMemory::kBufferSize >> (12 + 5 + 6)];
++  // Resolve destinations with scaled data: first page -> last page.
++  std::unordered_map<uint32_t, uint32_t> scaled_resolve_ranges_;
+ 
+   // Global watch for scaled resolve data invalidation.
+   SharedMemory::GlobalWatchHandle scaled_resolve_global_watch_handle_ = nullptr;
+diff --git a/src/graphics/pipeline/texture/cache.cpp b/src/graphics/pipeline/texture/cache.cpp
+index 76f5600..126181b 100644
+--- a/src/graphics/pipeline/texture/cache.cpp
++++ b/src/graphics/pipeline/texture/cache.cpp
+@@ -342,6 +342,8 @@ void TextureCache::MarkRangeAsResolved(uint32_t start_unscaled, uint32_t length_
+       scaled_resolve_pages_[i] |= add_bits;
+       scaled_resolve_pages_l2_[i >> 6] |= UINT64_C(1) << (i & 63);
+     }
++    uint32_t& range_last = scaled_resolve_ranges_[page_first];
++    range_last = std::max(range_last, page_last);
+   }
+ 
+   // Invalidate textures. Toggling individual textures between scaled and
+@@ -1081,8 +1083,26 @@ void TextureCache::ScaledResolveGlobalWatchCallback(
+   }
+   // Mark scaled resolve ranges as non-scaled. Textures themselves will be
+   // invalidated by their shared memory watches.
+-  uint32_t resolve_page_first = address_first >> 12;
+-  uint32_t resolve_page_last = address_last >> 12;
++  uint32_t page_first = address_first >> 12;
++  uint32_t page_last = address_last >> 12;
++  ClearScaledResolvePages(page_first, page_last);
++  // Only the GPU writes render targets, so a CPU write into a resolve
++  // destination means the game reused that memory: drop the whole region.
++  // Otherwise its pages the CPU doesn't rewrite stay marked, and since one
++  // marked page makes a texture scaled, textures loaded there sample stale
++  // upscaled data (SSX menu icons and thumbnails showing the title logo).
++  for (auto it = scaled_resolve_ranges_.begin(); it != scaled_resolve_ranges_.end();) {
++    if (it->first <= page_last && it->second >= page_first) {
++      ClearScaledResolvePages(it->first, it->second);
++      it = scaled_resolve_ranges_.erase(it);
++    } else {
++      ++it;
++    }
++  }
++}
++
++void TextureCache::ClearScaledResolvePages(uint32_t resolve_page_first,
++                                           uint32_t resolve_page_last) {
+   uint32_t resolve_block_first = resolve_page_first >> 5;
+   uint32_t resolve_block_last = resolve_page_last >> 5;
+   uint32_t resolve_l2_block_first = resolve_block_first >> 6;

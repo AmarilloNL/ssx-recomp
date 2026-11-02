@@ -147,3 +147,13 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   cache. New render size "high" = 1200x640 (15 x 40 = 600 tiles at 1440, every pass fits; log
   verified); old "720p" configs map to it. The xenia-canary 720p patch has the same overflow.
   Note: frame-rate measurements that day were contaminated by another game running on the PC.
+- 2026-11-02: 2x resolution scale showed stale textures in the menus after a race (SSX title logo
+  in event icons, map markers and gear thumbnails; empty event bubbles). Cause (upstream Xenia
+  behaviour too): a texture is "scaled" if any page of its range holds scaled resolve data, and
+  only pages the CPU actually rewrites lose that mark. When the game reuses a resolve region for
+  loaded assets, untouched pages stay marked and the new textures sample the stale upscaled
+  buffer. patches/rexglue-0003: record resolve regions; a CPU write into one drops the whole
+  region. Verified (temp log): a 512 KB region whose first page alone was rewritten is cleared;
+  the "Broken Elbow" event bubble went from empty to its skull icon after a race at 2x.
+  build-ssx.ps1 now applies patches not yet applied on every run (git apply --check --reverse),
+  so existing installs get new patches.
