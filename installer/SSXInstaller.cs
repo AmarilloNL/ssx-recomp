@@ -571,7 +571,7 @@ class InstallerForm : Form {
                             Th.F(10.5f, FontStyle.Regular), Th.Dim, x, Th.D(70), w, Th.D(46)));
     p.Controls.Add(new Bullets {
       Items = new[] { "Up to 300 fps, or match your monitor's refresh rate",
-                      "720p, 2x resolution and AMD FSR upscaling",
+                      "Sharper rendering, 2x resolution scale and AMD FSR upscaling",
                       "Settings menu in game: F1, or Back + Start on a controller",
                       "Keyboard and controller support, and DLC from your own console" },
       Bounds = new Rectangle(x, Th.D(122), w, Th.D(120)) });
