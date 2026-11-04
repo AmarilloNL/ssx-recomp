@@ -34,14 +34,18 @@ an emulator: the game's code runs natively, and Xbox 360 graphics are translated
 
 The installer then, entirely on your PC:
 - checks that the ISO is the supported release,
-- installs the build tools through `winget` (Git, CMake, Ninja, LLVM, and the Visual Studio 2022
-  Build Tools; Windows asks for administrator permission once),
-- downloads the ReXGlue SDK and recompiles the game,
+- installs the build tools that are missing (CMake, Ninja, LLVM, and the Visual Studio 2022
+  Build Tools) through `winget`, or from their official downloads if `winget` isn't available;
+  Windows asks for administrator permission for LLVM and Visual Studio,
+- downloads the prebuilt ReXGlue recompiler SDK (no game code; see
+  [`scripts/build-sdk-package.ps1`](scripts/build-sdk-package.ps1)) and recompiles the game,
 - produces the playable folder `SSX-PC\source\dist\SSX`. Click **Play SSX**, use the desktop
   shortcut, or start `ssx.exe`.
 
-It needs Windows 10/11 x64, about **30 GB** of free space, an internet connection and roughly
-**30–60 minutes**. Running it again later updates and rebuilds only what changed.
+It needs Windows 10/11 x64, about **10 GB** of free space (about 7.5 GB of that is the build
+tools, which other software can share; the build itself is about 1 GB), an internet connection
+and roughly **10–30 minutes** the first time, mostly for downloading the tools. Running it again
+later updates and rebuilds only what changed.
 
 ### Supported disc
 
@@ -123,6 +127,10 @@ powershell -ExecutionPolicy Bypass -File scripts\build-ssx.ps1 -Iso "D:\path\to\
 `patches/` holds the fixes applied to the ReXGlue SDK, `ssx_config.toml` holds the
 recompilation overrides, and `src/` holds the PC-side code (settings, launcher, hooks).
 `PROGRESS.md` is the development log.
+
+The builder uses the CMake preset `ssx-player`, which builds against the prebuilt SDK package
+made by `scripts/build-sdk-package.ps1` (the SDK source at a fixed commit plus `patches/`). For
+SDK development, the `ssx-release` preset builds the SDK from source in `tools/rexglue-src`.
 
 ## Credits
 

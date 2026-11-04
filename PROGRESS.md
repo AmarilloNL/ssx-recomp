@@ -157,3 +157,20 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   the "Broken Elbow" event bubble went from empty to its skull icon after a race at 2x.
   build-ssx.ps1 now applies patches not yet applied on every run (git apply --check --reverse),
   so existing installs get new patches.
+- 2026-11-04: 2x snow glitch (blocky light patches): the SDK's 3D-as-2D texture wrapper was
+  created at the unscaled size while loading resolution-scaled data (the upload clamp kept a
+  quarter of it) and was never reloaded after its first load. patches/rexglue-0004 sizes it
+  scaled and reloads it when outdated. Verified: clamp warning gone; Mount Eddie at 2x clean.
+  2x GPU profile (temporary timestamp profiler per EDRAM layout, Mount Eddie start line):
+  11.9 ms/frame vs 5.5 at 1x; shadow cascades are cheap; ~3 ms/frame is reloading a 128x128
+  scaled texture during a ~12-step ping-pong effect (160-pitch RT at EDRAM 332). Next target.
+- 2026-11-04: Issue #1 (build too heavy). Real disk use was ~10 GB, not 30. The builder now
+  downloads a prebuilt ReXGlue SDK package (15 MB zip, release sdk-1; made by
+  scripts/build-sdk-package.ps1: SDK commit + patches, Release, CMake install rules, AMD's signed
+  FidelityFX DLL, bundled library licenses) instead of cloning and compiling the SDK; preset
+  ssx-player. Git is no longer needed; tools fall back to official downloads without winget
+  (CMake/Ninja portable zips, LLVM MSI, VS bootstrapper). Clean-folder test: 3.5 min to ssx.exe
+  (codegen 137 s), 1 GB folder, title screen 60 fps. Old installer-made SDK copies
+  (.ssx-ready) are removed on update.
+  Testing aid: SSX_TEST_INPUT_FILE=path presses each appended line live, with left-stick
+  directions (lleft/lright/lup/ldown) for the globe.

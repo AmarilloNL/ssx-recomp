@@ -17,8 +17,9 @@ Start-Transcript -Path $log -Force | Out-Null
 # The recompilation config (function addresses, patches) matches exactly this default.xex:
 # SSX (USA) for Xbox 360, title 4541096D, media ID 55ABAB6C, version 0.0.0.2.
 $ExpectedXexSha256 = 'F509845401D65A6791C5D28A3E9636A6558DA204F3851028B0B369A44A4B68EA'
-$SdkRepo = 'https://github.com/rexglue/rexglue-sdk.git'
-$SdkCommit = 'bd833a2ab69d305f99ddf57418fc38ffec8af93d'
+# ReXGlue SDK commit bd833a2ab69d305f99ddf57418fc38ffec8af93d + patches 0001-0004, Release.
+$SdkPackage = 'sdk-1'
+$SdkPackageUrl = "https://github.com/AmarilloNL/ssx-recomp/releases/download/$SdkPackage/rexglue-sdk-ssx-1.zip"
 
 function Step($text) { Write-Host ""; Write-Host "==> $text" -ForegroundColor Cyan }
 function Fail($text) {
@@ -31,8 +32,8 @@ function Fail($text) {
 function Refresh-Path {
     $env:PATH = [Environment]::GetEnvironmentVariable('PATH', 'Machine') + ';' +
                 [Environment]::GetEnvironmentVariable('PATH', 'User') + ';' +
-                "C:\Program Files\CMake\bin;C:\Program Files\LLVM\bin;C:\Program Files\Git\cmd;" +
-                "$env:LOCALAPPDATA\Microsoft\WinGet\Links"
+                "C:\Program Files\CMake\bin;C:\Program Files\LLVM\bin;" +
+                "$env:LOCALAPPDATA\Microsoft\WinGet\Links;$root\tools\portable\cmake\bin;$root\tools\portable\ninja"
 }
 
 Write-Host ""
@@ -40,8 +41,8 @@ Write-Host "  SSX (2012) - native PC port builder" -ForegroundColor Cyan
 Write-Host "  ------------------------------------"
 Write-Host "  You need your OWN legally obtained Xbox 360 copy of SSX (USA), dumped to an ISO."
 Write-Host "  This builder does not download any game code or data."
-Write-Host "  It needs about 30 GB of free space, an internet connection for the build tools,"
-Write-Host "  and 30-60 minutes. Keep this window open until it says DONE."
+Write-Host "  It needs about 10 GB of free space (mostly the build tools, which other software can share),"
+Write-Host "  an internet connection, and 10-30 minutes the first time. Keep this window open until it says DONE."
 
 # ---------------------------------------------------------------- 1. the player's ISO
 Step "Select your SSX (Xbox 360) ISO"
@@ -121,83 +122,100 @@ if ($hash -ne $ExpectedXexSha256) {
 Write-Host "SSX (USA) default.xex verified." -ForegroundColor Green
 
 # ---------------------------------------------------------------- 2. build tools
-Step "Checking build tools (missing ones are installed with winget)"
+# winget when it's there, otherwise each tool's official download.
+Step "Checking build tools (missing ones are installed)"
 Refresh-Path
-if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-    Fail "winget is missing. Install 'App Installer' from the Microsoft Store and run this again."
+$hasWinget = [bool](Get-Command winget -ErrorAction SilentlyContinue)
+$portable = "$root\tools\portable"
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+function Get-ReleaseAsset($repo, $pattern) {
+    $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest" -Headers @{ 'User-Agent' = 'ssx-recomp-builder' }
+    ($release.assets | Where-Object { $_.name -match $pattern } | Select-Object -First 1).browser_download_url
 }
-$tools = @(
-    @{ Cmd = 'git';   Id = 'Git.Git' },
-    @{ Cmd = 'cmake'; Id = 'Kitware.CMake' },
-    @{ Cmd = 'ninja'; Id = 'Ninja-build.Ninja' },
-    @{ Cmd = 'clang'; Id = 'LLVM.LLVM' }
-)
-foreach ($t in $tools) {
-    if (Get-Command $t.Cmd -ErrorAction SilentlyContinue) { Write-Host "  $($t.Cmd): found"; continue }
-    Write-Host "  installing $($t.Id)..."
-    winget install --id $t.Id -e --silent --accept-source-agreements --accept-package-agreements
-    Refresh-Path
-    if (-not (Get-Command $t.Cmd -ErrorAction SilentlyContinue)) { Fail "Installing $($t.Id) failed." }
+function Get-Download($url) {
+    $file = Join-Path $env:TEMP ([IO.Path]::GetFileName($url))
+    Write-Host "  downloading $url"
+    Invoke-WebRequest $url -OutFile $file -UseBasicParsing
+    $file
+}
+function Expand-Portable($zip, $name) {
+    $dest = "$portable\$name"
+    if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+    Expand-Archive $zip "$portable\$name-tmp" -Force
+    $inner = Get-ChildItem "$portable\$name-tmp" -Directory
+    if ($inner.Count -eq 1 -and -not (Get-ChildItem "$portable\$name-tmp" -File)) { Move-Item $inner[0].FullName $dest; Remove-Item "$portable\$name-tmp" }
+    else { Move-Item "$portable\$name-tmp" $dest }
+}
+function Install-Tool($cmd, $wingetId, [scriptblock]$fallback) {
+    if (Get-Command $cmd -ErrorAction SilentlyContinue) { Write-Host "  ${cmd}: found"; return }
+    if ($hasWinget) {
+        Write-Host "  installing $wingetId with winget..."
+        winget install --id $wingetId -e --silent --accept-source-agreements --accept-package-agreements
+        Refresh-Path
+    }
+    if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) {
+        Write-Host "  installing $cmd from its official download..."
+        try { & $fallback } catch { Write-Host "  $_" }
+        Refresh-Path
+    }
+    if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) { Fail "Installing $cmd failed." }
+}
+
+Install-Tool 'cmake' 'Kitware.CMake' {
+    Expand-Portable (Get-Download (Get-ReleaseAsset 'Kitware/CMake' '^cmake-[\d.]+-windows-x86_64\.zip$')) 'cmake'
+}
+Install-Tool 'ninja' 'Ninja-build.Ninja' {
+    Expand-Portable (Get-Download (Get-ReleaseAsset 'ninja-build/ninja' '^ninja-win\.zip$')) 'ninja'
+}
+Install-Tool 'clang' 'LLVM.LLVM' {
+    Write-Host "  Windows will ask for administrator permission; please allow it." -ForegroundColor Yellow
+    $installer = Get-Download (Get-ReleaseAsset 'llvm/llvm-project' '^LLVM-[\d.]+-win64\.(msi|exe)$')
+    if ($installer -like '*.msi') { Start-Process msiexec -ArgumentList "/i `"$installer`" /qn /norestart" -Verb RunAs -Wait }
+    else { Start-Process $installer -ArgumentList '/S' -Verb RunAs -Wait }
 }
 $clangMajor = [int]((clang --version | Select-Object -First 1) -replace '^.*version (\d+).*$', '$1')
-if ($clangMajor -lt 20) { Fail "clang $clangMajor is too old; version 20 or newer is needed (winget upgrade LLVM.LLVM)." }
+if ($clangMajor -lt 20) { Fail "clang $clangMajor is too old; version 20 or newer is needed (update LLVM)." }
 
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-$hasMsvc = (Test-Path $vswhere) -and
-    (& $vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
-if (-not $hasMsvc) {
+function Test-Msvc { (Test-Path $vswhere) -and (& $vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath) }
+if (-not (Test-Msvc)) {
     Write-Host "  installing Visual Studio 2022 Build Tools (C++ libraries + Windows SDK)."
     Write-Host "  Windows will ask for administrator permission; please allow it." -ForegroundColor Yellow
-    winget install --id Microsoft.VisualStudio.2022.BuildTools -e --accept-source-agreements --accept-package-agreements `
-        --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows11SDK.26100"
-    if (-not (& $vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)) {
-        Fail "Installing the Visual Studio Build Tools failed."
+    $vsArgs = '--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools ' +
+              '--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows11SDK.26100'
+    if ($hasWinget) {
+        winget install --id Microsoft.VisualStudio.2022.BuildTools -e --accept-source-agreements --accept-package-agreements --override $vsArgs
     }
+    if (-not (Test-Msvc)) {
+        try { Start-Process (Get-Download 'https://aka.ms/vs/17/release/vs_BuildTools.exe') -ArgumentList $vsArgs -Verb RunAs -Wait }
+        catch { Write-Host "  $_" }
+    }
+    if (-not (Test-Msvc)) { Fail "Installing the Visual Studio Build Tools failed." }
 } else { Write-Host "  Visual Studio C++ build tools: found" }
 
 # ---------------------------------------------------------------- 3. ReXGlue SDK
-$sdk = "$root\tools\rexglue-src"
-if (-not (Test-Path "$sdk\.ssx-ready")) {
+# Prebuilt from the ReXGlue SDK source + this project's patches/ (no game code), so the
+# SDK doesn't have to be compiled here. scripts\build-sdk-package.ps1 makes it.
+$sdk = "$root\tools\rexglue-sdk-ssx"
+if (-not (Test-Path "$sdk\.version") -or (Get-Content "$sdk\.version") -ne $SdkPackage) {
     Step "Downloading the ReXGlue recompiler SDK"
+    $zip = "$env:TEMP\$SdkPackage.zip"
+    try { Invoke-WebRequest $SdkPackageUrl -OutFile $zip -UseBasicParsing } catch { Fail "Downloading the SDK failed: $_" }
     if (Test-Path $sdk) { Remove-Item $sdk -Recurse -Force }
-    New-Item -ItemType Directory -Force $sdk | Out-Null
-    git -C $sdk init -q
-    git -C $sdk remote add origin $SdkRepo
-    git -C $sdk fetch -q --depth 1 origin $SdkCommit
-    if ($LASTEXITCODE) { Fail "Downloading the SDK failed." }
-    git -C $sdk checkout -q FETCH_HEAD
-    git -C $sdk -c submodule.thirdparty/moltenvk.update=none submodule update --init --recursive --depth 1 --jobs 8
-    if ($LASTEXITCODE) { Fail "Downloading the SDK's libraries failed." }
-
-    # Git on Windows checks symlinks out as small text files holding the target path;
-    # replace them with copies of their targets.
-    $repos = @($sdk) + (git -C $sdk submodule foreach --quiet --recursive 'echo $toplevel/$sm_path' |
-        ForEach-Object { $_ -replace '/', '\' })
-    foreach ($repo in $repos) {
-        $links = git -C $repo ls-files -s | Where-Object { $_ -like '120000*' } | ForEach-Object { ($_ -split "`t", 2)[1] }
-        foreach ($rel in $links) {
-            $path = Join-Path $repo $rel
-            if (-not (Test-Path $path -PathType Leaf) -or (Get-Item $path).Length -gt 512) { continue }
-            $target = [IO.Path]::GetFullPath((Join-Path (Split-Path $path) (Get-Content $path -Raw).Trim()))
-            if (Test-Path $target -PathType Leaf) { Copy-Item $target $path -Force }
-            elseif (Test-Path $target -PathType Container) { Remove-Item $path; Copy-Item $target $path -Recurse }
-        }
-    }
-
-    Set-Content "$sdk\.ssx-ready" $SdkCommit
-} else { Step "ReXGlue SDK already prepared" }
-
-# Every run, so patches added in an update reach SDKs prepared by an older version.
-foreach ($patch in Get-ChildItem "$root\patches\*.patch" | Sort-Object Name) {
-    git -C $sdk apply --check --reverse --ignore-whitespace $patch.FullName 2>$null
-    if (-not $LASTEXITCODE) { continue }  # already applied
-    git -C $sdk apply --ignore-whitespace $patch.FullName
-    if ($LASTEXITCODE) { Fail "Applying $($patch.Name) failed." }
+    Expand-Archive $zip $sdk -Force
+    Remove-Item $zip
+    Set-Content "$sdk\.version" $SdkPackage
+} else { Step "ReXGlue SDK already downloaded" }
+# Older versions of this builder compiled the SDK here; that copy and its build (~2 GB)
+# are no longer used.
+if (Test-Path "$root\tools\rexglue-src\.ssx-ready") {
+    Remove-Item "$root\tools\rexglue-src", "$root\out\build\ssx-release" -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 # ---------------------------------------------------------------- 4. recompile + build
 Step "Recompiling SSX and building the PC version (this takes a while)"
-& "$root\scripts\package.ps1"
+& "$root\scripts\package.ps1" -Preset ssx-player
 if (-not (Test-Path "$root\dist\SSX\ssx.exe")) { Fail "The build failed." }
 
 # Point the game at the ISO so the first start needs no questions.

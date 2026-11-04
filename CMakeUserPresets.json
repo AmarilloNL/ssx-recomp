@@ -20,6 +20,16 @@
                 "REXSDK_DIR": "${sourceDir}/tools/rexglue-src",
                 "REXGLUE_ENABLE_FIDELITYFX": "ON"
             }
+        },
+        {
+            "name": "ssx-player",
+            "displayName": "SSX release (prebuilt SDK package in tools/rexglue-sdk-ssx)",
+            "inherits": "win-amd64-release",
+            "binaryDir": "${sourceDir}/out/build/ssx-player",
+            "cacheVariables": {
+                "REXSDK_DIR": "",
+                "CMAKE_PREFIX_PATH": "${sourceDir}/tools/rexglue-sdk-ssx"
+            }
         }
     ]
 }

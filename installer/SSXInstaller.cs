@@ -767,10 +767,10 @@ class InstallerForm : Form {
     try {
       var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(folder)));
       long gb = drive.AvailableFreeSpace >> 30;
-      SetHint(folderHint, string.Format("{0} free on {1}  (needs about 30 GB)", FormatGb(gb), drive.Name.TrimEnd('\\')),
-              gb >= 30 ? Th.Faint : Th.Warn);
+      SetHint(folderHint, string.Format("{0} free on {1}  (needs about 10 GB)", FormatGb(gb), drive.Name.TrimEnd('\\')),
+              gb >= 10 ? Th.Faint : Th.Warn);
     } catch (Exception) {
-      SetHint(folderHint, "Needs about 30 GB of free space.", Th.Faint);
+      SetHint(folderHint, "Needs about 10 GB of free space.", Th.Faint);
     }
   }
 
