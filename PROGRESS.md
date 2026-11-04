@@ -205,3 +205,8 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   defaults: readback_resolve=fast, readback_resolve_max_size=4096. Measured at 300 fps cap:
   Root Down 1x ~190-240 fps (no readback ~220), 2x ~120-130; Mount Eddie 2x start line 129 avg
   (was 123). SDK package sdk-3.
+- 2026-11-04: Issue #1 log: Add-Type -TypeDefinition (the C# XDVDFS helper) failed on the
+  reporter's PC with "A required privilege is not held by the client" (Win32Exception from
+  compiling with csc; security software or policy). The ISO reader is now plain PowerShell
+  (same logic; extracts default.xex in ~60 ms, hash verified; locked-file and non-Xbox errors
+  tested). No other compiled helpers are used by the builder.

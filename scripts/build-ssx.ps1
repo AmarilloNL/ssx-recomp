@@ -58,60 +58,56 @@ if (-not (Test-Path $Iso)) { Fail "ISO not found: $Iso" }
 Write-Host "Using $Iso"
 
 # Minimal XDVDFS reader: find default.xex in the disc's game partition and copy it out.
-Add-Type -TypeDefinition @'
-using System; using System.IO; using System.Text;
-public static class Xdvdfs {
-  static readonly long[] PartitionOffsets = { 0, 0xFD90000, 0x2080000, 0x18300000 };
-  public static bool ExtractFile(string iso, string name, string outPath) {
-    using (var fs = File.OpenRead(iso)) {
-      foreach (long baseOffset in PartitionOffsets) {
-        if (baseOffset + 33 * 2048 > fs.Length) continue;
-        var head = new byte[28];
-        fs.Position = baseOffset + 32 * 2048;
-        fs.Read(head, 0, 28);
-        if (Encoding.ASCII.GetString(head, 0, 20) != "MICROSOFT*XBOX*MEDIA") continue;
-        uint rootSector = BitConverter.ToUInt32(head, 20), rootSize = BitConverter.ToUInt32(head, 24);
-        var dir = new byte[rootSize];
-        fs.Position = baseOffset + (long)rootSector * 2048;
-        fs.Read(dir, 0, (int)rootSize);
-        long start, size;
-        if (!Find(dir, 0, name, out start, out size)) return false;
-        fs.Position = baseOffset + start * 2048;
-        using (var outFile = File.Create(outPath)) {
-          var buffer = new byte[1 << 20];
-          while (size > 0) {
-            int n = fs.Read(buffer, 0, (int)Math.Min(buffer.Length, size));
-            if (n <= 0) return false;
-            outFile.Write(buffer, 0, n); size -= n;
-          }
-        }
-        return true;
-      }
+# Plain PowerShell on purpose: compiling a C# helper (Add-Type) fails on some PCs
+# ("A required privilege is not held by the client", security software blocking csc).
+# Directory entries form a binary tree; left/right child offsets are in dwords.
+function Find-XdvdfsEntry([byte[]]$Dir, [int]$Offset, [string]$Name) {
+    if ($Offset -lt 0 -or $Offset + 14 -gt $Dir.Length) { return $null }
+    $left = [BitConverter]::ToUInt16($Dir, $Offset); $right = [BitConverter]::ToUInt16($Dir, $Offset + 2)
+    if ($left -eq 0xFFFF -and $right -eq 0xFFFF) { return $null }
+    $nameLength = [Math]::Min([int]$Dir[$Offset + 13], $Dir.Length - $Offset - 14)
+    if ([Text.Encoding]::ASCII.GetString($Dir, $Offset + 14, $nameLength) -eq $Name) {  # -eq ignores case
+        return @([BitConverter]::ToUInt32($Dir, $Offset + 4), [BitConverter]::ToUInt32($Dir, $Offset + 8))
     }
-    return false;
-  }
-  // Directory entries form a binary tree: left/right child offsets are in dwords.
-  static bool Find(byte[] dir, int offset, string name, out long sector, out long size) {
-    sector = size = 0;
-    if (offset < 0 || offset + 14 > dir.Length) return false;
-    ushort left = BitConverter.ToUInt16(dir, offset), right = BitConverter.ToUInt16(dir, offset + 2);
-    if (left == 0xFFFF && right == 0xFFFF) return false;
-    int nameLen = dir[offset + 13];
-    string entry = Encoding.ASCII.GetString(dir, offset + 14, Math.Min(nameLen, dir.Length - offset - 14));
-    if (string.Equals(entry, name, StringComparison.OrdinalIgnoreCase)) {
-      sector = BitConverter.ToUInt32(dir, offset + 4); size = BitConverter.ToUInt32(dir, offset + 8);
-      return true;
-    }
-    return (left != 0 && Find(dir, left * 4, name, out sector, out size)) ||
-           (right != 0 && Find(dir, right * 4, name, out sector, out size));
-  }
+    if ($left) { $found = Find-XdvdfsEntry $Dir ($left * 4) $Name; if ($found) { return $found } }
+    if ($right) { return Find-XdvdfsEntry $Dir ($right * 4) $Name }
+    return $null
 }
-'@
+function Export-XdvdfsFile([string]$IsoPath, [string]$Name, [string]$OutPath) {
+    $iso = [IO.File]::OpenRead($IsoPath)
+    try {
+        foreach ($base in 0, 0xFD90000, 0x2080000, 0x18300000) {
+            if ($base + 33 * 2048 -gt $iso.Length) { continue }
+            $head = New-Object byte[] 28
+            $iso.Position = $base + 32 * 2048
+            [void]$iso.Read($head, 0, 28)
+            if ([Text.Encoding]::ASCII.GetString($head, 0, 20) -cne 'MICROSOFT*XBOX*MEDIA') { continue }
+            $rootSector = [BitConverter]::ToUInt32($head, 20); $rootSize = [BitConverter]::ToUInt32($head, 24)
+            $dir = New-Object byte[] $rootSize
+            $iso.Position = $base + [long]$rootSector * 2048
+            [void]$iso.Read($dir, 0, $dir.Length)
+            $entry = Find-XdvdfsEntry $dir 0 $Name
+            if (-not $entry) { return $false }
+            $iso.Position = $base + [long]$entry[0] * 2048
+            $remaining = [long]$entry[1]
+            $out = [IO.File]::Create($OutPath)
+            try {
+                $buffer = New-Object byte[] (1MB)
+                while ($remaining -gt 0) {
+                    $n = $iso.Read($buffer, 0, [int][Math]::Min([long]$buffer.Length, $remaining))
+                    if ($n -le 0) { return $false }
+                    $out.Write($buffer, 0, $n); $remaining -= $n
+                }
+            } finally { $out.Dispose() }
+            return $true
+        }
+        return $false
+    } finally { $iso.Dispose() }
+}
 $xex = "$root\game-dump\files\default.xex"
 New-Item -ItemType Directory -Force (Split-Path $xex) | Out-Null
-# A .NET exception only aborts the statement it's in, so catch it here or the checks below
-# run on a missing file and report the wrong problem.
-try { $found = [Xdvdfs]::ExtractFile($Iso, 'default.xex', $xex) }
+# Catch read errors here, or the checks below run on a missing file and report the wrong problem.
+try { $found = Export-XdvdfsFile $Iso 'default.xex' $xex }
 catch { Fail "Could not read default.xex from the ISO: $($_.Exception.GetBaseException().Message)" }
 if (-not $found) {
     Fail "Could not find default.xex in that file. Is it an Xbox 360 disc image?"
