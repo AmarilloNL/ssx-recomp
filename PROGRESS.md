@@ -174,3 +174,12 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   (.ssx-ready) are removed on update.
   Testing aid: SSX_TEST_INPUT_FILE=path presses each appended line live, with left-stick
   directions (lleft/lright/lup/ldown) for the globe.
+- 2026-11-04: 2x frame rate. The ~3 ms/frame was a 128x128x256 3D k_8_8_8_8 texture (16 MB,
+  64 MB at 2x) that the game renders into one slice at a time; every slice write invalidated
+  the whole volume, so it was fully reloaded ~8 times a frame. patches/rexglue-0005: volume
+  textures (3D, tiled, 16+ slices, no mips) record the byte range written since their last load
+  through a global shared-memory watch, and a reload loads only those slices. 3D tiling stores
+  every 4 slices as one contiguous block and a z shift by a multiple of 8 keeps the bank swizzle,
+  so the slice range is a plain source offset (GetTiledOffset3D(0, 0, z_first)) plus a copy to
+  that Z. Mount Eddie at 2x / 300 fps cap: start line 85 -> ~120 fps, ride ~116 fps; snow trail
+  and footprints correct at 2x and 1x (1x ride ~190 fps). SDK package sdk-2.

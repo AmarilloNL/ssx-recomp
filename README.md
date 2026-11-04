@@ -66,8 +66,8 @@ to this exact executable.
 | Keyboard | WASD steer, Space jump, arrow keys = trick stick, Q/E triggers, 1/3 bumpers, Enter start, Tab back |
 | DLC | see [Adding DLC](#adding-dlc) below |
 
-**Tip:** 1× + FSR runs at very high frame rates and looks sharp. 2× is the sharpest but the GPU
-emulation limits it to roughly 60 fps. If a setting ever stops the game from starting, delete
+**Tip:** 1× + FSR runs at very high frame rates and looks sharp. 2× is the sharpest and needs a
+stronger GPU (about 60% of the 1× frame rate). If a setting ever stops the game from starting, delete
 `ssx.toml` next to `ssx.exe`.
 
 ## Adding DLC

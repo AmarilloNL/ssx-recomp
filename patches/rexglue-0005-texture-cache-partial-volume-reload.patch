@@ -1,0 +1,198 @@
+--- a/include/rex/graphics/pipeline/texture/cache.h
++++ b/include/rex/graphics/pipeline/texture/cache.h
+@@ -212,6 +212,20 @@
+     bool force_load_3d_tiling() const { return force_load_3d_tiling_; }
+     void SetForceLoad3DTiling(bool force) { force_load_3d_tiling_ = force; }
+ 
++    // Volume textures (3D, tiled, 16+ slices, no mips) track which bytes of the base were
++    // written since the last load, relative to the base address, so a reload can load only
++    // those slices. first > last: nothing written; 0..UINT32_MAX: everything.
++    bool is_volume() const { return is_volume_; }
++    void GetVolumeDirtyRange(uint32_t& first, uint32_t& last) const {
++      auto global_lock = texture_cache_.global_critical_region_.Acquire();
++      first = volume_dirty_first_;
++      last = volume_dirty_last_;
++    }
++    void ExtendVolumeDirtyRange(uint32_t first, uint32_t last) {
++      volume_dirty_first_ = std::min(volume_dirty_first_, first);
++      volume_dirty_last_ = std::max(volume_dirty_last_, last);
++    }
++
+     uint64_t GetHostMemoryUsage() const { return host_memory_usage_; }
+ 
+     uint64_t last_usage_submission_index() const { return last_usage_submission_index_; }
+@@ -262,6 +276,9 @@
+     Texture* used_next_;
+     bool in_usage_list_;
+     bool force_load_3d_tiling_ = false;
++    bool is_volume_ = false;
++    uint32_t volume_dirty_first_ = 0;
++    uint32_t volume_dirty_last_ = UINT32_MAX;
+ 
+     // These are to be accessed within the global critical region to synchronize
+     // with shared memory.
+@@ -579,6 +596,9 @@
+   void ScaledResolveGlobalWatchCallback(const std::unique_lock<std::recursive_mutex>& global_lock,
+                                         uint32_t address_first, uint32_t address_last,
+                                         bool invalidated_by_gpu);
++  static void VolumeGlobalWatchCallbackThunk(const std::unique_lock<std::recursive_mutex>& global_lock,
++                                             void* context, uint32_t address_first,
++                                             uint32_t address_last, bool invalidated_by_gpu);
+   // Marks the 4 KB pages as not containing scaled resolve data (global lock held).
+   void ClearScaledResolvePages(uint32_t page_first, uint32_t page_last);
+ 
+@@ -601,6 +621,10 @@
+   // Resolve destinations with scaled data: first page -> last page.
+   std::unordered_map<uint32_t, uint32_t> scaled_resolve_ranges_;
+ 
++  // Volume textures (see Texture::is_volume) and the watch extending their dirty ranges.
++  std::vector<Texture*> volume_textures_;
++  SharedMemory::GlobalWatchHandle volume_global_watch_handle_ = nullptr;
++
+   // Global watch for scaled resolve data invalidation.
+   SharedMemory::GlobalWatchHandle scaled_resolve_global_watch_handle_ = nullptr;
+ 
+--- a/src/graphics/pipeline/texture/cache.cpp
++++ b/src/graphics/pipeline/texture/cache.cpp
+@@ -223,11 +223,16 @@
+     scaled_resolve_global_watch_handle_ =
+         shared_memory.RegisterGlobalWatch(ScaledResolveGlobalWatchCallbackThunk, this);
+   }
++  volume_global_watch_handle_ =
++      shared_memory.RegisterGlobalWatch(VolumeGlobalWatchCallbackThunk, this);
+ }
+ 
+ TextureCache::~TextureCache() {
+   DestroyAllTextures(true);
+ 
++  if (volume_global_watch_handle_) {
++    shared_memory().UnregisterGlobalWatch(volume_global_watch_handle_);
++  }
+   if (scaled_resolve_global_watch_handle_) {
+     shared_memory().UnregisterGlobalWatch(scaled_resolve_global_watch_handle_);
+   }
+@@ -662,9 +667,20 @@
+   outdated_mask_.store(
+       (base_outdated_ ? kOutdatedBitBase : 0) | (mips_outdated_ ? kOutdatedBitMips : 0),
+       std::memory_order_relaxed);
++  is_volume_ = key.dimension == xenos::DataDimension::k3D && key.tiled &&
++               key.GetDepthOrArraySize() >= 16 && key.mip_max_level == 0 && base_outdated_;
++  if (is_volume_) {
++    auto global_lock = texture_cache.global_critical_region_.Acquire();
++    texture_cache.volume_textures_.push_back(this);
++  }
+ }
+ 
+ TextureCache::Texture::~Texture() {
++  if (is_volume_) {
++    auto global_lock = texture_cache_.global_critical_region_.Acquire();
++    auto& volumes = texture_cache_.volume_textures_;
++    volumes.erase(std::find(volumes.begin(), volumes.end(), this));
++  }
+   if (mips_watch_handle_) {
+     texture_cache().shared_memory().UnwatchMemoryRange(mips_watch_handle_);
+   }
+@@ -694,6 +710,8 @@
+   if (base_outdated_) {
+     assert_not_zero(GetGuestBaseSize());
+     base_outdated_ = false;
++    volume_dirty_first_ = UINT32_MAX;
++    volume_dirty_last_ = 0;
+     base_watch_handle_ = shared_memory.WatchMemoryRange(
+         key().base_page << 12, GetGuestBaseSize(), TextureCache::WatchCallback, this, nullptr, 0);
+     outdated_mask_.fetch_and(~kOutdatedBitBase, std::memory_order_release);
+@@ -1065,6 +1083,19 @@
+   return false;
+ }
+ 
++void TextureCache::VolumeGlobalWatchCallbackThunk(
++    const std::unique_lock<std::recursive_mutex>& global_lock, void* context,
++    uint32_t address_first, uint32_t address_last, bool invalidated_by_gpu) {
++  for (Texture* texture : static_cast<TextureCache*>(context)->volume_textures_) {
++    uint32_t base = texture->key().base_page << 12;
++    uint32_t last = base + texture->GetGuestBaseSize() - 1;
++    if (address_first <= last && address_last >= base) {
++      texture->ExtendVolumeDirtyRange(std::max(address_first, base) - base,
++                                      std::min(address_last, last) - base);
++    }
++  }
++}
++
+ void TextureCache::ScaledResolveGlobalWatchCallbackThunk(
+     const std::unique_lock<std::recursive_mutex>& global_lock, void* context,
+     uint32_t address_first, uint32_t address_last, bool invalidated_by_gpu) {
+--- a/src/graphics/d3d12/texture_cache.cpp
++++ b/src/graphics/d3d12/texture_cache.cpp
+@@ -1603,6 +1603,32 @@
+   uint32_t texture_resolution_scale_x = texture_resolution_scaled ? draw_resolution_scale_x() : 1;
+   uint32_t texture_resolution_scale_y = texture_resolution_scaled ? draw_resolution_scale_y() : 1;
+ 
++  // A volume texture reloaded after a partial write (SSX renders its 128x128x256 snow
++  // volume one slice at a time, and each slice made the whole 16 MB, 64 MB at 2x, reload)
++  // loads only the slices written since its last load. In 3D tiling every 4 slices form one
++  // contiguous block, and shifting z by a multiple of 8 keeps the bank swizzle, so slices
++  // z_first... are the slices 0... of the data starting GetTiledOffset3D(0, 0, z_first) later.
++  uint32_t base_z_first = 0, base_depth = depth, base_guest_offset = 0;
++  if (load_base && d3d12_texture.is_volume() && level_packed != 0 && bytes_per_block >= 2) {
++    uint32_t dirty_first, dirty_last;
++    d3d12_texture.GetVolumeDirtyRange(dirty_first, dirty_last);
++    if (dirty_first <= dirty_last && dirty_last != UINT32_MAX) {
++      uint32_t pitch_blocks = guest_layout.base.row_pitch_bytes / bytes_per_block;
++      uint32_t z_stride = guest_layout.base.z_slice_stride_block_rows;
++      uint32_t bpb_log2 = rex::log2_floor(bytes_per_block);
++      uint32_t group_bytes =
++          uint32_t(texture_util::GetTiledOffset3D(0, 0, 4, pitch_blocks, z_stride, bpb_log2));
++      uint32_t z_first = (dirty_first / group_bytes & ~UINT32_C(1)) * 4;
++      uint32_t z_end = std::min(depth, ((dirty_last / group_bytes | 1) + 1) * 4);
++      if (z_first < z_end) {
++        base_z_first = z_first;
++        base_depth = z_end - z_first;
++        base_guest_offset =
++            uint32_t(texture_util::GetTiledOffset3D(0, 0, z_first, pitch_blocks, z_stride, bpb_log2));
++      }
++    }
++  }
++
+   // The loop counter can mean two things depending on whether the packed mip
+   // tail is stored as mip 0, because in this case, it would be ambiguous since
+   // both the base and the mips would be on "level 0", but stored in separate
+@@ -1667,7 +1693,7 @@
+     } else {
+       level_host_slice_layout.Footprint.Width = std::max(width >> level, uint32_t(1));
+       level_host_slice_layout.Footprint.Height = std::max(height >> level, uint32_t(1));
+-      level_host_slice_layout.Footprint.Depth = std::max(depth >> level, uint32_t(1));
++      level_host_slice_layout.Footprint.Depth = is_base ? base_depth : std::max(depth >> level, uint32_t(1));
+     }
+     level_host_slice_layout.Footprint.Width =
+         rex::round_up(level_host_slice_layout.Footprint.Width * texture_resolution_scale_x,
+@@ -1802,7 +1828,10 @@
+     } else {
+       load_constants.guest_offset = guest_address;
+     }
+-    if (!is_base) {
++    if (is_base) {
++      load_constants.guest_offset +=
++          base_guest_offset * (texture_resolution_scale_x * texture_resolution_scale_y);
++    } else {
+       load_constants.guest_offset += guest_layout.mip_offsets_bytes[level] *
+                                      (texture_resolution_scale_x * texture_resolution_scale_y);
+     }
+@@ -1830,7 +1859,7 @@
+     } else {
+       level_width = std::max(width >> level, uint32_t(1));
+       level_height = std::max(height >> level, uint32_t(1));
+-      level_depth = std::max(depth >> level, uint32_t(1));
++      level_depth = is_base ? base_depth : std::max(depth >> level, uint32_t(1));
+     }
+     load_constants.size_blocks[0] =
+         (level_width + (block_width - 1)) / block_width * texture_resolution_scale_x;
+@@ -1963,7 +1992,8 @@
+       }
+     }
+     for (uint32_t slice = 0; slice < array_size; ++slice) {
+-      command_list.D3DCopyTextureRegion(&location_dest, 0, 0, 0, &location_source, source_box_ptr);
++      command_list.D3DCopyTextureRegion(&location_dest, 0, 0, level ? 0 : base_z_first,
++                                        &location_source, source_box_ptr);
+       location_dest.SubresourceIndex += texture_level_count;
+       location_source.PlacedFootprint.Offset += host_slice_size;
+     }
