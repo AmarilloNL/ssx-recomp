@@ -101,6 +101,17 @@ void SsxApplyStartupSettings() {
     rex::cvar::SetFlagByName("execute_unclipped_draw_vs_on_cpu_for_psi_render_backend", "false");
   }
 
+  // Antarctica's cold: the game decides sun or shade by reading a 32x16 render target on the
+  // CPU (resolve to 0x0AB42000 on Mount Craddock). Without readback it always reads shade and
+  // the rider freezes in the sun. Only tiny resolves are read back, one frame late, so nothing
+  // stalls; large ones are never read by the CPU and reading them back corrupted memory.
+  if (rex::cvar::GetFlagSource("readback_resolve") == rex::cvar::Source::kDefault) {
+    rex::cvar::SetFlagByName("readback_resolve", "fast");
+  }
+  if (rex::cvar::GetFlagSource("readback_resolve_max_size") == rex::cvar::Source::kDefault) {
+    rex::cvar::SetFlagByName("readback_resolve_max_size", "4096");
+  }
+
   // 3x removes the D3D12 device (INVALID_CALL) ~30 s into a race; 2x is stable.
   // (resolution_scale lives in the GPU plugin, which must be loaded by now.)
   if (rex::string::from_string<int32_t>(rex::cvar::GetFlagByName("resolution_scale"), 1) > 2) {

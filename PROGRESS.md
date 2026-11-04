@@ -188,3 +188,20 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   so the check ran on a missing file. build-ssx.ps1 now catches it and reports the real error
   (tested with a locked ISO), and checks the extracted file still exists (antivirus). The
   installer reads the script's output in the OEM code page (Cyrillic messages were garbled).
+- 2026-11-04: Antarctica cold bug (user report, Mount Craddock "Root Down: TRICK IT"): the rider
+  froze in the sun with the solar panel on. The game decides sun or shade by reading a 32x16
+  RGBA8 render target on the CPU (resolve to 0x0AB42000, every other frame); without resolve
+  readback the CPU never sees it. Found by logging every resolve (address, length, format, size)
+  and enabling readback per address while measuring the CORE TEMP bar in screenshots
+  (scratchpad live/rootdown.ps1 + coretemp.ps1): no readback 0.97 -> 0 in 10 s in the sun; with
+  only that resolve read back it stays up and drops only in the ice tunnels.
+  readback_resolve=fast crashed while loading and full halved the frame rate (it waits for the
+  GPU on every resolve). patches/rexglue-0006: delayed readback keeps 4 slots per resolve and
+  copies only the newest one the GPU has finished (2 slots read copies still in flight at high
+  frame rates: garbage); buffers replaced while a copy may be in flight are released after the
+  submission; new cvar readback_resolve_max_size. The crash: 3D slice resolves (the snow volume)
+  report a written range ~0x80000 that runs 0x880 bytes past the volume, and delayed readback
+  wrote older data over the memory after it (bisected: cap 448 KB loads, 520 KB crashes). SSX
+  defaults: readback_resolve=fast, readback_resolve_max_size=4096. Measured at 300 fps cap:
+  Root Down 1x ~190-240 fps (no readback ~220), 2x ~120-130; Mount Eddie 2x start line 129 avg
+  (was 123). SDK package sdk-3.
