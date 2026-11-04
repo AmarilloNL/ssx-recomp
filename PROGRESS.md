@@ -183,3 +183,8 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   so the slice range is a plain source offset (GetTiledOffset3D(0, 0, z_first)) plus a copy to
   that Z. Mount Eddie at 2x / 300 fps cap: start line 85 -> ~120 fps, ride ~116 fps; snow trail
   and footprints correct at 2x and 1x (1x ride ~190 fps). SDK package sdk-2.
+- 2026-11-04: Issue #1 follow-up: "This ISO is not the supported SSX release" with an empty hash.
+  Reading default.xex threw a .NET exception, which in PowerShell 5.1 only aborts that statement,
+  so the check ran on a missing file. build-ssx.ps1 now catches it and reports the real error
+  (tested with a locked ISO), and checks the extracted file still exists (antivirus). The
+  installer reads the script's output in the OEM code page (Cyrillic messages were garbled).

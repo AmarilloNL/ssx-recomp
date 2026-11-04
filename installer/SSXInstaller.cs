@@ -831,6 +831,11 @@ class InstallerForm : Form {
       info.CreateNoWindow = true;
       info.RedirectStandardOutput = true;
       info.RedirectStandardError = true;
+      // PowerShell writes redirected output in the console (OEM) code page; non-English
+      // Windows messages are garbled when read as the ANSI default.
+      var oem = Encoding.GetEncoding(System.Globalization.CultureInfo.CurrentCulture.TextInfo.OEMCodePage);
+      info.StandardOutputEncoding = oem;
+      info.StandardErrorEncoding = oem;
       info.WorkingDirectory = source;
       buildProcess = new Process { StartInfo = info };
       buildProcess.OutputDataReceived += delegate(object s, DataReceivedEventArgs a) { OnLine(a.Data); };

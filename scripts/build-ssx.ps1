@@ -109,8 +109,15 @@ public static class Xdvdfs {
 '@
 $xex = "$root\game-dump\files\default.xex"
 New-Item -ItemType Directory -Force (Split-Path $xex) | Out-Null
-if (-not [Xdvdfs]::ExtractFile($Iso, 'default.xex', $xex)) {
+# A .NET exception only aborts the statement it's in, so catch it here or the checks below
+# run on a missing file and report the wrong problem.
+try { $found = [Xdvdfs]::ExtractFile($Iso, 'default.xex', $xex) }
+catch { Fail "Could not read default.xex from the ISO: $($_.Exception.GetBaseException().Message)" }
+if (-not $found) {
     Fail "Could not find default.xex in that file. Is it an Xbox 360 disc image?"
+}
+if (-not (Test-Path $xex)) {
+    Fail "default.xex was extracted to $xex but is gone. An antivirus program may have removed it; allow that folder and try again."
 }
 $hash = (Get-FileHash $xex -Algorithm SHA256).Hash
 if ($hash -ne $ExpectedXexSha256) {
