@@ -118,6 +118,23 @@ an archive.
   game's own render buffers.
 - Online features (RiderNet, global events) don't work. EA's servers are gone.
 
+## Roadmap
+
+The game is playable and is being tested by playing through the World Tour. What's being worked on:
+
+- **Playing through every region** to find and fix bugs, especially the Deadly Descent mechanics
+  (cold, darkness, oxygen and so on), which depend on details of the original hardware. Fixed so
+  far: Antarctica's thermal protection, yellow specks on dark rock (Africa's caves).
+- **Known issue:** a peak label on the world map was once seen drawn as a solid box (Africa).
+  It hasn't been reproduced yet. Screenshots of it are welcome.
+- **Installer reliability** on more PCs, based on the reports in the issues.
+
+Updates arrive through the installer: run it again to get the latest fixes. The development log is
+in `PROGRESS.md`.
+
+**Found a bug?** Open an issue with a screenshot, where it happened (region, peak, event) and, if
+the game crashed, the newest file from the `logs` folder next to `ssx.exe`.
+
 ## Building manually
 
 ```powershell
