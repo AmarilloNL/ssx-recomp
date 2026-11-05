@@ -210,3 +210,12 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   compiling with csc; security software or policy). The ISO reader is now plain PowerShell
   (same logic; extracts default.xex in ~60 ms, hash verified; locked-file and non-Xbox errors
   tested). No other compiled helpers are used by the builder.
+- 2026-11-05: Issue #2: "configure failed" right after "cmake: found", with no CMake output in
+  build-ssx.log (Windows PowerShell's transcript skips what native programs print). package.ps1
+  now runs CMake through Invoke-CMake, which passes its output (stderr by its raw text) through
+  PowerShell so it lands in the log; exit codes unchanged. build-ssx.ps1 checks cmake --version
+  and downloads a portable CMake when the PC's is older than 3.25 (presets v6); portable tools now
+  come first on PATH. Tested: a bad preset's CMake error appears in the transcript, the version
+  check (4.4.4 ok, fake 3.20.6 / unreadable -> old), and a full ssx-player build from the sdk-3
+  package (exit 0, ninja progress in the log, ssx.exe reaches 300 fps at the title screen).
+  Their "SSX (World)" ISO passed the default.xex check (same release).

@@ -29,11 +29,13 @@ function Fail($text) {
     if (-not $NoPause) { Read-Host "Press Enter to close" }
     exit 1
 }
+# Portable tools come first: the builder only downloads them when the PC's own copy is missing
+# or too old.
 function Refresh-Path {
-    $env:PATH = [Environment]::GetEnvironmentVariable('PATH', 'Machine') + ';' +
+    $env:PATH = "$root\tools\portable\cmake\bin;$root\tools\portable\ninja;" +
+                [Environment]::GetEnvironmentVariable('PATH', 'Machine') + ';' +
                 [Environment]::GetEnvironmentVariable('PATH', 'User') + ';' +
-                "C:\Program Files\CMake\bin;C:\Program Files\LLVM\bin;" +
-                "$env:LOCALAPPDATA\Microsoft\WinGet\Links;$root\tools\portable\cmake\bin;$root\tools\portable\ninja"
+                "C:\Program Files\CMake\bin;C:\Program Files\LLVM\bin;$env:LOCALAPPDATA\Microsoft\WinGet\Links"
 }
 
 Write-Host ""
@@ -165,8 +167,20 @@ function Install-Tool($cmd, $wingetId, [scriptblock]$fallback) {
     if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) { Fail "Installing $cmd failed." }
 }
 
-Install-Tool 'cmake' 'Kitware.CMake' {
+$installPortableCMake = {
     Expand-Portable (Get-Download (Get-ReleaseAsset 'Kitware/CMake' '^cmake-[\d.]+-windows-x86_64\.zip$')) 'cmake'
+}
+function Get-CMakeVersion {
+    try { [version]((cmake --version | Select-Object -First 1) -replace '^cmake version (\d+\.\d+\.\d+).*$', '$1') }
+    catch { [version]'0.0' }
+}
+Install-Tool 'cmake' 'Kitware.CMake' $installPortableCMake
+# Another program's older CMake can be first on PATH; the project's presets need 3.25.
+if ((Get-CMakeVersion) -lt [version]'3.25') {
+    Write-Host "  cmake $(Get-CMakeVersion) is too old (3.25 or newer is needed); downloading a portable copy..."
+    try { & $installPortableCMake } catch { Write-Host "  $_" }
+    Refresh-Path
+    if ((Get-CMakeVersion) -lt [version]'3.25') { Fail "CMake 3.25 or newer is needed (found $(Get-CMakeVersion))." }
 }
 Install-Tool 'ninja' 'Ninja-build.Ninja' {
     Expand-Portable (Get-Download (Get-ReleaseAsset 'ninja-build/ninja' '^ninja-win\.zip$')) 'ninja'

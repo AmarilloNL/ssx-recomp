@@ -4,21 +4,28 @@
 # build-ssx.ps1 uses); ssx-release builds the SDK from tools\rexglue-src (development).
 param([string]$Preset = 'ssx-release')
 $root = Resolve-Path "$PSScriptRoot\.."
-$env:PATH = "C:\Program Files\CMake\bin;C:\Program Files\LLVM\bin;$env:LOCALAPPDATA\Microsoft\WinGet\Links;" +
-            "$root\tools\portable\cmake\bin;$root\tools\portable\ninja;$env:PATH"
+# Portable tools first: build-ssx.ps1 only downloads them when the PC's own copy is missing or too old.
+$env:PATH = "$root\tools\portable\cmake\bin;$root\tools\portable\ninja;" +
+            "C:\Program Files\CMake\bin;C:\Program Files\LLVM\bin;$env:LOCALAPPDATA\Microsoft\WinGet\Links;$env:PATH"
+
+# Pass CMake's output through PowerShell so it also lands in build-ssx.log: Windows PowerShell's
+# transcript leaves out what native programs write to the console themselves.
+function Invoke-CMake {
+    & cmake @args 2>&1 | ForEach-Object { if ($_ -is [Management.Automation.ErrorRecord]) { "$($_.TargetObject)" } else { "$_" } }
+}
 
 $build = "$root\out\build\$Preset"
 Push-Location $root
 # The recompiled sources are only added to the build if codegen output exists at configure
 # time, so on a fresh tree: configure, run codegen, then configure again to pick them up.
 if (-not (Test-Path "$root\generated\default\sources.cmake")) {
-    cmake --preset $Preset
+    Invoke-CMake --preset $Preset
     if ($LASTEXITCODE) { Pop-Location; throw "configure failed" }
     Write-Host "==> Recompiling the Xbox 360 code"
-    cmake --build $build --target ssx_codegen
+    Invoke-CMake --build $build --target ssx_codegen
     if ($LASTEXITCODE) { Pop-Location; throw "codegen failed" }
 }
-cmake --preset $Preset
+Invoke-CMake --preset $Preset
 Pop-Location
 if ($LASTEXITCODE) { throw "configure failed" }
 # FSR needs AMD's FidelityFX runtime, which ships prebuilt and signed: from the fetched
@@ -32,8 +39,8 @@ if (Test-Path $ffx) {
     Copy-Item "$root\tools\rexglue-sdk-ssx\bin\amd_fidelityfx_dx12.dll" $build -Force
 }
 Write-Host "==> Compiling the PC version"
-cmake --build $build
-if ($LASTEXITCODE) { cmake --build $build }  # codegen can rewrite the PCH mid-build; retry once
+Invoke-CMake --build $build
+if ($LASTEXITCODE) { Invoke-CMake --build $build }  # codegen can rewrite the PCH mid-build; retry once
 if ($LASTEXITCODE) { throw "build failed" }
 
 $dist = "$root\dist\SSX"
