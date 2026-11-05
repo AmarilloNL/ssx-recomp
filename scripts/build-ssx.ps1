@@ -17,9 +17,9 @@ Start-Transcript -Path $log -Force | Out-Null
 # The recompilation config (function addresses, patches) matches exactly this default.xex:
 # SSX (USA) for Xbox 360, title 4541096D, media ID 55ABAB6C, version 0.0.0.2.
 $ExpectedXexSha256 = 'F509845401D65A6791C5D28A3E9636A6558DA204F3851028B0B369A44A4B68EA'
-# ReXGlue SDK commit bd833a2ab69d305f99ddf57418fc38ffec8af93d + patches 0001-0006, Release.
-$SdkPackage = 'sdk-3'
-$SdkPackageUrl = "https://github.com/AmarilloNL/ssx-recomp/releases/download/$SdkPackage/rexglue-sdk-ssx-3.zip"
+# ReXGlue SDK commit bd833a2ab69d305f99ddf57418fc38ffec8af93d + patches 0001-0007, Release.
+$SdkPackage = 'sdk-4'
+$SdkPackageUrl = "https://github.com/AmarilloNL/ssx-recomp/releases/download/$SdkPackage/rexglue-sdk-ssx-4.zip"
 
 function Step($text) { Write-Host ""; Write-Host "==> $text" -ForegroundColor Cyan }
 function Fail($text) {
@@ -223,6 +223,9 @@ if (-not (Test-Path "$sdk\.version") -or (Get-Content "$sdk\.version") -ne $SdkP
     Expand-Archive $zip $sdk -Force
     Remove-Item $zip
     Set-Content "$sdk\.version" $SdkPackage
+    # Codegen only re-runs when the game's inputs change, so code made by an older SDK's
+    # recompiler (which may carry its bugs) is removed to be generated again.
+    Remove-Item "$root\generated\default" -Recurse -Force -ErrorAction SilentlyContinue
 } else { Step "ReXGlue SDK already downloaded" }
 # Older versions of this builder compiled the SDK here; that copy and its build (~2 GB)
 # are no longer used.

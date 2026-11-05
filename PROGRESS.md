@@ -219,3 +219,18 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   check (4.4.4 ok, fake 3.20.6 / unreadable -> old), and a full ssx-player build from the sdk-3
   package (exit 0, ninja progress in the log, ssx.exe reaches 300 fps at the title screen).
   Their "SSX (World)" ISO passed the default.xex check (same release).
+- 2026-11-05: Yellow specks on dark rock (user report, Africa, Meru "Red Light: TRICK IT"). Same at
+  1x/2x, ROV/RTV and without resolve readback. RenderDoc pixel history: the last post pass (scene,
+  bloom, then a 32x32x32 color-grading table sampled at g*31/32 + 0.5/32) turned near-black pixels
+  yellow; entry 0 of every axis of the table held the brightest value (0xFF instead of ~0x10), so
+  colors below 1/32 blended it in. The tables (linear 3D, physical 0x0B078000..0x0B177FFF) are built
+  on the CPU and memcpy'd in; their raw guest memory already had the bad entry. Cause: the
+  recompiler's vexptefp (2^x estimate) builds 2^floor(x) in the exponent bits, which is garbage
+  outside [-126, 127] and NaN for -inf, so pow(0, y) = exp2(log2(0) * y) was NaN instead of 0.
+  patches/rexglue-0007: clamp, then 0 below -126 (incl. -inf), +inf from 128, NaN kept; checked on
+  edge values against exp2f. 69 vexptefp sites in 26 generated files. Verified: table entry 0 now
+  0x10, cave walls clean. SDK package sdk-4 (codegen runs on the player's PC, so the fix ships
+  in the SDK). Found with a temporary log of the host PC at write-watch faults in the table range
+  (llvm-symbolizer on ssx.pdb -> the memcpy) and a dump of guest memory from the VdSwap hook.
+  Still open from the same report: an Africa peak label drawn as a solid box (once, not
+  reproduced in 13 tries; possibly the same vexptefp bug in a UI effect).

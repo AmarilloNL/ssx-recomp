@@ -1,0 +1,43 @@
+--- a/src/codegen/builders/vector.cpp
++++ b/src/codegen/builders/vector.cpp
+@@ -148,10 +148,17 @@
+   ctx.emit_set_flush_mode(true);
+   ctx.println("\t{{");
+   ctx.println("\t\tsimde__m128 x = simde_mm_load_ps({}.f32);", vA);
++  // The exponent construction below only works for n in [-126, 127]: clamp, and patch the
++  // out-of-range results afterwards like the hardware: 2^x below -126 (including -inf, as
++  // in pow(0, y) = exp2(log2(0) * y)) is 0 (denormals are flushed), 2^x from 128 is +inf,
++  // NaN stays NaN.
+   ctx.println(
+-      "\t\tsimde__m128 n = simde_mm_round_ps(x, "
++      "\t\tsimde__m128 xc = simde_mm_min_ps(simde_mm_max_ps(x, simde_mm_set1_ps(-126.0f)), "
++      "simde_mm_set1_ps(127.99999f));");
++  ctx.println(
++      "\t\tsimde__m128 n = simde_mm_round_ps(xc, "
+       "SIMDE_MM_FROUND_TO_NEG_INF | SIMDE_MM_FROUND_NO_EXC);");
+-  ctx.println("\t\tsimde__m128 f = simde_mm_sub_ps(x, n);");
++  ctx.println("\t\tsimde__m128 f = simde_mm_sub_ps(xc, n);");
+   // 4th-order minimax polynomial for 2^f, f in [0,1), ~12-bit accuracy
+   ctx.println("\t\tsimde__m128 p = simde_mm_set1_ps(1.8775767e-3f);");
+   ctx.println("\t\tp = simde_mm_add_ps(simde_mm_mul_ps(p, f), simde_mm_set1_ps(8.9893397e-3f));");
+@@ -162,10 +169,17 @@
+   // Construct 2^n by adding n to the IEEE 754 exponent bias and shifting into place
+   ctx.println("\t\tsimde__m128i exp_bits = simde_mm_slli_epi32(");
+   ctx.println("\t\t\tsimde_mm_add_epi32(simde_mm_cvttps_epi32(n), simde_mm_set1_epi32(127)), 23);");
++  ctx.println("\t\tsimde__m128 r = simde_mm_mul_ps(p, simde_mm_castsi128_ps(exp_bits));");
++  ctx.println(
++      "\t\tr = simde_mm_andnot_ps(simde_mm_cmplt_ps(x, simde_mm_set1_ps(-126.0f)), r);");
++  ctx.println("\t\tsimde__m128 big = simde_mm_cmpge_ps(x, simde_mm_set1_ps(128.0f));");
++  ctx.println(
++      "\t\tr = simde_mm_or_ps(simde_mm_andnot_ps(big, r), "
++      "simde_mm_and_ps(big, simde_mm_castsi128_ps(simde_mm_set1_epi32(0x7F800000))));");
++  ctx.println("\t\tsimde__m128 nan = simde_mm_cmpunord_ps(x, x);");
+   ctx.println(
+-      "\t\tsimde_mm_store_ps({}.f32, "
+-      "simde_mm_mul_ps(p, simde_mm_castsi128_ps(exp_bits)));",
+-      vD);
++      "\t\tr = simde_mm_or_ps(simde_mm_andnot_ps(nan, r), simde_mm_and_ps(nan, x));");
++  ctx.println("\t\tsimde_mm_store_ps({}.f32, r);", vD);
+   ctx.println("\t}}");
+   return true;
+ }
