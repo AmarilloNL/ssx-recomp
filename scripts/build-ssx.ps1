@@ -210,6 +210,23 @@ if (-not (Test-Msvc)) {
     }
     if (-not (Test-Msvc)) { Fail "Installing the Visual Studio Build Tools failed." }
 } else { Write-Host "  Visual Studio C++ build tools: found" }
+# Use the C++ headers and libraries of that installation. Left alone, clang picks a Visual
+# Studio installation by itself (the newest), which may lack them: "could not open
+# 'msvcrtd.lib'" (issue #2). INCLUDE, LIB and VCToolsInstallDir take precedence for clang/lld.
+$vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+$vcvars = "$vsPath\VC\Auxiliary\Build\vcvars64.bat"
+if (-not (Test-Path $vcvars)) {
+    Fail "The Visual Studio C++ build tools in $vsPath are incomplete ($vcvars is missing). Open the Visual Studio Installer and choose Repair."
+}
+cmd /c "`"$vcvars`" >nul 2>&1 && set" | ForEach-Object {
+    if ($_ -match '^(INCLUDE|LIB|LIBPATH|VCToolsInstallDir|VCToolsVersion|VCINSTALLDIR|VSINSTALLDIR|WindowsSdkDir|WindowsSDKVersion|UniversalCRTSdkDir|UCRTVersion)=(.*)$') {
+        Set-Item "env:$($Matches[1])" $Matches[2]
+    }
+}
+if (-not ($env:LIB -split ';' | Where-Object { $_ -and (Test-Path "$_\msvcrt.lib") })) {
+    Fail "The C++ libraries (msvcrt.lib) were not found in $vsPath. Open the Visual Studio Installer, choose Modify and tick 'MSVC v143 - VS 2022 C++ x64/x86 build tools' and a Windows SDK."
+}
+Write-Host "  Using the C++ tools in $vsPath (MSVC $env:VCToolsVersion, Windows SDK $($env:WindowsSDKVersion.TrimEnd('\')))"
 
 # ---------------------------------------------------------------- 3. ReXGlue SDK
 # Prebuilt from the ReXGlue SDK source + this project's patches/ (no game code), so the

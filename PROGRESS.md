@@ -234,3 +234,11 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   (llvm-symbolizer on ssx.pdb -> the memcpy) and a dump of guest memory from the VdSwap hook.
   Still open from the same report: an Africa peak label drawn as a solid box (once, not
   reproduced in 13 tries; possibly the same vexptefp bug in a UI effect).
+- 2026-11-06: Issue #2 again, now with CMake's output: the compiler check failed at linking,
+  "lld-link: could not open 'msvcrtd.lib' / 'oldnames.lib'". vswhere had found an installation
+  with the C++ tools, but clang picks a Visual Studio installation itself (the newest), likely
+  another one without them. build-ssx.ps1 now imports INCLUDE/LIB/LIBPATH/VCToolsInstallDir and
+  the SDK variables from that installation's vcvars64.bat (not PATH, so our CMake stays first),
+  logs which installation it uses, and fails with a clear message if msvcrt.lib is missing.
+  Tested: the import (MSVC 14.44, SDK 26100), the exact failing debug link command, and a fresh
+  ssx-player configure + build.
