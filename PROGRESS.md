@@ -286,3 +286,13 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   size limit) is read back synchronously; per-frame resolves keep the delayed mode, 3D/array
   destinations (snow volume slices, new address every frame) are excluded. No fps change.
   Scripts: scratchpad/live/denali.ps1 (globe nav Himalayas -> Siberia -> Alaska), sheet.sh.
+- 2026-11-06: One-off readback refined: "not done in the previous frame" also caught resolves
+  repeating every few frames (e.g. 12AF0000/0A228000 every ~8 frames), each a full GPU wait -
+  a stutter at 4x. Now the first 4 resolves to each 2D range are read back synchronously
+  (the flare textures reuse a range up to 3 times), later ones keep the delayed mode.
+  Remaining 4x stutter (user report, measured): ~15 times a second a frame takes ~one extra GPU
+  frame and the next follows within 0-5 ms (VdSwap interval histogram; 75 pairs per 5 s on both
+  Grand Golliat and Emergency Exit, at 2x/3x/4x alike; at 3x 22+2 ms, at 4x 35-45+2 ms). Not a
+  host drain (none measured), not the frame queue depth (2/3/4 frames in flight all the same),
+  not memexport readback, not CPU running ahead (a 50 fps cap pairs too). Points at a guest
+  wait on GPU progress at ~15 Hz; not found yet.

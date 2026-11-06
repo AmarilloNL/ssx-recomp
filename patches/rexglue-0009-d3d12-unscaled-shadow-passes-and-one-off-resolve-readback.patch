@@ -1,8 +1,17 @@
 diff --git a/include/rex/graphics/d3d12/command_processor.h b/include/rex/graphics/d3d12/command_processor.h
-index 1aea382..ecfaf68 100644
+index 1aea382..e0be139 100644
 --- a/include/rex/graphics/d3d12/command_processor.h
 +++ b/include/rex/graphics/d3d12/command_processor.h
-@@ -480,6 +480,8 @@ class D3D12CommandProcessor : public CommandProcessor {
+@@ -383,6 +383,8 @@ class D3D12CommandProcessor : public CommandProcessor {
+     uint32_t written_size[kSlots] = {};
+     uint32_t current_index = 0;
+     uint64_t last_used_frame = 0;
++    // Resolves to this range so far, for readback_resolve_one_off_sync.
++    uint32_t resolve_count = 0;
+   };
+   void EvictOldReadbackBuffers(std::unordered_map<uint64_t, ReadbackBuffer>& buffer_map);
+   static constexpr uint32_t kReadbackBufferSizeIncrement = 16 * 1024 * 1024;
+@@ -480,6 +482,8 @@ class D3D12CommandProcessor : public CommandProcessor {
    ViewportCacheKey previous_viewport_key_{};
    draw_util::ViewportInfo previous_viewport_info_{};
    bool viewport_cache_valid_ = false;
@@ -147,7 +156,7 @@ index f42fd81..9d7c6b3 100644
    // allocated and returns whether it is.
    virtual bool EnsureScaledResolveMemoryCommitted(uint32_t /*start_unscaled*/,
 diff --git a/src/graphics/d3d12/command_processor.cpp b/src/graphics/d3d12/command_processor.cpp
-index 0b6825a..0ac0bbf 100644
+index 0b6825a..b5f6409 100644
 --- a/src/graphics/d3d12/command_processor.cpp
 +++ b/src/graphics/d3d12/command_processor.cpp
 @@ -43,6 +43,11 @@ REXCVAR_DEFINE_BOOL(d3d12_readback_resolve, false, "GPU/D3D12",
@@ -155,8 +164,8 @@ index 0b6825a..0ac0bbf 100644
      .lifecycle(rex::cvar::Lifecycle::kHotReload);
  
 +REXCVAR_DEFINE_BOOL(readback_resolve_one_off_sync, false, "GPU/D3D12",
-+                    "With resolve readback, read back resolves not also done in the previous "
-+                    "frame (up to 4 MB) right away, whatever their size and the readback mode.")
++                    "With resolve readback, read back the first 4 resolves to each 2D range (up "
++                    "to 4 MB) right away, whatever their size and the readback mode.")
 +    .lifecycle(rex::cvar::Lifecycle::kHotReload);
 +
  REXCVAR_DEFINE_INT32(readback_resolve_max_size, 0, "GPU/D3D12",
@@ -207,43 +216,42 @@ index 0b6825a..0ac0bbf 100644
  
    draw_util::ViewportInfo viewport_info;
    if (viewport_cache_valid_ && viewport_key == previous_viewport_key_) {
-@@ -2907,15 +2921,32 @@ bool D3D12CommandProcessor::IssueCopy_ReadbackResolvePath() {
+@@ -2907,17 +2921,28 @@ bool D3D12CommandProcessor::IssueCopy_ReadbackResolvePath() {
      return true;
    }
  
 +  uint64_t resolve_key = MakeReadbackResolveKey(written_address, written_length);
-+  // A resolve not also done in the previous frame (render-to-texture at load time that the CPU
-+  // then reads, like SSX building its flare light textures) is read back right away. Waiting
-+  // only costs for such one-off resolves; the per-frame ones keep the configured mode.
-+  bool read_back_now = false;
-+  // Not 3D or array destinations: a volume written slice by slice (SSX's snow trails) has a
-+  // new address every frame, and its conservative range covers neighbouring data.
-+  if (REXCVAR_GET(readback_resolve_one_off_sync) &&
-+      !register_file_->Get<reg::RB_COPY_DEST_INFO>().copy_dest_array) {
-+    auto it = readback_buffers_.find(resolve_key);
-+    read_back_now = written_length > uint32_t(std::max(REXCVAR_GET(readback_resolve_max_size), 0)) &&
-+                    written_length <= (4u << 20) &&
-+                    (it == readback_buffers_.end() ||
-+                     frame_current_ - it->second.last_used_frame > 1);
-+  }
++  ReadbackBuffer& rb = readback_buffers_[resolve_key];
++  rb.last_used_frame = frame_current_;
++  // The first few resolves to a range are read back right away: render-to-texture at load time
++  // that the CPU then reads (SSX builds its flare light textures that way, reusing each range up
++  // to 3 times). Later ones keep the configured mode, so a range resolved every frame, or every
++  // few frames, doesn't stall. Not 3D or array destinations: a volume written slice by slice
++  // (SSX's snow trails) has a new address every frame, and its range covers neighbouring data.
++  int32_t max_size = REXCVAR_GET(readback_resolve_max_size);
++  bool read_back_now = REXCVAR_GET(readback_resolve_one_off_sync) && rb.resolve_count < 4 &&
++                       written_length > uint32_t(std::max(max_size, 0)) &&
++                       written_length <= (4u << 20) &&
++                       !register_file_->Get<reg::RB_COPY_DEST_INFO>().copy_dest_array;
++  ++rb.resolve_count;
    // The written range is conservative (a 3D slice resolve's range covers neighbouring slices and
    // can run past the texture), and delayed readback writes older data over all of it.
-   if (int32_t max_size = REXCVAR_GET(readback_resolve_max_size);
+-  if (int32_t max_size = REXCVAR_GET(readback_resolve_max_size);
 -      max_size > 0 && written_length > uint32_t(max_size)) {
-+      !read_back_now && max_size > 0 && written_length > uint32_t(max_size)) {
-+    // Still track it, so it counts as per-frame next frame.
-+    readback_buffers_[resolve_key].last_used_frame = frame_current_;
++  if (!read_back_now && max_size > 0 && written_length > uint32_t(max_size)) {
      return true;
    }
  
 -  bool is_scaled = texture_cache_->IsDrawResolutionScaled();
 -  uint64_t resolve_key = MakeReadbackResolveKey(written_address, written_length);
+-  ReadbackBuffer& rb = readback_buffers_[resolve_key];
+-  rb.last_used_frame = frame_current_;
 +  bool is_scaled =
 +      texture_cache_->IsDrawResolutionScaled() && !render_target_cache_->last_resolve_unscaled();
-   ReadbackBuffer& rb = readback_buffers_[resolve_key];
-   rb.last_used_frame = frame_current_;
  
-@@ -3089,7 +3120,8 @@ bool D3D12CommandProcessor::IssueCopy_ReadbackResolvePath() {
+   uint32_t write_index = rb.current_index;
+   uint32_t size = AlignReadbackBufferSize(written_length);
+@@ -3089,7 +3114,8 @@ bool D3D12CommandProcessor::IssueCopy_ReadbackResolvePath() {
  
    ReadbackResolveMode readback_mode = GetReadbackResolveMode(REXCVAR_GET(d3d12_readback_resolve));
    uint32_t read_index = write_index;
@@ -253,7 +261,7 @@ index 0b6825a..0ac0bbf 100644
      // Delayed: copy the newest earlier result the GPU has finished. A slot whose copy is still in
      // flight holds garbage (the GPU can be several frames behind), which games then read as data.
      CheckSubmissionFence(0);
-@@ -3633,8 +3665,10 @@ void D3D12CommandProcessor::UpdateSystemConstantValues(
+@@ -3633,8 +3659,10 @@ void D3D12CommandProcessor::UpdateSystemConstantValues(
  
    bool edram_rov_used =
        render_target_cache_->GetPath() == RenderTargetCache::Path::kPixelShaderInterlock;
