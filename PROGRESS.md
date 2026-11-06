@@ -242,3 +242,19 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   logs which installation it uses, and fails with a clear message if msvcrt.lib is missing.
   Tested: the import (MSVC 14.44, SDK 26100), the exact failing debug link command, and a fresh
   ssx-player configure + build.
+- 2026-11-06: 2x-only snow glitch (gray/white blocky bands; user report, Alps; reproduced every run
+  at Grand Golliat "Hard Currency" right after the drop). Chain found with RenderDoc 1x/2x pairs:
+  the snow surface samples a 128x128x256 trail volume (3D, 0x12734000) that a trail simulation
+  updates every frame (stamp draws into a 128x128 target at EDRAM 332, then a 4-step ping-pong of
+  screen-space quads, each resolved into volume slices 0-3). At 2x the quads drew nothing (texture
+  diff: 0 px vs 16384 at 1x), so the target kept the data the render target cache had transferred
+  into it (depth read as color) and that was resolved into the volume. The quads are indexed, and
+  their index buffer sits at the volume's end; the slice resolves report an extent 0x880 bytes past
+  the volume, over that page. With scaling, the resolve skipped shared_memory.RequestRange (only
+  the unscaled path uploads pending CPU writes first) but still marked the extent written by the
+  GPU (MakeRangeValid), so the CPU-written indices never reached the GPU: indices 0,0,0,0 at 2x,
+  0,1,2,3 at 1x. patches/rexglue-0008: request the range in the scaled path too. Verified: bands
+  gone at 2x, trails and footprints now drawn at 2x, 1x unchanged, no fps cost (139 vs 138 at the
+  start line). Ruled out on the way: ROV/RTV, readback, CPU writes, patches 0003/0005, the three
+  half-pixel settings, scaled 3D resolve/load addressing (disassembled: identical math), the
+  unclipped-VS setting. SDK package sdk-5.

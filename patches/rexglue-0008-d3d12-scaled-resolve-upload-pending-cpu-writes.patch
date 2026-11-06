@@ -1,0 +1,18 @@
+--- a/src/graphics/d3d12/render_target_cache.cpp
++++ b/src/graphics/d3d12/render_target_cache.cpp
+@@ -1226,7 +1226,15 @@
+         // Committing starting with the beginning of the potentially written
+         // extent, but making the buffer containing the base current as the
+         // beginning of the bound buffer is the base.
++        // The extent is then marked as written by the GPU (valid in the shared
++        // memory), although with scaling nothing is written there. Upload the
++        // CPU's pending writes to it first, as without scaling: the extent can
++        // cover data the resolve doesn't touch (SSX's index buffer right after
++        // a 3D texture whose slice resolves report 0x880 bytes past its end,
++        // which otherwise stayed zero on the GPU).
+         copy_dest_committed =
++            shared_memory.RequestRange(resolve_info.copy_dest_extent_start,
++                                       resolve_info.copy_dest_extent_length) &&
+             texture_cache.EnsureScaledResolveMemoryCommitted(
+                 resolve_info.copy_dest_extent_start, resolve_info.copy_dest_extent_length) &&
+             texture_cache.MakeScaledResolveRangeCurrent(resolve_info.copy_dest_base,
