@@ -47,7 +47,9 @@ const Choice kFramerates[] = {{"30  (original)", "30"}, {"60", "60"},   {"120", 
                               {"144", "144"},           {"165", "165"}, {"240", "240"},
                               {"300", "300"},           {"Match main display", "0"}};
 const Choice kScales[] = {{"1x   (fast)", "1"},
-                          {"2x   (sharpest, much heavier)", "2"}};
+                          {"2x   (sharp, heavier)", "2"},
+                          {"3x   (about 4K, very heavy)", "3"},
+                          {"4x   (beyond 4K, extreme)", "4"}};
 const Choice kUpscaling[] = {{"Bilinear  (soft)", "bilinear"},
                              {"AMD CAS  (sharpen)", "cas"},
                              {"AMD FSR 1  (upscale + sharpen)", "fsr"}};
@@ -334,7 +336,7 @@ void SsxSettingsDialog::DrawDisplayTab() {
 
 void SsxSettingsDialog::DrawGraphicsTab() {
   if (!BeginRows("##graphics")) return;
-  Row("Resolution scale", "2x draws four times as many pixels: sharpest, but much heavier on the GPU.");
+  Row("Resolution scale", "Nx draws N x N times as many pixels: sharper, but much heavier on the GPU.");
   Combo("##scale", "resolution_scale", kScales, std::size(kScales));
 
   Row("Upscaling", "How the image is scaled to your screen. FSR is sharpest at 1x.");

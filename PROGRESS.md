@@ -258,3 +258,9 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   start line). Ruled out on the way: ROV/RTV, readback, CPU writes, patches 0003/0005, the three
   half-pixel settings, scaled 3D resolve/load addressing (disassembled: identical math), the
   unclipped-VS setting. SDK package sdk-5.
+- 2026-11-06: 3x and 4x resolution scale unlocked (menu + startup clamp now 4). The old 3x
+  device removal (~30 s into a race) no longer happens with patches 0001-0008: 90 s Grand
+  Golliat rides at 3x and 4x, no device errors, image correct (trails included). Start-line fps
+  (RTX 4080 SUPER, uncapped, ROV): 2x ~120, 3x 76, 4x 43, GPU 99%. The RTV path is far slower at
+  4x (23). Render sizes: 3x = 3600x1920, 4x = 4800x2560 (from the 1200x640 "high" size).
+  Next lever if 4x needs more fps: shadow maps at 1x (per-render-target scale), see 2x perf notes.

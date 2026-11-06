@@ -112,11 +112,11 @@ void SsxApplyStartupSettings() {
     rex::cvar::SetFlagByName("readback_resolve_max_size", "4096");
   }
 
-  // 3x removes the D3D12 device (INVALID_CALL) ~30 s into a race; 2x is stable.
+  // Scales above 4 are untested in SSX.
   // (resolution_scale lives in the GPU plugin, which must be loaded by now.)
-  if (rex::string::from_string<int32_t>(rex::cvar::GetFlagByName("resolution_scale"), 1) > 2) {
-    REXLOG_WARN("resolution_scale above 2 is unstable in SSX; using 2");
-    rex::cvar::SetFlagByName("resolution_scale", "2");
+  if (rex::string::from_string<int32_t>(rex::cvar::GetFlagByName("resolution_scale"), 1) > 4) {
+    REXLOG_WARN("resolution_scale above 4 is untested in SSX; using 4");
+    rex::cvar::SetFlagByName("resolution_scale", "4");
   }
 
   ApplyVolume(REXCVAR_GET(ssx_volume));
