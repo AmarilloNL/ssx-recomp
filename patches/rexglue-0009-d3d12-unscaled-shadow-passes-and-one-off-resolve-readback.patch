@@ -1,0 +1,863 @@
+diff --git a/include/rex/graphics/d3d12/command_processor.h b/include/rex/graphics/d3d12/command_processor.h
+index 1aea382..ecfaf68 100644
+--- a/include/rex/graphics/d3d12/command_processor.h
++++ b/include/rex/graphics/d3d12/command_processor.h
+@@ -480,6 +480,8 @@ class D3D12CommandProcessor : public CommandProcessor {
+   ViewportCacheKey previous_viewport_key_{};
+   draw_util::ViewportInfo previous_viewport_info_{};
+   bool viewport_cache_valid_ = false;
++  // The current draw is an unscaled pass (ROV with resolution scaling).
++  bool draw_edram_unscaled_ = false;
+ 
+   // Should bindless textures and samplers be used - many times faster
+   // UpdateBindings than bindful (that becomes a significant bottleneck with
+diff --git a/include/rex/graphics/d3d12/pipeline_cache.h b/include/rex/graphics/d3d12/pipeline_cache.h
+index 7a9d6a2..e396d83 100644
+--- a/include/rex/graphics/d3d12/pipeline_cache.h
++++ b/include/rex/graphics/d3d12/pipeline_cache.h
+@@ -80,6 +80,10 @@ class PipelineCache {
+       const Shader& shader, uint32_t interpolator_mask, uint32_t param_gen_pos,
+       reg::RB_DEPTHCONTROL normalized_depth_control) const;
+ 
++  // Whether the next draw is an unscaled pass (ROV with resolution scaling),
++  // for the pixel shader modification and the pipeline description.
++  void SetDrawEdramUnscaled(bool edram_unscaled) { draw_edram_unscaled_ = edram_unscaled; }
++
+   // If draw_util::IsRasterizationPotentiallyDone is false, the pixel shader
+   // MUST be made nullptr BEFORE calling this!
+   bool ConfigurePipeline(D3D12Shader::D3D12Translation* vertex_shader,
+@@ -206,6 +210,8 @@ class PipelineCache {
+     uint32_t depth_write : 1;                         // 18
+     uint32_t stencil_enable : 1;                      // 19
+     uint32_t stencil_read_mask : 8;                   // 27
++    // ROV with resolution scaling: drawn at 1x to the unscaled EDRAM region.
++    uint32_t edram_unscaled : 1;  // 28
+ 
+     uint32_t stencil_write_mask : 8;                   // 8
+     xenos::StencilOp stencil_front_fail_op : 3;        // 11
+@@ -341,6 +347,8 @@ class PipelineCache {
+   // Empty depth-only pixel shader for writing to depth buffer via ROV when no
+   // Xenos pixel shader provided.
+   std::vector<uint8_t> depth_only_pixel_shader_;
++  std::vector<uint8_t> depth_only_pixel_shader_edram_unscaled_;
++  bool draw_edram_unscaled_ = false;
+ 
+   struct Pipeline {
+     // nullptr if creation has failed.
+diff --git a/include/rex/graphics/d3d12/render_target_cache.h b/include/rex/graphics/d3d12/render_target_cache.h
+index cd7693a..213f4ff 100644
+--- a/include/rex/graphics/d3d12/render_target_cache.h
++++ b/include/rex/graphics/d3d12/render_target_cache.h
+@@ -79,6 +79,16 @@ class D3D12RenderTargetCache final : public RenderTargetCache {
+                D3D12TextureCache& texture_cache, uint32_t& written_address_out,
+                uint32_t& written_length_out);
+ 
++  // ROV with resolution scaling: whether the draw is an unscaled pass - a
++  // depth-only pass with the EDRAM pitch from rov_unscaled_depth_pitch (shadow
++  // maps), drawn at 1x to the unscaled EDRAM region placed after the scaled
++  // EDRAM in the same buffer. Its depth resolves then write unscaled data, and
++  // the textures sampling it are unscaled. Call once per draw.
++  bool UpdateDrawEdramUnscaled(reg::RB_DEPTHCONTROL normalized_depth_control,
++                               uint32_t normalized_color_mask);
++  // Whether the last Resolve copied unscaled data (from an unscaled pass).
++  bool last_resolve_unscaled() const { return last_resolve_unscaled_; }
++
+   // For host render targets.
+ 
+   bool gamma_render_target_as_unorm16() const { return gamma_render_target_as_unorm16_; }
+@@ -167,9 +177,29 @@ class D3D12RenderTargetCache final : public RenderTargetCache {
+     kR32UintUAV,
+     kR32G32UintUAV,
+     kR32G32B32A32UintUAV,
++    // The unscaled EDRAM region (see UpdateDrawEdramUnscaled).
++    kUnscaledRawSRV,
++    kUnscaledR32UintSRV,
++    kUnscaledR32G32UintSRV,
++    kUnscaledR32G32B32A32UintSRV,
++    kUnscaledR32G32B32A32UintUAV,
+ 
+     kCount,
+   };
++
++  // Unscaled passes (see UpdateDrawEdramUnscaled). Off (0) unless ROV with
++  // resolution scaling and bindless resources.
++  uint32_t edram_unscaled_depth_pitch_ = 0;
++  // The last draw writing the EDRAM was an unscaled pass with this depth base
++  // and pitch (tiles), so resolving depth from there reads the unscaled region.
++  bool unscaled_pass_active_ = false;
++  bool last_resolve_unscaled_ = false;
++  uint32_t unscaled_pass_depth_base_tiles_ = 0;
++  uint32_t unscaled_pass_pitch_tiles_ = 0;
++  ID3D12RootSignature* resolve_copy_root_signature_unscaled_ = nullptr;
++  ID3D12PipelineState*
++      resolve_copy_pipelines_unscaled_[size_t(draw_util::ResolveCopyShaderIndex::kCount)] = {};
++  ID3D12PipelineState* resolve_rov_clear_32bpp_pipeline_unscaled_ = nullptr;
+   ID3D12DescriptorHeap* edram_buffer_descriptor_heap_ = nullptr;
+   D3D12_CPU_DESCRIPTOR_HANDLE edram_buffer_descriptor_heap_start_;
+ 
+diff --git a/include/rex/graphics/pipeline/shader/dxbc_translator.h b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+index 3b0fd61..cabfa8f 100644
+--- a/include/rex/graphics/pipeline/shader/dxbc_translator.h
++++ b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+@@ -176,6 +176,9 @@ class DxbcShaderTranslator : public ShaderTranslator {
+       uint32_t dynamic_addressable_register_count : 8;
+       // Non-ROV - depth / stencil output mode.
+       DepthStencilMode depth_stencil_mode : 2;
++      // ROV with resolution scaling - draw this pass at 1x into the unscaled
++      // EDRAM region placed after the scaled EDRAM in the same buffer.
++      uint32_t edram_unscaled : 1;
+     } pixel;
+ 
+     explicit Modification(uint64_t modification_value = 0) : value(modification_value) {
+@@ -513,7 +516,7 @@ class DxbcShaderTranslator : public ShaderTranslator {
+ 
+   // Creates a special pixel shader without color outputs - this resets the
+   // state of the translator.
+-  std::vector<uint8_t> CreateDepthOnlyPixelShader();
++  std::vector<uint8_t> CreateDepthOnlyPixelShader(bool edram_unscaled = false);
+ 
+   // Common functions useful not only for the translator, but also for render
+   // target reinterpretation.
+@@ -936,6 +939,12 @@ class DxbcShaderTranslator : public ShaderTranslator {
+   // Guest pixel host width / height.
+   uint32_t draw_resolution_scale_x_;
+   uint32_t draw_resolution_scale_y_;
++  // Pixel scale and dword offset of the EDRAM being drawn to: the draw
++  // resolution scale and 0, or 1 and the scaled EDRAM size for a pass drawn
++  // unscaled (Modification::pixel.edram_unscaled). Set in StartTranslation.
++  uint32_t edram_scale_x_ = 1;
++  uint32_t edram_scale_y_ = 1;
++  uint32_t edram_dword_offset_ = 0;
+ 
+   // Is currently writing the empty depth-only pixel shader, for
+   // CompleteTranslation.
+diff --git a/include/rex/graphics/pipeline/texture/cache.h b/include/rex/graphics/pipeline/texture/cache.h
+index f42fd81..9d7c6b3 100644
+--- a/include/rex/graphics/pipeline/texture/cache.h
++++ b/include/rex/graphics/pipeline/texture/cache.h
+@@ -80,7 +80,9 @@ class TextureCache {
+   virtual void BeginSubmission(uint64_t new_submission_index);
+   virtual void BeginFrame();
+ 
+-  void MarkRangeAsResolved(uint32_t start_unscaled, uint32_t length_unscaled);
++  // scaled = false: written by an unscaled resolve while scaling is enabled
++  // (an unscaled pass, see D3D12RenderTargetCache), so not scaled data anymore.
++  void MarkRangeAsResolved(uint32_t start_unscaled, uint32_t length_unscaled, bool scaled = true);
+   // Ensures the memory backing the range in the scaled resolve address space is
+   // allocated and returns whether it is.
+   virtual bool EnsureScaledResolveMemoryCommitted(uint32_t /*start_unscaled*/,
+diff --git a/src/graphics/d3d12/command_processor.cpp b/src/graphics/d3d12/command_processor.cpp
+index 0b6825a..0ac0bbf 100644
+--- a/src/graphics/d3d12/command_processor.cpp
++++ b/src/graphics/d3d12/command_processor.cpp
+@@ -43,6 +43,11 @@ REXCVAR_DEFINE_BOOL(d3d12_readback_resolve, false, "GPU/D3D12",
+                     "Read render-to-texture results on the CPU")
+     .lifecycle(rex::cvar::Lifecycle::kHotReload);
+ 
++REXCVAR_DEFINE_BOOL(readback_resolve_one_off_sync, false, "GPU/D3D12",
++                    "With resolve readback, read back resolves not also done in the previous "
++                    "frame (up to 4 MB) right away, whatever their size and the readback mode.")
++    .lifecycle(rex::cvar::Lifecycle::kHotReload);
++
+ REXCVAR_DEFINE_INT32(readback_resolve_max_size, 0, "GPU/D3D12",
+                      "With resolve readback, only read back resolves of at most this many bytes "
+                      "(0: all). Games often read only tiny render targets on the CPU.")
+@@ -2357,6 +2362,13 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type, uint3
+                                                              regs.Get<reg::SQ_CONTEXT_MISC>(),
+                                                              ps_param_gen_pos))
+                    : 0;
++  // Passes drawn at 1x with resolution scaling (shadow maps, see
++  // D3D12RenderTargetCache::UpdateDrawEdramUnscaled).
++  draw_edram_unscaled_ = render_target_cache_->UpdateDrawEdramUnscaled(
++      normalized_depth_control,
++      pixel_shader ? draw_util::GetNormalizedColorMask(regs, pixel_shader->writes_color_targets())
++                   : 0);
++  pipeline_cache_->SetDrawEdramUnscaled(draw_edram_unscaled_);
+   DxbcShaderTranslator::Modification vertex_shader_modification =
+       pipeline_cache_->GetCurrentVertexShaderModification(
+           *vertex_shader, primitive_processing_result.host_vertex_shader_type, interpolator_mask);
+@@ -2374,7 +2386,6 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type, uint3
+                                     normalized_color_mask, *vertex_shader)) {
+     return false;
+   }
+-
+   // Create the pipeline (for this, need the actually used render target formats
+   // from the render target cache), translating the shaders - doing this now to
+   // obtain the used textures.
+@@ -2424,8 +2435,10 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type, uint3
+   }
+ 
+   // Get dynamic rasterizer state.
+-  uint32_t draw_resolution_scale_x = texture_cache_->draw_resolution_scale_x();
+-  uint32_t draw_resolution_scale_y = texture_cache_->draw_resolution_scale_y();
++  uint32_t draw_resolution_scale_x =
++      draw_edram_unscaled_ ? 1 : texture_cache_->draw_resolution_scale_x();
++  uint32_t draw_resolution_scale_y =
++      draw_edram_unscaled_ ? 1 : texture_cache_->draw_resolution_scale_y();
+ 
+   bool convert_z_to_float24 =
+       host_render_targets_used && render_target_cache_->depth_float24_convert_in_pixel_shader();
+@@ -2443,7 +2456,8 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type, uint3
+   std::memcpy(viewport_key.vport_regs, &regs[XE_GPU_REG_PA_CL_VPORT_XSCALE],
+               sizeof(viewport_key.vport_regs));
+   viewport_key.flags = (uint32_t(convert_z_to_float24) << 0) |
+-                       (uint32_t(host_render_targets_used) << 1) | (uint32_t(ps_writes_depth) << 2);
++                       (uint32_t(host_render_targets_used) << 1) | (uint32_t(ps_writes_depth) << 2) |
++                       (uint32_t(draw_edram_unscaled_) << 3);
+ 
+   draw_util::ViewportInfo viewport_info;
+   if (viewport_cache_valid_ && viewport_key == previous_viewport_key_) {
+@@ -2907,15 +2921,32 @@ bool D3D12CommandProcessor::IssueCopy_ReadbackResolvePath() {
+     return true;
+   }
+ 
++  uint64_t resolve_key = MakeReadbackResolveKey(written_address, written_length);
++  // A resolve not also done in the previous frame (render-to-texture at load time that the CPU
++  // then reads, like SSX building its flare light textures) is read back right away. Waiting
++  // only costs for such one-off resolves; the per-frame ones keep the configured mode.
++  bool read_back_now = false;
++  // Not 3D or array destinations: a volume written slice by slice (SSX's snow trails) has a
++  // new address every frame, and its conservative range covers neighbouring data.
++  if (REXCVAR_GET(readback_resolve_one_off_sync) &&
++      !register_file_->Get<reg::RB_COPY_DEST_INFO>().copy_dest_array) {
++    auto it = readback_buffers_.find(resolve_key);
++    read_back_now = written_length > uint32_t(std::max(REXCVAR_GET(readback_resolve_max_size), 0)) &&
++                    written_length <= (4u << 20) &&
++                    (it == readback_buffers_.end() ||
++                     frame_current_ - it->second.last_used_frame > 1);
++  }
+   // The written range is conservative (a 3D slice resolve's range covers neighbouring slices and
+   // can run past the texture), and delayed readback writes older data over all of it.
+   if (int32_t max_size = REXCVAR_GET(readback_resolve_max_size);
+-      max_size > 0 && written_length > uint32_t(max_size)) {
++      !read_back_now && max_size > 0 && written_length > uint32_t(max_size)) {
++    // Still track it, so it counts as per-frame next frame.
++    readback_buffers_[resolve_key].last_used_frame = frame_current_;
+     return true;
+   }
+ 
+-  bool is_scaled = texture_cache_->IsDrawResolutionScaled();
+-  uint64_t resolve_key = MakeReadbackResolveKey(written_address, written_length);
++  bool is_scaled =
++      texture_cache_->IsDrawResolutionScaled() && !render_target_cache_->last_resolve_unscaled();
+   ReadbackBuffer& rb = readback_buffers_[resolve_key];
+   rb.last_used_frame = frame_current_;
+ 
+@@ -3089,7 +3120,8 @@ bool D3D12CommandProcessor::IssueCopy_ReadbackResolvePath() {
+ 
+   ReadbackResolveMode readback_mode = GetReadbackResolveMode(REXCVAR_GET(d3d12_readback_resolve));
+   uint32_t read_index = write_index;
+-  if (readback_mode == ReadbackResolveMode::kFast || readback_mode == ReadbackResolveMode::kSome) {
++  if (!read_back_now &&
++      (readback_mode == ReadbackResolveMode::kFast || readback_mode == ReadbackResolveMode::kSome)) {
+     // Delayed: copy the newest earlier result the GPU has finished. A slot whose copy is still in
+     // flight holds garbage (the GPU can be several frames behind), which games then read as data.
+     CheckSubmissionFence(0);
+@@ -3633,8 +3665,10 @@ void D3D12CommandProcessor::UpdateSystemConstantValues(
+ 
+   bool edram_rov_used =
+       render_target_cache_->GetPath() == RenderTargetCache::Path::kPixelShaderInterlock;
+-  uint32_t draw_resolution_scale_x = texture_cache_->draw_resolution_scale_x();
+-  uint32_t draw_resolution_scale_y = texture_cache_->draw_resolution_scale_y();
++  uint32_t draw_resolution_scale_x =
++      draw_edram_unscaled_ ? 1 : texture_cache_->draw_resolution_scale_x();
++  uint32_t draw_resolution_scale_y =
++      draw_edram_unscaled_ ? 1 : texture_cache_->draw_resolution_scale_y();
+ 
+   // Get the color info register values for each render target. Also, for ROV,
+   // exclude components that don't exist in the format from the write mask.
+diff --git a/src/graphics/d3d12/pipeline_cache.cpp b/src/graphics/d3d12/pipeline_cache.cpp
+index 8e6b854..9a2b6c8 100644
+--- a/src/graphics/d3d12/pipeline_cache.cpp
++++ b/src/graphics/d3d12/pipeline_cache.cpp
+@@ -103,6 +103,10 @@ PipelineCache::PipelineCache(D3D12CommandProcessor& command_processor,
+ 
+   if (edram_rov_used) {
+     depth_only_pixel_shader_ = std::move(shader_translator_->CreateDepthOnlyPixelShader());
++    if (render_target_cache_.IsDrawResolutionScaled()) {
++      depth_only_pixel_shader_edram_unscaled_ =
++          std::move(shader_translator_->CreateDepthOnlyPixelShader(true));
++    }
+   }
+ }
+ 
+@@ -855,6 +859,7 @@ DxbcShaderTranslator::Modification PipelineCache::GetCurrentPixelShaderModificat
+       shader_translator_->GetDefaultPixelShaderModification(
+           shader.GetDynamicAddressableRegisterCount(regs.Get<reg::SQ_PROGRAM_CNTL>().ps_num_reg)));
+ 
++  modification.pixel.edram_unscaled = uint32_t(draw_edram_unscaled_);
+   modification.pixel.interpolator_mask = interpolator_mask;
+   modification.pixel.interpolators_centroid =
+       interpolator_mask & ~xenos::GetInterpolatorSamplingPattern(
+@@ -1253,6 +1258,7 @@ bool PipelineCache::GetCurrentStateDescription(
+ 
+   // Initialize all unused fields to zero for comparison/hashing.
+   std::memset(&runtime_description_out, 0, sizeof(runtime_description_out));
++  description_out.edram_unscaled = uint32_t(draw_edram_unscaled_);
+ 
+   assert_true(DxbcShaderTranslator::Modification(vertex_shader->modification())
+                   .vertex.host_vertex_shader_type ==
+@@ -2836,8 +2842,11 @@ ID3D12PipelineState* PipelineCache::CreateD3D12Pipeline(
+     state_desc.PS.pShaderBytecode = runtime_description.pixel_shader->translated_binary().data();
+     state_desc.PS.BytecodeLength = runtime_description.pixel_shader->translated_binary().size();
+   } else if (edram_rov_used) {
+-    state_desc.PS.pShaderBytecode = depth_only_pixel_shader_.data();
+-    state_desc.PS.BytecodeLength = depth_only_pixel_shader_.size();
++    const std::vector<uint8_t>& depth_only_ps = description.edram_unscaled
++                                                    ? depth_only_pixel_shader_edram_unscaled_
++                                                    : depth_only_pixel_shader_;
++    state_desc.PS.pShaderBytecode = depth_only_ps.data();
++    state_desc.PS.BytecodeLength = depth_only_ps.size();
+   } else {
+     if (render_target_cache_.depth_float24_convert_in_pixel_shader() &&
+         (description.depth_func != xenos::CompareFunction::kAlways || description.depth_write) &&
+diff --git a/src/graphics/d3d12/render_target_cache.cpp b/src/graphics/d3d12/render_target_cache.cpp
+index dc06120..c8712a1 100644
+--- a/src/graphics/d3d12/render_target_cache.cpp
++++ b/src/graphics/d3d12/render_target_cache.cpp
+@@ -46,6 +46,11 @@ REXCVAR_DEFINE_STRING(render_target_path_d3d12, "", "GPU/D3D12",
+     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+ 
+ REXCVAR_DEFINE_BOOL(native_stencil_value_output, true, "GPU", "Enable native stencil value output");
++REXCVAR_DEFINE_INT32(rov_unscaled_depth_pitch, 0, "GPU/D3D12",
++                     "With resolution scaling on the ROV path, depth-only passes with this EDRAM "
++                     "pitch in samples (a title's shadow maps) are drawn and resolved at 1x. "
++                     "0: off")
++    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+ 
+ namespace rex::graphics::d3d12 {
+ 
+@@ -202,9 +207,19 @@ bool D3D12RenderTargetCache::Initialize() {
+     path_ = Path::kHostRenderTargets;
+   }
+ 
++  edram_unscaled_depth_pitch_ =
++      path_ == Path::kPixelShaderInterlock && IsDrawResolutionScaled() && bindless_resources_used_
++          ? uint32_t(std::max(REXCVAR_GET(rov_unscaled_depth_pitch), 0))
++          : 0;
++
+   // Create the buffer for reinterpreting EDRAM contents.
+   uint32_t edram_buffer_size =
+       xenos::kEdramSizeBytes * (draw_resolution_scale_x() * draw_resolution_scale_y());
++  // Unscaled passes use an unscaled EDRAM region after the scaled EDRAM.
++  uint32_t edram_buffer_scaled_size = edram_buffer_size;
++  if (edram_unscaled_depth_pitch_) {
++    edram_buffer_size += xenos::kEdramSizeBytes;
++  }
+   D3D12_RESOURCE_DESC edram_buffer_desc;
+   ui::d3d12::util::FillBufferResourceDesc(edram_buffer_desc, edram_buffer_size,
+                                           D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+@@ -280,6 +295,32 @@ bool D3D12RenderTargetCache::Initialize() {
+       provider.OffsetViewDescriptor(edram_buffer_descriptor_heap_start_,
+                                     uint32_t(EdramBufferDescriptorIndex::kR32G32B32A32UintUAV)),
+       edram_buffer_, DXGI_FORMAT_R32G32B32A32_UINT, edram_buffer_size >> 4);
++  if (edram_unscaled_depth_pitch_) {
++    ui::d3d12::util::CreateBufferRawSRV(
++        device,
++        provider.OffsetViewDescriptor(edram_buffer_descriptor_heap_start_,
++                                      uint32_t(EdramBufferDescriptorIndex::kUnscaledRawSRV)),
++        edram_buffer_, xenos::kEdramSizeBytes, edram_buffer_scaled_size);
++    static const DXGI_FORMAT kUnscaledSRVFormats[] = {
++        DXGI_FORMAT_R32_UINT, DXGI_FORMAT_R32G32_UINT, DXGI_FORMAT_R32G32B32A32_UINT};
++    for (uint32_t i = 0; i < 3; ++i) {
++      uint32_t element_size_log2 = 2 + i;
++      ui::d3d12::util::CreateBufferTypedSRV(
++          device,
++          provider.OffsetViewDescriptor(
++              edram_buffer_descriptor_heap_start_,
++              uint32_t(EdramBufferDescriptorIndex::kUnscaledR32UintSRV) + i),
++          edram_buffer_, kUnscaledSRVFormats[i], xenos::kEdramSizeBytes >> element_size_log2,
++          edram_buffer_scaled_size >> element_size_log2);
++    }
++    ui::d3d12::util::CreateBufferTypedUAV(
++        device,
++        provider.OffsetViewDescriptor(
++            edram_buffer_descriptor_heap_start_,
++            uint32_t(EdramBufferDescriptorIndex::kUnscaledR32G32B32A32UintUAV)),
++        edram_buffer_, DXGI_FORMAT_R32G32B32A32_UINT, xenos::kEdramSizeBytes >> 4,
++        edram_buffer_scaled_size >> 4);
++  }
+ 
+   bool draw_resolution_scaled = IsDrawResolutionScaled();
+ 
+@@ -367,6 +408,31 @@ bool D3D12RenderTargetCache::Initialize() {
+     resolve_copy_pipelines_[i] = resolve_copy_pipeline;
+   }
+ 
++  // Unscaled resolves from the unscaled EDRAM region to the whole shared
++  // memory.
++  if (edram_unscaled_depth_pitch_) {
++    resolve_copy_root_parameters[0].Constants.Num32BitValues =
++        sizeof(draw_util::ResolveCopyShaderConstants) / sizeof(uint32_t);
++    resolve_copy_root_signature_unscaled_ =
++        ui::d3d12::util::CreateRootSignature(provider, resolve_copy_root_signature_desc);
++    if (resolve_copy_root_signature_unscaled_ == nullptr) {
++      REXGPU_ERROR("D3D12RenderTargetCache: Failed to create the unscaled resolve copy root "
++                   "signature");
++      Shutdown();
++      return false;
++    }
++    for (size_t i = 0; i < size_t(draw_util::ResolveCopyShaderIndex::kCount); ++i) {
++      resolve_copy_pipelines_unscaled_[i] = ui::d3d12::util::CreateComputePipeline(
++          device, kResolveCopyShaders[i].unscaled, kResolveCopyShaders[i].unscaled_size,
++          resolve_copy_root_signature_unscaled_);
++      if (resolve_copy_pipelines_unscaled_[i] == nullptr) {
++        REXGPU_ERROR("D3D12RenderTargetCache: Failed to create an unscaled resolve copy pipeline");
++        Shutdown();
++        return false;
++      }
++    }
++  }
++
+   // Using the cvar on emulator initialization so used pipelines are consistent
+   // across different titles launched in one emulator instance.
+   use_stencil_reference_output_ =
+@@ -948,6 +1014,17 @@ bool D3D12RenderTargetCache::Initialize() {
+       return false;
+     }
+     resolve_rov_clear_64bpp_pipeline_->SetName(L"Resolve Clear 64bpp");
++    if (edram_unscaled_depth_pitch_) {
++      // Unscaled passes are depth-only, only 32bpp is cleared there.
++      resolve_rov_clear_32bpp_pipeline_unscaled_ = ui::d3d12::util::CreateComputePipeline(
++          device, shaders::resolve_clear_32bpp_cs, sizeof(shaders::resolve_clear_32bpp_cs),
++          resolve_rov_clear_root_signature_);
++      if (resolve_rov_clear_32bpp_pipeline_unscaled_ == nullptr) {
++        REXGPU_ERROR("D3D12RenderTargetCache: Failed to create the unscaled clear pipeline");
++        Shutdown();
++        return false;
++      }
++    }
+   } else {
+     assert_unhandled_case(path_);
+     Shutdown();
+@@ -960,6 +1037,11 @@ bool D3D12RenderTargetCache::Initialize() {
+ }
+ 
+ void D3D12RenderTargetCache::Shutdown(bool from_destructor) {
++  ui::d3d12::util::ReleaseAndNull(resolve_rov_clear_32bpp_pipeline_unscaled_);
++  for (ID3D12PipelineState*& pipeline : resolve_copy_pipelines_unscaled_) {
++    ui::d3d12::util::ReleaseAndNull(pipeline);
++  }
++  ui::d3d12::util::ReleaseAndNull(resolve_copy_root_signature_unscaled_);
+   ui::d3d12::util::ReleaseAndNull(resolve_rov_clear_64bpp_pipeline_);
+   ui::d3d12::util::ReleaseAndNull(resolve_rov_clear_32bpp_pipeline_);
+   ui::d3d12::util::ReleaseAndNull(resolve_rov_clear_root_signature_);
+@@ -1159,6 +1241,30 @@ void D3D12RenderTargetCache::WriteEdramUintPow2UAVDescriptor(D3D12_CPU_DESCRIPTO
+                                 D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+ }
+ 
++bool D3D12RenderTargetCache::UpdateDrawEdramUnscaled(reg::RB_DEPTHCONTROL normalized_depth_control,
++                                                     uint32_t normalized_color_mask) {
++  if (!edram_unscaled_depth_pitch_) {
++    return false;
++  }
++  bool depth_used = normalized_depth_control.z_enable || normalized_depth_control.stencil_enable;
++  if (!normalized_color_mask && !depth_used) {
++    // Doesn't access the EDRAM.
++    return false;
++  }
++  const RegisterFile& regs = register_file();
++  auto rb_surface_info = regs.Get<reg::RB_SURFACE_INFO>();
++  uint32_t pitch_samples =
++      rb_surface_info.surface_pitch *
++      (rb_surface_info.msaa_samples >= xenos::MsaaSamples::k4X ? 2 : 1);
++  unscaled_pass_active_ = !normalized_color_mask && pitch_samples == edram_unscaled_depth_pitch_;
++  if (unscaled_pass_active_) {
++    unscaled_pass_depth_base_tiles_ = regs.Get<reg::RB_DEPTH_INFO>().depth_base;
++    unscaled_pass_pitch_tiles_ = xenos::GetSurfacePitchTiles(rb_surface_info.surface_pitch,
++                                                             rb_surface_info.msaa_samples, false);
++  }
++  return unscaled_pass_active_;
++}
++
+ bool D3D12RenderTargetCache::Resolve(const memory::Memory& memory, D3D12SharedMemory& shared_memory,
+                                      D3D12TextureCache& texture_cache,
+                                      uint32_t& written_address_out, uint32_t& written_length_out) {
+@@ -1180,15 +1286,35 @@ bool D3D12RenderTargetCache::Resolve(const memory::Memory& memory, D3D12SharedMe
+     return true;
+   }
+ 
++  // Depth of an unscaled pass (see UpdateDrawEdramUnscaled) is copied
++  // unscaled from the unscaled EDRAM region.
++  bool copy_unscaled = false;
++  draw_util::ResolveInfo resolve_info_unscaled;
++  if (edram_unscaled_depth_pitch_) {
++    if (!draw_util::GetResolveInfo(register_file(), memory, 1, 1,
++                                   fixed_16_truncated_to_minus_1_to_1,
++                                   fixed_16_truncated_to_minus_1_to_1, resolve_info_unscaled)) {
++      return false;
++    }
++    copy_unscaled = unscaled_pass_active_ && resolve_info.IsCopyingDepth() &&
++                    resolve_info.depth_original_base == unscaled_pass_depth_base_tiles_ &&
++                    resolve_info.depth_edram_info.pitch_tiles == unscaled_pass_pitch_tiles_;
++  }
++  const draw_util::ResolveInfo& copy_info = copy_unscaled ? resolve_info_unscaled : resolve_info;
++  last_resolve_unscaled_ = copy_unscaled;
++  bool copy_scaled = draw_resolution_scaled && !copy_unscaled;
++  uint32_t copy_scale_x = copy_unscaled ? 1 : draw_resolution_scale_x();
++  uint32_t copy_scale_y = copy_unscaled ? 1 : draw_resolution_scale_y();
++
+   DeferredCommandList& command_list = command_processor_.GetDeferredCommandList();
+ 
+   // Copying.
+   bool copied = false;
+-  if (resolve_info.copy_dest_extent_length) {
++  if (copy_info.copy_dest_extent_length) {
+     draw_util::ResolveCopyShaderConstants copy_shader_constants;
+     uint32_t copy_group_count_x, copy_group_count_y;
+     draw_util::ResolveCopyShaderIndex copy_shader =
+-        resolve_info.GetCopyShader(draw_resolution_scale_x(), draw_resolution_scale_y(),
++        copy_info.GetCopyShader(copy_scale_x, copy_scale_y,
+                                    copy_shader_constants, copy_group_count_x, copy_group_count_y);
+     assert_true(copy_group_count_x && copy_group_count_y);
+     if (copy_shader != draw_util::ResolveCopyShaderIndex::kUnknown) {
+@@ -1198,7 +1324,7 @@ bool D3D12RenderTargetCache::Resolve(const memory::Memory& memory, D3D12SharedMe
+       if (GetPath() == Path::kHostRenderTargets) {
+         if (REXCVAR_GET(direct_host_resolve)) {
+           direct_resolved =
+-              TryResolveCopyDirectly(resolve_info, copy_shader, draw_resolution_scaled);
++              TryResolveCopyDirectly(copy_info, copy_shader, copy_scaled);
+           if (direct_resolved) {
+             ++direct_resolve_success_count_;
+           } else {
+@@ -1212,7 +1338,7 @@ bool D3D12RenderTargetCache::Resolve(const memory::Memory& memory, D3D12SharedMe
+           uint32_t dump_row_length_used;
+           uint32_t dump_rows;
+           uint32_t dump_pitch;
+-          resolve_info.GetCopyEdramTileSpan(dump_base, dump_row_length_used, dump_rows, dump_pitch);
++          copy_info.GetCopyEdramTileSpan(dump_base, dump_row_length_used, dump_rows, dump_pitch);
+           if (!DumpRenderTargets(dump_base, dump_row_length_used, dump_rows, dump_pitch)) {
+             REXGPU_ERROR("D3D12RenderTargetCache: Failed to dump host render targets for resolve");
+             return false;
+@@ -1222,7 +1348,7 @@ bool D3D12RenderTargetCache::Resolve(const memory::Memory& memory, D3D12SharedMe
+ 
+       // Make sure there is memory to write to.
+       bool copy_dest_committed;
+-      if (draw_resolution_scaled) {
++      if (copy_scaled) {
+         // Committing starting with the beginning of the potentially written
+         // extent, but making the buffer containing the base current as the
+         // beginning of the bound buffer is the base.
+@@ -1233,17 +1359,17 @@ bool D3D12RenderTargetCache::Resolve(const memory::Memory& memory, D3D12SharedMe
+         // a 3D texture whose slice resolves report 0x880 bytes past its end,
+         // which otherwise stayed zero on the GPU).
+         copy_dest_committed =
+-            shared_memory.RequestRange(resolve_info.copy_dest_extent_start,
+-                                       resolve_info.copy_dest_extent_length) &&
++            shared_memory.RequestRange(copy_info.copy_dest_extent_start,
++                                       copy_info.copy_dest_extent_length) &&
+             texture_cache.EnsureScaledResolveMemoryCommitted(
+-                resolve_info.copy_dest_extent_start, resolve_info.copy_dest_extent_length) &&
+-            texture_cache.MakeScaledResolveRangeCurrent(resolve_info.copy_dest_base,
+-                                                        resolve_info.copy_dest_extent_start -
+-                                                            resolve_info.copy_dest_base +
+-                                                            resolve_info.copy_dest_extent_length);
++                copy_info.copy_dest_extent_start, copy_info.copy_dest_extent_length) &&
++            texture_cache.MakeScaledResolveRangeCurrent(copy_info.copy_dest_base,
++                                                        copy_info.copy_dest_extent_start -
++                                                            copy_info.copy_dest_base +
++                                                            copy_info.copy_dest_extent_length);
+       } else {
+-        copy_dest_committed = shared_memory.RequestRange(resolve_info.copy_dest_extent_start,
+-                                                         resolve_info.copy_dest_extent_length);
++        copy_dest_committed = shared_memory.RequestRange(copy_info.copy_dest_extent_start,
++                                                         copy_info.copy_dest_extent_length);
+       }
+       if (copy_dest_committed) {
+         // Write the descriptors and transition the resources.
+@@ -1255,15 +1381,27 @@ bool D3D12RenderTargetCache::Resolve(const memory::Memory& memory, D3D12SharedMe
+         ui::d3d12::util::DescriptorCpuGpuHandlePair descriptor_source;
+         ui::d3d12::util::DescriptorCpuGpuHandlePair descriptors[2];
+         if (command_processor_.RequestOneUseSingleViewDescriptors(
+-                bindless_resources_used_ ? uint32_t(draw_resolution_scaled) : 2, descriptors)) {
++                bindless_resources_used_ ? uint32_t(copy_scaled || copy_unscaled) : 2, descriptors)) {
+           if (bindless_resources_used_) {
+-            if (draw_resolution_scaled) {
++            if (copy_scaled) {
+               descriptor_dest = descriptors[0];
+             } else {
+               descriptor_dest = command_processor_.GetSharedMemoryUintPow2BindlessUAVHandlePair(
+                   copy_shader_info.dest_bpe_log2);
+             }
+-            if (copy_shader_info.source_is_raw) {
++            if (copy_unscaled) {
++              descriptor_source = descriptors[0];
++              const ui::d3d12::D3D12Provider& provider = command_processor_.GetD3D12Provider();
++              provider.GetDevice()->CopyDescriptorsSimple(
++                  1, descriptor_source.first,
++                  provider.OffsetViewDescriptor(
++                      edram_buffer_descriptor_heap_start_,
++                      copy_shader_info.source_is_raw
++                          ? uint32_t(EdramBufferDescriptorIndex::kUnscaledRawSRV)
++                          : uint32_t(EdramBufferDescriptorIndex::kUnscaledR32UintSRV) +
++                                (copy_shader_info.source_bpe_log2 - 2)),
++                  D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
++            } else             if (copy_shader_info.source_is_raw) {
+               descriptor_source = command_processor_.GetSystemBindlessViewHandlePair(
+                   D3D12CommandProcessor::SystemBindlessView::kEdramRawSRV);
+             } else {
+@@ -1272,7 +1410,7 @@ bool D3D12RenderTargetCache::Resolve(const memory::Memory& memory, D3D12SharedMe
+             }
+           } else {
+             descriptor_dest = descriptors[0];
+-            if (!draw_resolution_scaled) {
++            if (!copy_scaled) {
+               shared_memory.WriteUintPow2UAVDescriptor(descriptor_dest.first,
+                                                        copy_shader_info.dest_bpe_log2);
+             }
+@@ -1284,7 +1422,7 @@ bool D3D12RenderTargetCache::Resolve(const memory::Memory& memory, D3D12SharedMe
+                                               copy_shader_info.source_bpe_log2);
+             }
+           }
+-          if (draw_resolution_scaled) {
++          if (copy_scaled) {
+             texture_cache.CreateCurrentScaledResolveRangeUintPow2UAV(
+                 descriptor_dest.first, copy_shader_info.dest_bpe_log2);
+             texture_cache.TransitionCurrentScaledResolveRange(
+@@ -1295,10 +1433,11 @@ bool D3D12RenderTargetCache::Resolve(const memory::Memory& memory, D3D12SharedMe
+           TransitionEdramBuffer(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+ 
+           // Submit the resolve.
+-          command_list.D3DSetComputeRootSignature(resolve_copy_root_signature_);
++          command_list.D3DSetComputeRootSignature(copy_unscaled ? resolve_copy_root_signature_unscaled_
++                                                            : resolve_copy_root_signature_);
+           command_list.D3DSetComputeRootDescriptorTable(2, descriptor_source.second);
+           command_list.D3DSetComputeRootDescriptorTable(1, descriptor_dest.second);
+-          if (draw_resolution_scaled) {
++          if (copy_scaled) {
+             command_list.D3DSetComputeRoot32BitConstants(
+                 0, sizeof(copy_shader_constants.dest_relative) / sizeof(uint32_t),
+                 &copy_shader_constants.dest_relative, 0);
+@@ -1306,22 +1445,24 @@ bool D3D12RenderTargetCache::Resolve(const memory::Memory& memory, D3D12SharedMe
+             command_list.D3DSetComputeRoot32BitConstants(
+                 0, sizeof(copy_shader_constants) / sizeof(uint32_t), &copy_shader_constants, 0);
+           }
+-          command_processor_.SetExternalPipeline(resolve_copy_pipelines_[size_t(copy_shader)]);
++          command_processor_.SetExternalPipeline(
++              (copy_unscaled ? resolve_copy_pipelines_unscaled_
++                             : resolve_copy_pipelines_)[size_t(copy_shader)]);
+           command_processor_.SubmitBarriers();
+           command_list.D3DDispatch(copy_group_count_x, copy_group_count_y, 1);
+ 
+           // Order the resolve with other work using the destination as a UAV.
+-          if (draw_resolution_scaled) {
++          if (copy_scaled) {
+             texture_cache.MarkCurrentScaledResolveRangeUAVWritesCommitNeeded();
+           } else {
+             shared_memory.MarkUAVWritesCommitNeeded();
+           }
+ 
+           // Invalidate textures and mark the range as scaled if needed.
+-          texture_cache.MarkRangeAsResolved(resolve_info.copy_dest_extent_start,
+-                                            resolve_info.copy_dest_extent_length);
+-          written_address_out = resolve_info.copy_dest_extent_start;
+-          written_length_out = resolve_info.copy_dest_extent_length;
++          texture_cache.MarkRangeAsResolved(copy_info.copy_dest_extent_start,
++                                            copy_info.copy_dest_extent_length, !copy_unscaled);
++          written_address_out = copy_info.copy_dest_extent_start;
++          written_length_out = copy_info.copy_dest_extent_length;
+           copied = true;
+         }
+       } else {
+@@ -1411,6 +1552,31 @@ bool D3D12RenderTargetCache::Resolve(const memory::Memory& memory, D3D12SharedMe
+             command_processor_.SubmitBarriers();
+             command_list.D3DDispatch(clear_group_count.first, clear_group_count.second, 1);
+           }
++          // Clear depth in the unscaled EDRAM region too, for unscaled passes.
++          ui::d3d12::util::DescriptorCpuGpuHandlePair descriptor_edram_unscaled;
++          if (clear_depth && edram_unscaled_depth_pitch_ &&
++              command_processor_.RequestOneUseSingleViewDescriptors(1,
++                                                                    &descriptor_edram_unscaled)) {
++            const ui::d3d12::D3D12Provider& provider = command_processor_.GetD3D12Provider();
++            provider.GetDevice()->CopyDescriptorsSimple(
++                1, descriptor_edram_unscaled.first,
++                provider.OffsetViewDescriptor(
++                    edram_buffer_descriptor_heap_start_,
++                    uint32_t(EdramBufferDescriptorIndex::kUnscaledR32G32B32A32UintUAV)),
++                D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
++            command_list.D3DSetComputeRootDescriptorTable(1, descriptor_edram_unscaled.second);
++            draw_util::ResolveClearShaderConstants depth_clear_constants_unscaled;
++            resolve_info_unscaled.GetDepthClearShaderConstants(depth_clear_constants_unscaled);
++            command_list.D3DSetComputeRoot32BitConstants(
++                0, sizeof(depth_clear_constants_unscaled) / sizeof(uint32_t),
++                &depth_clear_constants_unscaled, 0);
++            command_processor_.SetExternalPipeline(resolve_rov_clear_32bpp_pipeline_unscaled_);
++            command_processor_.SubmitBarriers();
++            std::pair<uint32_t, uint32_t> clear_group_count_unscaled =
++                resolve_info_unscaled.GetClearShaderGroupCount(1, 1);
++            command_list.D3DDispatch(clear_group_count_unscaled.first,
++                                     clear_group_count_unscaled.second, 1);
++          }
+           MarkEdramBufferModified();
+           cleared = true;
+         }
+diff --git a/src/graphics/pipeline/shader/dxbc_translator.cpp b/src/graphics/pipeline/shader/dxbc_translator.cpp
+index 2c31a0e..13b587c 100644
+--- a/src/graphics/pipeline/shader/dxbc_translator.cpp
++++ b/src/graphics/pipeline/shader/dxbc_translator.cpp
+@@ -79,13 +79,15 @@ DxbcShaderTranslator::DxbcShaderTranslator(ui::GraphicsProvider::GpuVendorID ven
+ }
+ DxbcShaderTranslator::~DxbcShaderTranslator() = default;
+ 
+-std::vector<uint8_t> DxbcShaderTranslator::CreateDepthOnlyPixelShader() {
++std::vector<uint8_t> DxbcShaderTranslator::CreateDepthOnlyPixelShader(bool edram_unscaled) {
+   is_depth_only_pixel_shader_ = true;
+   // TODO(Triang3l): Handle in a nicer way (is_depth_only_pixel_shader_ is a
+   // leftover from when a Shader object wasn't used during translation).
+   Shader shader(xenos::ShaderType::kPixel, 0, nullptr, 0);
+   shader.AnalyzeUcode(instruction_disassembly_buffer_);
+-  Shader::Translation& translation = *shader.GetOrCreateTranslation(0);
++  Modification modification;
++  modification.pixel.edram_unscaled = uint32_t(edram_unscaled);
++  Shader::Translation& translation = *shader.GetOrCreateTranslation(modification.value);
+   TranslateAnalyzedShader(translation);
+   is_depth_only_pixel_shader_ = false;
+   return translation.translated_binary();
+@@ -658,13 +660,13 @@ void DxbcShaderTranslator::StartPixelShader() {
+     in_position_used_ |= 0b0011;
+     a_.OpRoundNI(dxbc::Dest::R(param_gen_temp, 0b0011), dxbc::Src::V1D(in_reg_ps_position_));
+     uint32_t resolution_scaled_axes =
+-        uint32_t(draw_resolution_scale_x_ > 1) | (uint32_t(draw_resolution_scale_y_ > 1) << 1);
++        uint32_t(edram_scale_x_ > 1) | (uint32_t(edram_scale_y_ > 1) << 1);
+     if (resolution_scaled_axes) {
+       // Revert resolution scale - after truncating, so if the pixel position
+       // is passed to tfetch (assuming the game doesn't round it by itself),
+       // it will be sampled with higher resolution too.
+       a_.OpMul(dxbc::Dest::R(param_gen_temp, resolution_scaled_axes), dxbc::Src::R(param_gen_temp),
+-               dxbc::Src::LF(1.0f / draw_resolution_scale_x_, 1.0f / draw_resolution_scale_y_, 1.0f,
++               dxbc::Src::LF(1.0f / edram_scale_x_, 1.0f / edram_scale_y_, 1.0f,
+                              1.0f));
+     }
+     if (shader_modification.pixel.param_gen_point) {
+@@ -724,7 +726,7 @@ void DxbcShaderTranslator::StartPixelShader() {
+     dxbc::Src memexport_enabled_src(
+         dxbc::Src::R(system_temp_memexport_enabled_and_eM_written_, dxbc::Src::kXXXX));
+     uint32_t resolution_scaled_axes =
+-        uint32_t(draw_resolution_scale_x_ > 1) | (uint32_t(draw_resolution_scale_y_ > 1) << 1);
++        uint32_t(edram_scale_x_ > 1) | (uint32_t(edram_scale_y_ > 1) << 1);
+     if (resolution_scaled_axes) {
+       uint32_t memexport_condition_temp = PushSystemTemp();
+       // Only do memexport for one host pixel in a guest pixel - prefer the
+@@ -737,10 +739,10 @@ void DxbcShaderTranslator::StartPixelShader() {
+                 dxbc::Src::V1D(in_reg_ps_position_));
+       a_.OpUDiv(dxbc::Dest::Null(), dxbc::Dest::R(memexport_condition_temp, resolution_scaled_axes),
+                 dxbc::Src::R(memexport_condition_temp),
+-                dxbc::Src::LU(draw_resolution_scale_x_, draw_resolution_scale_y_, 0, 0));
++                dxbc::Src::LU(edram_scale_x_, edram_scale_y_, 0, 0));
+       a_.OpIEq(dxbc::Dest::R(memexport_condition_temp, resolution_scaled_axes),
+                dxbc::Src::R(memexport_condition_temp),
+-               dxbc::Src::LU(draw_resolution_scale_x_ >> 1, draw_resolution_scale_y_ >> 1, 0, 0));
++               dxbc::Src::LU(edram_scale_x_ >> 1, edram_scale_y_ >> 1, 0, 0));
+       for (uint32_t i = 0; i < 2; ++i) {
+         if (!(resolution_scaled_axes & (1 << i))) {
+           continue;
+@@ -772,6 +774,16 @@ void DxbcShaderTranslator::StartPixelShader() {
+ void DxbcShaderTranslator::StartTranslation() {
+   // Set up the input and output registers.
+   Modification shader_modification = GetDxbcShaderModification();
++  if (is_pixel_shader() && shader_modification.pixel.edram_unscaled) {
++    edram_scale_x_ = 1;
++    edram_scale_y_ = 1;
++    edram_dword_offset_ = xenos::kEdramSizeBytes / sizeof(uint32_t) *
++                          (draw_resolution_scale_x_ * draw_resolution_scale_y_);
++  } else {
++    edram_scale_x_ = draw_resolution_scale_x_;
++    edram_scale_y_ = draw_resolution_scale_y_;
++    edram_dword_offset_ = 0;
++  }
+   uint32_t interpolator_register_mask = GetModificationInterpolatorMask();
+   uint32_t interpolator_register_count = rex::bit_count(interpolator_register_mask);
+   if (is_vertex_shader()) {
+diff --git a/src/graphics/pipeline/shader/dxbc_translator_om.cpp b/src/graphics/pipeline/shader/dxbc_translator_om.cpp
+index a7d508a..a2164d4 100644
+--- a/src/graphics/pipeline/shader/dxbc_translator_om.cpp
++++ b/src/graphics/pipeline/shader/dxbc_translator_om.cpp
+@@ -62,9 +62,9 @@ void DxbcShaderTranslator::StartPixelShader_LoadROVParameters() {
+   //   dividing by 40, not by 80.
+   // For depth-only:
+   //   Same, but for full 80x16 tiles, not 40x16 half-tiles.
+-  uint32_t tile_width = xenos::kEdramTileWidthSamples * draw_resolution_scale_x_;
++  uint32_t tile_width = xenos::kEdramTileWidthSamples * edram_scale_x_;
+   uint32_t tile_or_tile_half_width = tile_width >> uint32_t(any_color_targets_written);
+-  uint32_t tile_height = xenos::kEdramTileHeightSamples * draw_resolution_scale_y_;
++  uint32_t tile_height = xenos::kEdramTileHeightSamples * edram_scale_y_;
+   // system_temp_rov_params_.x = X sample 0 position within the half-tile or
+   //                             tile
+   // system_temp_rov_params_.y = Y sample 0 position within the (half-)tile
+@@ -323,6 +323,12 @@ void DxbcShaderTranslator::StartPixelShader_LoadROVParameters() {
+   a_.OpUDiv(dxbc::Dest::Null(), dxbc::Dest::R(system_temp_rov_params_, 0b0010),
+             dxbc::Src::R(system_temp_rov_params_, dxbc::Src::kYYYY),
+             dxbc::Src::LU(tile_size * xenos::kEdramTileCount));
++  if (edram_dword_offset_) {
++    // Unscaled pass: its EDRAM is placed after the scaled EDRAM.
++    a_.OpIAdd(dxbc::Dest::R(system_temp_rov_params_, 0b0010),
++              dxbc::Src::R(system_temp_rov_params_, dxbc::Src::kYYYY),
++              dxbc::Src::LU(edram_dword_offset_));
++  }
+ 
+   // ***************************************************************************
+   // Sample coverage to system_temp_rov_params_.x.
+@@ -1010,7 +1016,7 @@ void DxbcShaderTranslator::ROV_DepthStencilTest() {
+     // Go to the next sample (samples are at +0, +(80*scale_x), +1,
+     // +(80*scale_x+1), so need to do +(80*scale_x), -(80*scale_x-1),
+     // +(80*scale_x) and -(80*scale_x+1) after each sample).
+-    uint32_t tile_width = xenos::kEdramTileWidthSamples * draw_resolution_scale_x_;
++    uint32_t tile_width = xenos::kEdramTileWidthSamples * edram_scale_x_;
+     a_.OpIAdd(dxbc::Dest::R(system_temp_rov_params_, 0b0010),
+               dxbc::Src::R(system_temp_rov_params_, dxbc::Src::kYYYY),
+               dxbc::Src::LI((i & 1) ? -int32_t(tile_width) + 2 - i : int32_t(tile_width)));
+@@ -1828,7 +1834,7 @@ void DxbcShaderTranslator::CompletePixelShader_WriteToROV() {
+   dxbc::Dest temp_w_dest(dxbc::Dest::R(temp, 0b1000));
+   dxbc::Src temp_w_src(dxbc::Src::R(temp, dxbc::Src::kWWWW));
+ 
+-  uint32_t tile_width = xenos::kEdramTileWidthSamples * draw_resolution_scale_x_;
++  uint32_t tile_width = xenos::kEdramTileWidthSamples * edram_scale_x_;
+ 
+   // Do late depth/stencil test (which includes writing) if needed or deferred
+   // depth writing.
+@@ -1881,7 +1887,7 @@ void DxbcShaderTranslator::CompletePixelShader_WriteToROV() {
+ 
+   // Write color values.
+   uint32_t shader_writes_color_targets = current_shader().writes_color_targets();
+-  uint32_t edram_size_32bpp_samples = (xenos::kEdramTileHeightSamples * draw_resolution_scale_y_) *
++  uint32_t edram_size_32bpp_samples = (xenos::kEdramTileHeightSamples * edram_scale_y_) *
+                                       tile_width * xenos::kEdramTileCount;
+   for (uint32_t i = 0; i < 4; ++i) {
+     if (!(shader_writes_color_targets & (1 << i))) {
+@@ -1950,6 +1956,11 @@ void DxbcShaderTranslator::CompletePixelShader_WriteToROV() {
+     a_.OpUDiv(dxbc::Dest::Null(), dxbc::Dest::R(system_temp_rov_params_, 0b0010),
+               dxbc::Src::R(system_temp_rov_params_, dxbc::Src::kYYYY),
+               dxbc::Src::LU(edram_size_32bpp_samples));
++    if (edram_dword_offset_) {
++      a_.OpIAdd(dxbc::Dest::R(system_temp_rov_params_, 0b0010),
++                dxbc::Src::R(system_temp_rov_params_, dxbc::Src::kYYYY),
++                dxbc::Src::LU(edram_dword_offset_));
++    }
+ 
+     dxbc::Src rt_blend_factors_ops_src(LoadSystemConstant(
+         SystemConstants::Index::kEdramRTBlendFactorsOps,
+diff --git a/src/graphics/pipeline/texture/cache.cpp b/src/graphics/pipeline/texture/cache.cpp
+index 469cd1f..c7ea183 100644
+--- a/src/graphics/pipeline/texture/cache.cpp
++++ b/src/graphics/pipeline/texture/cache.cpp
+@@ -323,14 +323,18 @@ void TextureCache::BeginFrame() {
+   ResetTextureBindings();
+ }
+ 
+-void TextureCache::MarkRangeAsResolved(uint32_t start_unscaled, uint32_t length_unscaled) {
++void TextureCache::MarkRangeAsResolved(uint32_t start_unscaled, uint32_t length_unscaled,
++                                       bool scaled) {
+   if (length_unscaled == 0) {
+     return;
+   }
+   start_unscaled &= 0x1FFFFFFF;
+   length_unscaled = std::min(length_unscaled, 0x20000000 - start_unscaled);
+ 
+-  if (IsDrawResolutionScaled()) {
++  if (IsDrawResolutionScaled() && !scaled) {
++    auto global_lock = global_critical_region_.Acquire();
++    ClearScaledResolvePages(start_unscaled >> 12, (start_unscaled + length_unscaled - 1) >> 12);
++  } else if (IsDrawResolutionScaled()) {
+     uint32_t page_first = start_unscaled >> 12;
+     uint32_t page_last = (start_unscaled + length_unscaled - 1) >> 12;
+     uint32_t block_first = page_first >> 5;

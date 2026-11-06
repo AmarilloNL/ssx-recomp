@@ -111,6 +111,20 @@ void SsxApplyStartupSettings() {
   if (rex::cvar::GetFlagSource("readback_resolve_max_size") == rex::cvar::Source::kDefault) {
     rex::cvar::SetFlagByName("readback_resolve_max_size", "4096");
   }
+  // Flare light textures (night Deadly Descents, e.g. Denali > Emergency Exit): at load the game
+  // renders each flare into a 512x256 target, resolves it with mips and compresses it to DXT1 on
+  // the CPU. Without the resolved data in memory the flares projected noise and stale blocks onto
+  // the snow. These one-off resolves are read back right away; per-frame ones stay delayed.
+  if (rex::cvar::GetFlagSource("readback_resolve_one_off_sync") == rex::cvar::Source::kDefault) {
+    rex::cvar::SetFlagByName("readback_resolve_one_off_sync", "true");
+  }
+
+  // Shadow maps (depth-only passes at EDRAM pitch 1040: 1024x1024 cascades, and 512x512 with
+  // 4x MSAA) are drawn and resolved at 1x with resolution scaling. At 4x they cost ~4.7 of
+  // 23 ms per frame scaled, ~0.7 ms at 1x (Grand Golliat start line).
+  if (rex::cvar::GetFlagSource("rov_unscaled_depth_pitch") == rex::cvar::Source::kDefault) {
+    rex::cvar::SetFlagByName("rov_unscaled_depth_pitch", "1040");
+  }
 
   // Scales above 4 are untested in SSX.
   // (resolution_scale lives in the GPU plugin, which must be loaded by now.)

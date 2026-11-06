@@ -264,3 +264,25 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   (RTX 4080 SUPER, uncapped, ROV): 2x ~120, 3x 76, 4x 43, GPU 99%. The RTV path is far slower at
   4x (23). Render sizes: 3x = 3600x1920, 4x = 4800x2560 (from the 1200x640 "high" size).
   Next lever if 4x needs more fps: shadow maps at 1x (per-render-target scale), see 2x perf notes.
+- 2026-11-06: 4x performance: shadow maps drawn at 1x (patch 0009, `rov_unscaled_depth_pitch`,
+  SSX default 1040). GPU timestamp profile at 4x (Grand Golliat start line, 23 ms/frame): shadow
+  passes (depth-only, EDRAM pitch 1040: 1024x1024 cascades and 512x512 4x MSAA) 3.0 ms, their
+  resolves 0.5 ms, the scaled 1024x3072 atlas texture load 1.2 ms. ROV draws of those passes now
+  use 1x shader variants (pixel shader modification bit, 1x depth-only shader, 1x viewport/scissor
+  and system constants) that address an unscaled EDRAM region placed after the scaled EDRAM in
+  the same buffer; depth resolves from it use the unscaled copy pipelines and mark the
+  destination as not scaled, so the atlas loads at 1x; depth clears also clear that region.
+  Result at 4x: start line 43 -> 49-52 fps, mid-race 47 -> 57-60; 3x 76 -> 83; shadows look the
+  same apart from 1x edge sharpness. Remaining 4x cost: scaled texture loads (~3 ms, a load
+  shader writes a buffer that is then copied into the texture) and resolves (~2 ms).
+- 2026-11-06: Flare noise (user video, Alaska > Denali > Emergency Exit, night): yellow/green
+  blocky noise or flat orange bands on the snow lit by flares, on both render paths, random per
+  run. At level load SSX renders each flare light (the skull, AVALANCHE, UNSTABLE...) into a
+  512x256 target, resolves it with mips and compresses it to DXT1 on the CPU; resolve readback
+  was limited to 4 KB (Antarctica fix), so the CPU compressed stale memory. Found by logging
+  texture loads and resolves into the light textures' range (RenderDoc showed the projected
+  512x256 BC1 textures held garbage). Fix (patch 0009, `readback_resolve_one_off_sync`, SSX
+  default on): a 2D resolve not also done in the previous frame (up to 4 MB, above the readback
+  size limit) is read back synchronously; per-frame resolves keep the delayed mode, 3D/array
+  destinations (snow volume slices, new address every frame) are excluded. No fps change.
+  Scripts: scratchpad/live/denali.ps1 (globe nav Himalayas -> Siberia -> Alaska), sheet.sh.
