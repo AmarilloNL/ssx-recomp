@@ -124,7 +124,8 @@ The game is playable and is being tested by playing through the World Tour. What
 
 - **Playing through every region** to find and fix bugs, especially the Deadly Descent mechanics
   (cold, darkness, oxygen and so on), which depend on details of the original hardware. Fixed so
-  far: Antarctica's thermal protection, yellow specks on dark rock (Africa's caves).
+  far: Antarctica's thermal protection, yellow specks on dark rock (Africa's caves), blocky
+  bands on the snow at 2x resolution scale (snow trails now show up at 2x too).
 - **Known issue:** a peak label on the world map was once seen drawn as a solid box (Africa).
   It hasn't been reproduced yet. Screenshots of it are welcome.
 - **Installer reliability** on more PCs, based on the reports in the issues.
