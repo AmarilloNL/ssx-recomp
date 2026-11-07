@@ -141,13 +141,13 @@ void SsxApplyStartupSettings() {
 }
 
 // Runs after `li r11,2` at 0x8233CB10: the device asked for present interval 2
-// (every other vblank of the 60 Hz emulated display = 30 fps). Above 60 fps
+// (every other vblank of the 60 Hz emulated display = 30 fps). Above 30 fps
 // the swap doesn't wait for vblank at all (interval 0) and the main-loop task
-// below paces frames; the runtime caps the emulated display at 240 Hz, so
-// vblank pacing can't go higher.
+// below paces frames. At 60, vblank waits on top of the 1/60 s task period
+// sent frames out in 30 + 3 ms pairs whenever the GPU lagged a little.
 void SsxPresentInterval(PPCRegister& r11) {
   int32_t fps = SsxTargetFps();
-  r11.u64 = fps <= 30 ? 2 : fps <= 60 ? 1 : 0;
+  r11.u64 = fps <= 30 ? 2 : 0;
 }
 
 // The main loop is a periodic task (vtable 0x82007738) run by the scheduler
@@ -162,7 +162,7 @@ REX_EXTERN(__imp__sub_83047248);
 REX_HOOK_RAW(sub_83047248) {
   uint32_t task = ctx.r3.u32;
   int32_t fps = SsxTargetFps();
-  if (fps > 60 && REX_LOAD_U32(task) == 0x82007738) {
+  if (fps > 30 && REX_LOAD_U32(task) == 0x82007738) {
     int64_t period = pace_period_ns.load(std::memory_order_relaxed);
     REX_STORE_U64(task + 72, uint64_t(std::max<int64_t>(period, 1000000000 / fps)));
 
@@ -181,7 +181,9 @@ REX_HOOK_RAW(sub_83047248) {
 // GPU-bound. Bound: pace at 1.04x the measured frame time (or nudge the pace up). Otherwise,
 // after a second, ease back towards the target: quickly (~5%/s) down to 4% above the lowest
 // pace that was GPU-bound in the last 10 s (a heavy moment shouldn't keep it slow), then
-// slowly (~0.25%/s) to follow lighter scenes.
+// slowly (~0.25%/s) to follow lighter scenes. When the GPU is only a little short (within
+// 15% of the target, e.g. 3x at 60 fps), remember that pace for 2 s instead: the heavy
+// moment is usually over by then, and a retry costs a few pair frames, not 10 s at ~53 fps.
 static std::atomic<int64_t> gpu_wait_ns{0};
 
 static void AddGpuWait(std::chrono::steady_clock::time_point start) {
@@ -215,34 +217,52 @@ void SsxPaceFrameEnd() {
   last = now;
   double wait = double(gpu_wait_ns.exchange(0, std::memory_order_relaxed));
   double target = 1e9 / SsxTargetFps();
-  if (SsxTargetFps() <= 60 || frame > 250e6) {  // vblank pacing, or a loading hitch
+  if (SsxTargetFps() <= 30 || frame > 250e6) {  // vblank pacing, or a loading hitch
     period = target;
     frame_avg = 0.0;
   } else {
-    // Clamped so one streaming hitch can't inflate the average (and the pace) much.
-    frame_avg = frame_avg > 0.0 ? frame_avg * 0.9 + std::min(frame, frame_avg * 2) * 0.1 : frame;
+    auto floor_memory = floor_period > target * 1.15 ? std::chrono::seconds(10) : std::chrono::seconds(2);
+    // A frame over 2.2x the pace is a one-off spike (streaming, a shader compile), not the
+    // GPU's pace: left out, or a 0.2 s spike at 60 fps paced the game at ~43 fps for 15 s.
+    // Pair frames stay under 2x.
+    bool paced = period > target * 1.001;
+    bool hitch = frame > std::max(period, target) * 2.2;
+    if (!hitch) {
+      frame_avg = frame_avg > 0.0 ? frame_avg * 0.9 + std::min(frame, frame_avg * 2) * 0.1 : frame;
+    }
     // GPU-bound: the render thread waited over a quarter of the frame, 3 frames in a row,
     // and frames come slower than the pace. A wait alone isn't enough: with GPU headroom
     // (2x) the fence blocks still wait out the GPU's latency each frame.
-    bool bound = wait > frame * 0.25 && frame_avg > std::max(period, target) * 1.02;
-    bound_frames = bound ? bound_frames + 1 : 0;
+    bool bound = !hitch && wait > frame * 0.25 && frame_avg > std::max(period, target) * 1.02;
+    bound_frames = bound ? bound_frames + 1 : hitch ? bound_frames : 0;
     // Or a pair starts: one wait longer than a whole pace period means the GPU is over a frame
     // behind. The pair (35 + 2 ms) averages out to the pace, so the test above misses it.
-    bool pair = period > target * 1.001 && wait > period * 1.25;
+    // Unpaced, 3 within a second (30 + 3 ms pairs at a 60 fps cap).
+    static clock::time_point late_start;
+    static uint32_t late_count = 0;
+    bool late = !hitch && wait > period * 1.25;
+    if (late) {
+      if (now - late_start > std::chrono::seconds(1)) {
+        late_start = now;
+        late_count = 0;
+      }
+      ++late_count;
+    }
+    bool pair = late && (paced || late_count >= 3);
     if (bound_frames >= 3 || pair) {
       bound_frames = 0;
+      late_count = 0;
       // Unpaced, the average frame time is what the GPU manages; once paced, nudge up
       // (more if the frames already take longer than the pace).
-      bool paced = period > target * 1.001;
       double bound_at = paced ? period : frame_avg;
-      if (bound_at < floor_period || now - floor_time > std::chrono::seconds(10)) {
+      if (bound_at < floor_period || now - floor_time > floor_memory) {
         floor_period = bound_at;
         floor_time = now;
       }
       period = paced ? std::max(period * 1.01, frame_avg * 1.02) : frame_avg * 1.04;
       hold_until = now + std::chrono::seconds(1);
     } else if (now > hold_until) {
-      bool floor_fresh = now - floor_time < std::chrono::seconds(10);
+      bool floor_fresh = now - floor_time < floor_memory;
       period *= period > floor_period * 1.04 || !floor_fresh ? 0.999 : 0.99995;
     }
     period = std::max(period, target);

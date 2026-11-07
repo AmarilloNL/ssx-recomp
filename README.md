@@ -120,9 +120,16 @@ the file for you.
 > delete `ssx.toml` next to `ssx.exe`.
 
 > [!WARNING]
-> **4× is limited by the graphics card, not by the port.** Even an RTX 4080 SUPER runs it at about
-> 40–50 fps, dropping to 35–40 fps in busy scenes, with hitches. For smooth play use **2×** or **3×**:
-> on a 1440p screen 3× looks almost the same as 4×.
+> **3× and 4× are limited by the graphics card, not by the port.**
+> - **4×:** even an RTX 4080 SUPER runs it at about 40–50 fps, dropping to 35–40 fps in busy
+>   scenes, with hitches.
+> - **3×:** an RTX 4080 SUPER holds a 60 fps cap almost everywhere, but heavy spots (for example
+>   riding into the cave on The Dagger) can dip to about 55 fps for a few seconds.
+>
+> When the GPU can't keep up, the game slows its pace a little so frames still come out evenly
+> instead of stuttering, and returns to full speed as soon as the scene gets lighter. You may see
+> the fps counter drop for a moment; that's expected. For a locked 60 fps use **2×**; on a 1440p
+> screen 3× looks almost the same as 4×.
 
 <details>
 <summary><b>Why is 4× so heavy, and what would it take to reach 60 fps?</b></summary>
@@ -211,6 +218,8 @@ The game is playable and is being tested by playing through the whole World Tour
 - ✅ Blocky bands on the snow at 2× resolution scale (snow trails now show up at 2× too)
 - ✅ Flickering yellow/green noise in the flare light on night Deadly Descents (Alaska)
 - ✅ Uneven frame pacing (stutter) when the GPU is at its limit, for example at 4×
+- ✅ Stutter with a 60 fps cap at 3× (frames came out in pairs, which looked like 30 fps), and
+  long slowdowns after a short spike
 
 **👀 Known issues**
 - A peak label on the world map was once seen drawn as a solid box (Africa). Not reproduced

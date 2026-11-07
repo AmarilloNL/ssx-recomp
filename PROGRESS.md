@@ -338,3 +338,20 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   without the fix 1 corruption + crash before run 3; with it 8 restarts, 0 corruption.
   Note: Explore's globe opens on the last region visited, so Explore routes aren't repeatable;
   World Tour routes are. SDK package sdk-7.
+- 2026-11-07: User report: 3x with the default 60 fps cap stutters a lot (The Dagger: TRICK IT,
+  Explore > Rockies > Extinguisher Tower). Bench (TEMPHITCH 5 ms histogram): counter 59.x fps but
+  ~90 of 300 frames 0-5 ms and ~95 at 25-35 ms per 5 s: 30 + 3 ms pairs. At 300 fps the same
+  ride ran 60-87 fps at 12-20 ms. Cause: at <= 60 fps the swap used present interval 1 (wait for
+  the emulated 60 Hz vblank) on top of the 1/60 s main-loop task period, and the adaptive pacer
+  was off. Fix: 60 fps uses interval 0 plus the task period and the pacer like higher caps (only
+  30 keeps vblank pacing). A/B Whitehorn 3x/60: pairs 150-240 per 5 s -> none, max 33-49 ->
+  17-19 ms, race clock identical (game speed unchanged).
+  Then two pacer fixes from TEMPPACE/TEMPBOUND logs of the user's runs: (1) a 0.2 s spike
+  (frames 40-73 ms, full GPU waits) counted as GPU-bound and paced 3x/60 at ~43 fps for ~15 s
+  (floor kept 10 s): frames over 2.2x the pace are now left out of the average and the bound /
+  pair tests. (2) Pairs at the target itself weren't caught (pair test required pacing): now 3
+  late frames (wait > 1.25 x pace) within 1 s trigger it. (3) The floor is remembered 2 s
+  instead of 10 s when it is within 15% of the target (3x/60 recovered after ~12 s, now ~3 s);
+  4x keeps 10 s. Result: one short dip to ~55 fps for 2-3 s in the cave on The Dagger (GPU
+  limit at 3x). The 70 ms spike in every session is on the first drop's loading screen
+  (harmless). Regression: Whitehorn 3x/60 steady 60, 4x 44-54 fps (as before).
