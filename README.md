@@ -104,8 +104,33 @@ the file for you.
 > [!TIP]
 > **1× + FSR** runs at very high frame rates and looks sharp. **2×** is noticeably sharper (about
 > 60% of the 1× frame rate); **3×** and **4×** need a high-end GPU (an RTX 4080 SUPER runs 4× at
-> about 50 fps). If a setting ever stops the game from starting,
+> about 40–50 fps). If a setting ever stops the game from starting,
 > delete `ssx.toml` next to `ssx.exe`.
+
+> [!WARNING]
+> **4× is limited by the graphics card, not by the port.** Even an RTX 4080 SUPER runs it at about
+> 40–50 fps, dropping to 35–40 fps in busy scenes, with hitches. For smooth play use **2×** or **3×**:
+> on a 1440p screen 3× looks almost the same as 4×.
+
+<details>
+<summary><b>Why is 4× so heavy, and what would it take to reach 60 fps?</b></summary>
+<br>
+
+- **The pixel count.** 4× draws 4800×2560 = 12.3 million pixels per frame: 16 times the 1×
+  image and more than 4K (8.3 million). Every pass the game draws (snow, lighting, particles,
+  glow, blur) is drawn at that size.
+- **Emulated console video memory.** The Xbox 360 renders into a small, fast on-chip memory. The
+  port reproduces it in shaders, which costs extra work for every pixel.
+- **Measured** on an RTX 4080 SUPER while playing: the GPU at 99% the whole time, at full clock
+  speed and well within its power and heat limits. The CPU is at about 20%. The GPU is simply
+  out of headroom.
+- **For 60 fps** a frame has to take 16.7 ms instead of the 21–28 ms measured, so the GPU would
+  have to do about a third less work. Shadows are already drawn at 1× when scaling, which was
+  worth about 15%. The rest would have to come from drawing more of the frame at a lower
+  resolution (for example glow and blur effects), which makes those parts softer. That isn't
+  available yet and may not be possible without visible differences.
+
+</details>
 
 <a id="adding-dlc"></a>
 

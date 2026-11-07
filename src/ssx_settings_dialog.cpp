@@ -338,6 +338,12 @@ void SsxSettingsDialog::DrawGraphicsTab() {
   if (!BeginRows("##graphics")) return;
   Row("Resolution scale", "Nx draws N x N times as many pixels: sharper, but much heavier on the GPU.");
   Combo("##scale", "resolution_scale", kScales, std::size(kScales));
+  if (std::atoi(rex::cvar::GetFlagByName("resolution_scale").c_str()) >= 3) {
+    ImGui::PushStyleColor(ImGuiCol_Text, kWarn);
+    ImGui::TextWrapped("GPU-limited: even an RTX 4080 SUPER runs 4x at about 40-50 fps, with dips "
+                       "and hitches in busy scenes. For smooth play use 2x or 3x.");
+    ImGui::PopStyleColor();
+  }
 
   Row("Upscaling", "How the image is scaled to your screen. FSR is sharpest at 1x.");
   Combo("##upscaling", "present_effect", kUpscaling, std::size(kUpscaling));
