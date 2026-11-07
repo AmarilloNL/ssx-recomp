@@ -220,6 +220,7 @@ The game is playable and is being tested by playing through the whole World Tour
 - ✅ Uneven frame pacing (stutter) when the GPU is at its limit, for example at 4×
 - ✅ Stutter with a 60 fps cap at 3× (frames came out in pairs, which looked like 30 fps), and
   long slowdowns after a short spike
+- ✅ Uneven frame times at 2× with an uncapped frame rate (frames jumped between 3 and 40 ms)
 
 **👀 Known issues**
 - A peak label on the world map was once seen drawn as a solid box (Africa). Not reproduced

@@ -222,11 +222,15 @@ void SsxPaceFrameEnd() {
     frame_avg = 0.0;
   } else {
     auto floor_memory = floor_period > target * 1.15 ? std::chrono::seconds(10) : std::chrono::seconds(2);
-    // A frame over 2.2x the pace is a one-off spike (streaming, a shader compile), not the
-    // GPU's pace: left out, or a 0.2 s spike at 60 fps paced the game at ~43 fps for 15 s.
-    // Pair frames stay under 2x.
+    // A frame over 2.2x the pace (or the average frame time, when the GPU is slower than the
+    // pace) is a one-off spike (streaming, a shader compile), not the GPU's pace: left out, or
+    // a 0.2 s spike at 60 fps paced the game at ~43 fps for 15 s. Pair frames stay under 2x.
+    // 8 in a row aren't a spike but a heavier scene.
+    static uint32_t hitch_run = 0;
     bool paced = period > target * 1.001;
-    bool hitch = frame > std::max(period, target) * 2.2;
+    bool long_frame = frame_avg > 0.0 && frame > std::max(period, frame_avg) * 2.2;
+    hitch_run = long_frame ? hitch_run + 1 : 0;
+    bool hitch = long_frame && hitch_run <= 8;
     if (!hitch) {
       frame_avg = frame_avg > 0.0 ? frame_avg * 0.9 + std::min(frame, frame_avg * 2) * 0.1 : frame;
     }
@@ -266,9 +270,10 @@ void SsxPaceFrameEnd() {
       period *= period > floor_period * 1.04 || !floor_fresh ? 0.999 : 0.99995;
     }
     period = std::max(period, target);
-    // Only pace below 100 fps: faster, the hitch is too short to feel and pacing costs
-    // ~12% fps (measured at 1x and 2x).
-    if (period < 10e6) period = target;
+    // Only pace below 150 fps: faster, the hitch is too short to feel and pacing costs
+    // ~12% fps (measured at 1x and 2x). 2x at ~105 fps unpaced swung between 3 and 20 ms
+    // frames, which shows.
+    if (period < 6.67e6) period = target;
   }
   pace_period_ns.store(int64_t(period), std::memory_order_relaxed);
 }

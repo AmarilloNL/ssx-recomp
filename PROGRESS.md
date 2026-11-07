@@ -355,3 +355,12 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   4x keeps 10 s. Result: one short dip to ~55 fps for 2-3 s in the cave on The Dagger (GPU
   limit at 3x). The 70 ms spike in every session is on the first drop's loading screen
   (harmless). Regression: Whitehorn 3x/60 steady 60, 4x 44-54 fps (as before).
+- 2026-11-07: User: micro dips at 2x, frame rate "match display" (300). The Dagger at 2x/300:
+  ~105 fps, unpaced (pacing was only below 100 fps), frames spread 0-20 ms (~110 per 5 s under
+  5 ms, ~75 at 15-20) plus a 35-40 ms frame every 5-10 s. Also found: the spike filter compared
+  frames with the target (3.3 ms at 300), so at 2x most real frames counted as spikes and
+  frame_avg only saw the short ones. Fix: spikes are > 2.2x max(pace, frame_avg), 8 long frames
+  in a row count (heavier scene); pace up to 150 fps (period < 6.67 ms -> target). Result on the
+  same ride: ~90 fps, 280-410 of ~450 frames at 10-15 ms, max 19-24 ms. User: dips "way less".
+  Open: the SSX title logo drawn over Psymon's portrait in rider select at 2x right after boot
+  (stale upscaled resolve data; like the 2026-11-02 fix, but no race before it).
