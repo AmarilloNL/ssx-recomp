@@ -13,6 +13,10 @@ REXCVAR_DECLARE(int32_t, ssx_volume);
 // main display's refresh rate).
 int32_t SsxTargetFps();
 
+// Adaptive frame pacing above 60 fps when the GPU can't keep up; call once per
+// presented frame (VdSwap).
+void SsxPaceFrameEnd();
+
 // Pushes SSX settings into the runtime; call from OnPreSetup after the GPU
 // plugin is loaded (its cvars must exist).
 void SsxApplyStartupSettings();

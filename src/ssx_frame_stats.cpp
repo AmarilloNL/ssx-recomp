@@ -11,6 +11,7 @@
 #include <rex/logging.h>
 
 #include "ssx_runtime_export.h"
+#include "ssx_settings.h"
 
 
 namespace {
@@ -45,6 +46,7 @@ extern "C" REX_FUNC(__imp__VdSwap) {
     window_start = clock::now();
   }
 
+  SsxPaceFrameEnd();
   original(ctx, base);
 }
 

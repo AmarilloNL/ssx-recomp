@@ -296,3 +296,19 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   host drain (none measured), not the frame queue depth (2/3/4 frames in flight all the same),
   not memexport readback, not CPU running ahead (a 50 fps cap pairs too). Points at a guest
   wait on GPU progress at ~15 Hz; not found yet.
+- 2026-11-06/07: 4x stutter traced and fixed. Render thread timeline (hooks on the D3D wait
+  loops, the sub_82335DE0 callers): every ~3rd frame game code 0x8273859C (sub_82738568,
+  virtual; frees/updates an object after the GPU is done with it) calls sub_8232C258 = D3D
+  block on the object's fence (+52). With the GPU queue full that waits a whole frame, then two
+  VdSwaps go out within 3 ms. Not avoidable by skipping (memory reuse). Fix: adaptive pacing
+  (SsxPaceFrameEnd, called from VdSwap; hooks on sub_8233D770 = per-frame throttle and
+  sub_8232C258 measure the render thread's GPU wait per frame): when GPU-bound (wait > 25% of
+  the frame AND frames slower than the pace, 3 frames in a row) pace the main loop 4% above the
+  GPU-bound frame time, then ease back (fast while above the 10 s floor, slowly near it).
+  The wait alone is not a GPU-bound signal: at 2x the fence blocks wait out GPU latency every
+  frame, which made the first version ratchet 2x down to ~85 fps. Frame samples are clamped to
+  2x the average so a streaming hitch can't inflate the pace. Pacing only below 100 fps: above
+  that the pairs are ~1-2 ms and pacing cost ~12% (1x/2x). Result, Grand Golliat ride at 4x:
+  49-52 fps with ~10 pairs per 5 s at scene changes (was ~75); 2x 125-175 fps, 1x unchanged.
+  Bench note: this PC's absolute fps varies a lot between hours (old build 1x 237 -> 193);
+  compare builds back to back only.

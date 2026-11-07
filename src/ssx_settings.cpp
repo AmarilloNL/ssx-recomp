@@ -6,6 +6,7 @@
 #include "ssx_settings.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <fstream>
 #include <set>
@@ -154,14 +155,98 @@ void SsxPresentInterval(PPCRegister& r11) {
 // (ns, u64 at +72) has elapsed, passing the measured frame time (+132) to the
 // game, so the simulation keeps real-time speed at any rate. The game keeps
 // the period at 1/60 s; rewrite it before every pass.
+// Main-loop period from the adaptive pacing below (SsxPaceFrameEnd), 0 until set.
+static std::atomic<int64_t> pace_period_ns{0};
+
 REX_EXTERN(__imp__sub_83047248);
 REX_HOOK_RAW(sub_83047248) {
   uint32_t task = ctx.r3.u32;
   int32_t fps = SsxTargetFps();
   if (fps > 60 && REX_LOAD_U32(task) == 0x82007738) {
-    REX_STORE_U64(task + 72, uint64_t(1000000000 / fps));
+    int64_t period = pace_period_ns.load(std::memory_order_relaxed);
+    REX_STORE_U64(task + 72, uint64_t(std::max<int64_t>(period, 1000000000 / fps)));
   }
   __imp__sub_83047248(ctx, base);
+}
+
+// Adaptive pacing when the host GPU can't reach the target rate (e.g. 4x resolution scale):
+// about 15 times a second the game blocks until the GPU is done with something the previous
+// frame used (game code 0x8273859C -> sub_8232C258, a D3D block on fence), and with a full
+// GPU queue that costs a whole extra frame, then the next frame goes out at once (35 + 3 ms
+// pairs at 4x). Pacing the main loop a little below what the GPU manages keeps the queue
+// short: those blocks then return at once and frames come out evenly.
+// The signal is the time the render thread spends waiting for the GPU in the game's
+// per-frame throttle (sub_8233D770) and in those blocks: near 0 when paced, ~a frame when
+// GPU-bound. Bound: pace at 1.04x the measured frame time (or nudge the pace up). Otherwise,
+// after a second, ease back towards the target: quickly (~5%/s) down to 4% above the lowest
+// pace that was GPU-bound in the last 10 s (a heavy moment shouldn't keep it slow), then
+// slowly (~0.25%/s) to follow lighter scenes.
+static std::atomic<int64_t> gpu_wait_ns{0};
+
+static void AddGpuWait(std::chrono::steady_clock::time_point start) {
+  gpu_wait_ns.fetch_add(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start)
+          .count(),
+      std::memory_order_relaxed);
+}
+
+REX_EXTERN(__imp__sub_8233D770);
+REX_HOOK_RAW(sub_8233D770) {
+  auto start = std::chrono::steady_clock::now();
+  __imp__sub_8233D770(ctx, base);
+  AddGpuWait(start);
+}
+
+REX_EXTERN(__imp__sub_8232C258);
+REX_HOOK_RAW(sub_8232C258) {
+  auto start = std::chrono::steady_clock::now();
+  __imp__sub_8232C258(ctx, base);
+  AddGpuWait(start);
+}
+
+void SsxPaceFrameEnd() {
+  using clock = std::chrono::steady_clock;
+  static clock::time_point last = clock::now(), hold_until = clock::now(), floor_time;
+  static double frame_avg = 0.0, period = 0.0, floor_period = 0.0;
+  static uint32_t bound_frames = 0;
+  auto now = clock::now();
+  double frame = double(std::chrono::duration_cast<std::chrono::nanoseconds>(now - last).count());
+  last = now;
+  double wait = double(gpu_wait_ns.exchange(0, std::memory_order_relaxed));
+  double target = 1e9 / SsxTargetFps();
+  if (SsxTargetFps() <= 60 || frame > 250e6) {  // vblank pacing, or a loading hitch
+    period = target;
+    frame_avg = 0.0;
+  } else {
+    // Clamped so one streaming hitch can't inflate the average (and the pace) much.
+    frame_avg = frame_avg > 0.0 ? frame_avg * 0.9 + std::min(frame, frame_avg * 2) * 0.1 : frame;
+    // GPU-bound: the render thread waited over a quarter of the frame, 3 frames in a row,
+    // and frames come slower than the pace. A wait alone isn't enough: with GPU headroom
+    // (2x) the fence blocks still wait out the GPU's latency each frame.
+    bool bound = wait > frame * 0.25 && frame_avg > std::max(period, target) * 1.02;
+    bound_frames = bound ? bound_frames + 1 : 0;
+    if (bound_frames >= 3) {
+      bound_frames = 0;
+      // Unpaced, the average frame time is what the GPU manages; once paced, nudge up
+      // (more if the frames already take longer than the pace).
+      bool paced = period > target * 1.001;
+      double bound_at = paced ? period : frame_avg;
+      if (bound_at < floor_period || now - floor_time > std::chrono::seconds(10)) {
+        floor_period = bound_at;
+        floor_time = now;
+      }
+      period = paced ? std::max(period * 1.01, frame_avg * 1.02) : frame_avg * 1.04;
+      hold_until = now + std::chrono::seconds(1);
+    } else if (now > hold_until) {
+      bool floor_fresh = now - floor_time < std::chrono::seconds(10);
+      period *= period > floor_period * 1.04 || !floor_fresh ? 0.999 : 0.99995;
+    }
+    period = std::max(period, target);
+    // Only pace below 100 fps: faster, the hitch is too short to feel and pacing costs
+    // ~12% fps (measured at 1x and 2x).
+    if (period < 10e6) period = target;
+  }
+  pace_period_ns.store(int64_t(period), std::memory_order_relaxed);
 }
 
 // Scheduler clock (ns) for the tasks above; the original is a millisecond tick
