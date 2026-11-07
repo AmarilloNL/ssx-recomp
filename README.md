@@ -9,7 +9,7 @@
 [![Direct3D 12](https://img.shields.io/badge/Direct3D-12-7a3cff?style=for-the-badge)](#features)
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge)](LICENSE)
 
-[**⬇️ Download**](../../releases/latest) · [✨ Features](#features) · [🛠️ Install](#installing) · [🎮 Controls](#playing) · [📦 DLC](#adding-dlc) · [🗺️ Roadmap](#roadmap)
+[**⬇️ Download**](../../releases/latest) · [🎬 Gameplay](#gameplay) · [✨ Features](#features) · [🛠️ Install](#installing) · [🎮 Controls](#playing) · [📦 DLC](#adding-dlc) · [🗺️ Roadmap](#roadmap)
 
 </div>
 
@@ -25,6 +25,18 @@
 A native Windows build of EA's *SSX* (2012), made by statically recompiling the Xbox 360
 executable to x86-64 with the [ReXGlue SDK](https://github.com/rexglue/rexglue-sdk). The game's
 code runs natively, and its Xbox 360 graphics are translated to Direct3D 12.
+
+<a id="gameplay"></a>
+
+## 🎬 Gameplay
+
+<div align="center">
+
+[![SSX (2012) Native PC Port at High FPS – Pure Gameplay (No Emulator)](https://img.youtube.com/vi/ibGjbR-AqRo/maxresdefault.jpg)](https://www.youtube.com/watch?v=ibGjbR-AqRo)
+
+▶️ *[SSX (2012) Native PC Port at High FPS – Pure Gameplay (No Emulator)](https://www.youtube.com/watch?v=ibGjbR-AqRo)*
+
+</div>
 
 <a id="features"></a>
 
