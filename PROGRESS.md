@@ -324,3 +324,17 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   readback_resolve_one_off_sync (off: same pairs).
   Open: user's installed build hit DEVICE_HUNG (TDR) at 4x ~108 s into a run on another
   mountain, nothing logged before it.
+- 2026-11-07: GPU hang (DEVICE_HUNG / TDR) at 4x after restarting a drop (user: Explore >
+  Rockies > Extinguisher Tower > Wrecking Crew; reproduced on other drops too, any restart).
+  Found with the D3D12 debug layer (--d3d12_debug=true) plus a temporary ID3D12InfoQueue1
+  message callback logging a stack (RtlCaptureStackBackTrace, symbolized with llvm-symbolizer
+  --relative-address on the RelWithDebInfo *rd.dll): "CORRUPTION: ID3D12Resource final-release
+  while referenced by GPU operations in flight" from EvictOldReadbackBuffers. Its size limit
+  (256 entries) evicts recently used readback buffers and Released them at once, while a copy
+  into them was still in flight. Since patch 0009 every resolve makes an entry (resolve_count),
+  so the limit is hit often, and a drop restart bursts past it. Fix (patch 0010): evicted
+  buffers go to resources_for_deletion_ (released once the submission completes). A/B with the
+  debug layer, scratchpad/live/whrestart.ps1 (World Tour > Rockies > Whitehorn, restart x8):
+  without the fix 1 corruption + crash before run 3; with it 8 restarts, 0 corruption.
+  Note: Explore's globe opens on the last region visited, so Explore routes aren't repeatable;
+  World Tour routes are. SDK package sdk-7.
