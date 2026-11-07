@@ -165,6 +165,7 @@ REX_HOOK_RAW(sub_83047248) {
   if (fps > 60 && REX_LOAD_U32(task) == 0x82007738) {
     int64_t period = pace_period_ns.load(std::memory_order_relaxed);
     REX_STORE_U64(task + 72, uint64_t(std::max<int64_t>(period, 1000000000 / fps)));
+
   }
   __imp__sub_83047248(ctx, base);
 }
@@ -225,7 +226,10 @@ void SsxPaceFrameEnd() {
     // (2x) the fence blocks still wait out the GPU's latency each frame.
     bool bound = wait > frame * 0.25 && frame_avg > std::max(period, target) * 1.02;
     bound_frames = bound ? bound_frames + 1 : 0;
-    if (bound_frames >= 3) {
+    // Or a pair starts: one wait longer than a whole pace period means the GPU is over a frame
+    // behind. The pair (35 + 2 ms) averages out to the pace, so the test above misses it.
+    bool pair = period > target * 1.001 && wait > period * 1.25;
+    if (bound_frames >= 3 || pair) {
       bound_frames = 0;
       // Unpaced, the average frame time is what the GPU manages; once paced, nudge up
       // (more if the frames already take longer than the pace).

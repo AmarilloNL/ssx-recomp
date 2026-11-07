@@ -312,3 +312,15 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   49-52 fps with ~10 pairs per 5 s at scene changes (was ~75); 2x 125-175 fps, 1x unchanged.
   Bench note: this PC's absolute fps varies a lot between hours (old build 1x 237 -> 193);
   compare builds back to back only.
+- 2026-11-07: User report: 4x on Rockies > Whitehorn Mountain stutters a lot at ~42 fps
+  (ssx_framerate=0 = match monitor, 300 Hz). Reproduced with scratchpad/live/whitehorn.ps1:
+  40-90 pairs (35-40 + 0-5 ms) per 5 s from ~30 s into the ride, in windows running 49-53 fps.
+  Cause: the pace drifted just below the GPU limit and the bound test missed it - a pair
+  averages out to the pace, so "frame_avg > pace" stays false, and the 2 ms frame resets the
+  3-in-a-row count. Fix: also count a single GPU wait longer than 1.25 x the pace as bound
+  (only while pacing). Result: pairs 40-90 -> 0-3 per 5 s, frames 20-25 ms, 45-51 fps.
+  Ruled out on the way: EnumDisplaySettingsW per call (1 us), the scheduler's lateness carry
+  (+112; dropping it while pacing changed nothing; task mode +52 is 1 = measured frame time),
+  readback_resolve_one_off_sync (off: same pairs).
+  Open: user's installed build hit DEVICE_HUNG (TDR) at 4x ~108 s into a run on another
+  mountain, nothing logged before it.
