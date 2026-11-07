@@ -33,7 +33,7 @@ code runs natively, and its Xbox 360 graphics are translated to Direct3D 12.
 | | |
 |---|---|
 | ⚡ **Up to 300 fps** | or match your monitor, at real-time game speed (the original runs at 30) |
-| 🖥️ **Sharper image** | 1200×640 rendering (the 360 renders 1120×584), optional 2× scale (2400×1280) |
+| 🖥️ **Sharper image** | 1200×640 rendering (the 360 renders 1120×584), optional 2×, 3× or 4× scale (up to 4800×2560) |
 | 🔍 **AMD FSR 1** | upscaling by default, plus CAS sharpening, FXAA and anisotropic filtering |
 | ⚙️ **Settings menu** | in game: **F1**, or **Back + Start** on a controller |
 | ⌨️ **Keyboard & controller** | key rebinding, vibration, deadzone |
@@ -102,8 +102,9 @@ the file for you.
 | ⌨️ **Keyboard** | WASD steer · Space jump · arrow keys = trick stick · Q/E triggers · 1/3 bumpers · Enter start · Tab back |
 
 > [!TIP]
-> **1× + FSR** runs at very high frame rates and looks sharp. **2×** is the sharpest and needs a
-> stronger GPU (about 60% of the 1× frame rate). If a setting ever stops the game from starting,
+> **1× + FSR** runs at very high frame rates and looks sharp. **2×** is noticeably sharper (about
+> 60% of the 1× frame rate); **3×** and **4×** need a high-end GPU (an RTX 4080 SUPER runs 4× at
+> about 50 fps). If a setting ever stops the game from starting,
 > delete `ssx.toml` next to `ssx.exe`.
 
 <a id="adding-dlc"></a>
@@ -171,13 +172,15 @@ The game is playable and is being tested by playing through the whole World Tour
 - ✅ Antarctica's thermal protection (the rider froze in the sun)
 - ✅ Yellow specks on dark rock (Africa's caves)
 - ✅ Blocky bands on the snow at 2× resolution scale (snow trails now show up at 2× too)
+- ✅ Flickering yellow/green noise in the flare light on night Deadly Descents (Alaska)
+- ✅ Uneven frame pacing (stutter) when the GPU is at its limit, for example at 4×
 
 **👀 Known issues**
 - A peak label on the world map was once seen drawn as a solid box (Africa). Not reproduced
   yet; screenshots are welcome.
 - Only SSX (USA) is supported.
-- 3× resolution scale and render sizes above 1200×640 aren't available: they crash or break the
-  game's own render buffers.
+- Render sizes above 1200×640 aren't available: they break the game's own render buffers. Use the
+  resolution scale instead.
 - Online features (RiderNet, global events) don't work, because EA's servers are gone.
 
 > [!TIP]

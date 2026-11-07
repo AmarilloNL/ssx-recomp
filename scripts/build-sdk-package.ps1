@@ -3,7 +3,7 @@
 # CMake's own install rules, plus AMD's signed amd_fidelityfx_dx12.dll. Needs git, cmake,
 # ninja, clang 20+ and the VS Build Tools.
 # Usage: powershell -ExecutionPolicy Bypass -File scripts\build-sdk-package.ps1 [-Out file.zip]
-param([string]$Out = "$PSScriptRoot\..\tools\rexglue-sdk-ssx-5.zip")
+param([string]$Out = "$PSScriptRoot\..\tools\rexglue-sdk-ssx-6.zip")
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path "$PSScriptRoot\..").Path
 $SdkRepo = 'https://github.com/rexglue/rexglue-sdk.git'
