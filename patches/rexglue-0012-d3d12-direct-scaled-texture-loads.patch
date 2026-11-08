@@ -1,0 +1,3758 @@
+diff --git a/include/rex/graphics/d3d12/texture_cache.h b/include/rex/graphics/d3d12/texture_cache.h
+index 4d845c7..0e874a4 100644
+--- a/include/rex/graphics/d3d12/texture_cache.h
++++ b/include/rex/graphics/d3d12/texture_cache.h
+@@ -379,6 +379,10 @@ class D3D12TextureCache final : public TextureCache {
+   }
+ 
+   LoadShaderIndex GetLoadShaderIndex(TextureKey key) const;
++  // -1, or the direct load (0: k_8_8_8_8, 1: k_24_8_FLOAT, 2: k_16_16_16_16_FLOAT) of a
++  // resolution-scaled 2D texture without mips, written straight into the texture through a
++  // UAV instead of through a buffer copied into it.
++  int GetDirectLoadVariant(TextureKey key) const;
+ 
+   static constexpr bool AreDimensionsCompatible(xenos::FetchOpDimension binding_dimension,
+                                                 xenos::DataDimension resource_dimension) {
+@@ -461,6 +465,8 @@ class D3D12TextureCache final : public TextureCache {
+   std::array<Microsoft::WRL::ComPtr<ID3D12PipelineState>, kLoadShaderCount> load_pipelines_;
+   // Load pipelines for resolution-scaled resolve targets.
+   std::array<Microsoft::WRL::ComPtr<ID3D12PipelineState>, kLoadShaderCount> load_pipelines_scaled_;
++  // See GetDirectLoadVariant.
++  std::array<Microsoft::WRL::ComPtr<ID3D12PipelineState>, 3> load_pipelines_direct_scaled_;
+ 
+   std::vector<SRVDescriptorCachePage> srv_descriptor_cache_;
+   uint32_t srv_descriptor_cache_allocated_;
+diff --git a/src/graphics/d3d12/texture_cache.cpp b/src/graphics/d3d12/texture_cache.cpp
+index 3bbb698..55b5727 100644
+--- a/src/graphics/d3d12/texture_cache.cpp
++++ b/src/graphics/d3d12/texture_cache.cpp
+@@ -51,6 +51,9 @@ namespace shaders {
+ #include "../shaders/bytecode/d3d12_5_1/texture_load_ctx1_cs.h"
+ #include "../shaders/bytecode/d3d12_5_1/texture_load_depth_float_cs.h"
+ #include "../shaders/bytecode/d3d12_5_1/texture_load_depth_float_scaled_cs.h"
++#include "../shaders/bytecode/d3d12_5_1/texture_load_direct_depth_float_scaled_cs.h"
++#include "../shaders/bytecode/d3d12_5_1/texture_load_direct_rgba16f_scaled_cs.h"
++#include "../shaders/bytecode/d3d12_5_1/texture_load_direct_rgba8_scaled_cs.h"
+ #include "../shaders/bytecode/d3d12_5_1/texture_load_depth_unorm_cs.h"
+ #include "../shaders/bytecode/d3d12_5_1/texture_load_depth_unorm_scaled_cs.h"
+ #include "../shaders/bytecode/d3d12_5_1/texture_load_dxn_rg8_cs.h"
+@@ -590,6 +593,23 @@ bool D3D12TextureCache::Initialize() {
+       }
+     }
+   }
++  if (IsDrawResolutionScaled()) {
++    // Optional: without one, those textures are loaded through a buffer as before.
++    const D3D12_SHADER_BYTECODE direct_load_shaders[] = {
++        {shaders::texture_load_direct_rgba8_scaled_cs,
++         sizeof(shaders::texture_load_direct_rgba8_scaled_cs)},
++        {shaders::texture_load_direct_depth_float_scaled_cs,
++         sizeof(shaders::texture_load_direct_depth_float_scaled_cs)},
++        {shaders::texture_load_direct_rgba16f_scaled_cs,
++         sizeof(shaders::texture_load_direct_rgba16f_scaled_cs)},
++    };
++    for (size_t i = 0; i < load_pipelines_direct_scaled_.size(); ++i) {
++      *(load_pipelines_direct_scaled_[i].ReleaseAndGetAddressOf()) =
++          ui::d3d12::util::CreateComputePipeline(device, direct_load_shaders[i].pShaderBytecode,
++                                                 direct_load_shaders[i].BytecodeLength,
++                                                 load_root_signature_.Get());
++    }
++  }
+ 
+   srv_descriptor_cache_allocated_ = 0;
+ 
+@@ -1516,6 +1536,40 @@ uint32_t D3D12TextureCache::GetMaxHostTextureDepthOrArraySize(
+   }
+ }
+ 
++int D3D12TextureCache::GetDirectLoadVariant(TextureKey key) const {
++  if (!key.scaled_resolve || key.dimension != xenos::DataDimension::k2DOrStacked ||
++      key.depth_or_array_size_minus_1 || key.mip_max_level || key.signed_separate) {
++    return -1;
++  }
++  int variant;
++  LoadShaderIndex load_shader;
++  DXGI_FORMAT resource_format;
++  switch (key.format) {
++    case xenos::TextureFormat::k_8_8_8_8:
++      variant = 0;
++      load_shader = kLoadShaderIndex32bpb;
++      resource_format = DXGI_FORMAT_R8G8B8A8_TYPELESS;  // Written as R8G8B8A8_UINT.
++      break;
++    case xenos::TextureFormat::k_24_8_FLOAT:
++      variant = 1;
++      load_shader = kLoadShaderIndexDepthFloat;
++      resource_format = DXGI_FORMAT_R32_FLOAT;
++      break;
++    case xenos::TextureFormat::k_16_16_16_16_FLOAT:
++      variant = 2;
++      load_shader = kLoadShaderIndex64bpb;
++      resource_format = DXGI_FORMAT_R16G16B16A16_FLOAT;
++      break;
++    default:
++      return -1;
++  }
++  if (!load_pipelines_direct_scaled_[variant] || GetLoadShaderIndex(key) != load_shader ||
++      GetDXGIResourceFormat(key) != resource_format) {
++    return -1;
++  }
++  return variant;
++}
++
+ std::unique_ptr<TextureCache::Texture> D3D12TextureCache::CreateTexture(TextureKey key) {
+   D3D12_RESOURCE_DESC desc;
+   desc.Format = GetDXGIResourceFormat(key);
+@@ -1542,8 +1596,10 @@ std::unique_ptr<TextureCache::Texture> D3D12TextureCache::CreateTexture(TextureK
+   desc.SampleDesc.Quality = 0;
+   desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+   // Untiling through a buffer instead of using unordered access because copying
+-  // is not done that often.
+-  desc.Flags = D3D12_RESOURCE_FLAG_NONE;
++  // is not done that often - except for resolution-scaled render targets, reloaded
++  // every frame, where the copy costs as much as the load (GetDirectLoadVariant).
++  desc.Flags = GetDirectLoadVariant(key) >= 0 ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
++                                             : D3D12_RESOURCE_FLAG_NONE;
+   const ui::d3d12::D3D12Provider& provider = command_processor_.GetD3D12Provider();
+   ID3D12Device* device = provider.GetDevice();
+   // Assuming untiling will be the next operation.
+@@ -1602,6 +1658,14 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+   uint32_t level_stored_last = std::min(level_last, level_packed);
+   uint32_t texture_resolution_scale_x = texture_resolution_scaled ? draw_resolution_scale_x() : 1;
+   uint32_t texture_resolution_scale_y = texture_resolution_scaled ? draw_resolution_scale_y() : 1;
++  // Resolution-scaled 2D render targets without mips (SSX at 4x: 9 full-screen ones per frame,
++  // 3.3 ms, half of it the buffer-to-texture copy) are written straight into the texture.
++  int direct_variant = (level_first == 0 && level_last == 0 && level_packed != 0 && !is_3d_tiling)
++                           ? GetDirectLoadVariant(texture_key)
++                           : -1;
++  if (direct_variant >= 0) {
++    pipeline = load_pipelines_direct_scaled_[direct_variant].Get();
++  }
+ 
+   // A volume texture reloaded after a partial write (SSX renders its 128x128x256 snow
+   // volume one slice at a time, and each slice made the whole 16 MB, 64 MB at 2x, reload)
+@@ -1715,10 +1779,13 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+     copy_buffer_size += level_host_slice_size * array_size;
+   }
+   D3D12_RESOURCE_STATES copy_buffer_state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+-  ID3D12Resource* copy_buffer =
+-      command_processor_.RequestScratchGPUBuffer(uint32_t(copy_buffer_size), copy_buffer_state);
+-  if (copy_buffer == nullptr) {
+-    return false;
++  ID3D12Resource* copy_buffer = nullptr;
++  if (direct_variant < 0) {
++    copy_buffer =
++        command_processor_.RequestScratchGPUBuffer(uint32_t(copy_buffer_size), copy_buffer_state);
++    if (copy_buffer == nullptr) {
++      return false;
++    }
+   }
+ 
+   // Begin loading.
+@@ -1740,7 +1807,9 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+   ui::d3d12::util::DescriptorCpuGpuHandlePair descriptors_allocated[3];
+   if (!command_processor_.RequestOneUseSingleViewDescriptors(descriptor_count,
+                                                              descriptors_allocated)) {
+-    command_processor_.ReleaseScratchGPUBuffer(copy_buffer, copy_buffer_state);
++    if (copy_buffer) {
++      command_processor_.ReleaseScratchGPUBuffer(copy_buffer, copy_buffer_state);
++    }
+     return false;
+   }
+   uint32_t descriptor_write_index = 0;
+@@ -1750,10 +1819,29 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+   assert_true(descriptor_write_index < descriptor_count);
+   ui::d3d12::util::DescriptorCpuGpuHandlePair descriptor_dest =
+       descriptors_allocated[descriptor_write_index++];
+-  ui::d3d12::util::CreateBufferTypedUAV(
+-      device, descriptor_dest.first, copy_buffer,
+-      ui::d3d12::util::GetUintPow2DXGIFormat(load_shader_info.dest_bpe_log2),
+-      uint32_t(copy_buffer_size) >> load_shader_info.dest_bpe_log2);
++  if (direct_variant >= 0) {
++    static const DXGI_FORMAT kDirectUAVFormats[] = {
++        DXGI_FORMAT_R8G8B8A8_UINT, DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT};
++    D3D12_UNORDERED_ACCESS_VIEW_DESC direct_uav_desc = {};
++    direct_uav_desc.Format = kDirectUAVFormats[direct_variant];
++    direct_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
++    device->CreateUnorderedAccessView(d3d12_texture.resource(), nullptr, &direct_uav_desc,
++                                      descriptor_dest.first);
++    D3D12_RESOURCE_STATES direct_old_state =
++        d3d12_texture.SetResourceState(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
++    if (direct_old_state == D3D12_RESOURCE_STATE_UNORDERED_ACCESS) {
++      // Loaded again without being used in between: order the writes.
++      command_processor_.PushUAVBarrier(d3d12_texture.resource());
++    } else {
++      command_processor_.PushTransitionBarrier(d3d12_texture.resource(), direct_old_state,
++                                               D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
++    }
++  } else {
++    ui::d3d12::util::CreateBufferTypedUAV(
++        device, descriptor_dest.first, copy_buffer,
++        ui::d3d12::util::GetUintPow2DXGIFormat(load_shader_info.dest_bpe_log2),
++        uint32_t(copy_buffer_size) >> load_shader_info.dest_bpe_log2);
++  }
+   command_list.D3DSetComputeRootDescriptorTable(2, descriptor_dest.second);
+   // Set up the unscaled source descriptor (scaled needs two descriptors that
+   // depend on the buffer being current, so they will be set later - for mips,
+@@ -1805,7 +1893,9 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+           is_base ? d3d12_texture.GetGuestBaseSize() : d3d12_texture.GetGuestMipsSize();
+       if (!MakeScaledResolveRangeCurrent(guest_address, guest_size_unscaled,
+                                          load_shader_info.source_bpe_log2)) {
+-        command_processor_.ReleaseScratchGPUBuffer(copy_buffer, copy_buffer_state);
++        if (copy_buffer) {
++      command_processor_.ReleaseScratchGPUBuffer(copy_buffer, copy_buffer_state);
++    }
+         return false;
+       }
+       TransitionCurrentScaledResolveRange(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+@@ -1907,6 +1997,9 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+ 
+   // Update LRU caching because the texture will be used by the command list.
+   d3d12_texture.MarkAsUsed();
++  if (direct_variant >= 0) {
++    return true;
++  }
+ 
+   // Submit copying from the copy buffer to the host texture.
+   ID3D12Resource* texture_resource = d3d12_texture.resource();
+@@ -1999,7 +2092,9 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+     }
+   }
+ 
+-  command_processor_.ReleaseScratchGPUBuffer(copy_buffer, copy_buffer_state);
++  if (copy_buffer) {
++      command_processor_.ReleaseScratchGPUBuffer(copy_buffer, copy_buffer_state);
++    }
+ 
+   return true;
+ }
+diff --git a/src/graphics/shaders/bytecode/d3d12_5_1/texture_load_direct_depth_float_scaled_cs.h b/src/graphics/shaders/bytecode/d3d12_5_1/texture_load_direct_depth_float_scaled_cs.h
+new file mode 100644
+index 0000000..9ce6d7d
+--- /dev/null
++++ b/src/graphics/shaders/bytecode/d3d12_5_1/texture_load_direct_depth_float_scaled_cs.h
+@@ -0,0 +1,1235 @@
++#if 0
++//
++// Generated by Microsoft (R) HLSL Shader Compiler 10.1
++//
++//
++// Buffer Definitions: 
++//
++// cbuffer push_consts_xe
++// {
++//
++//   uint xe_texture_load_is_tiled_3d_endian_scale;// Offset:    0 Size:     4
++//   uint xe_texture_load_guest_offset; // Offset:    4 Size:     4
++//   uint xe_texture_load_guest_pitch_aligned;// Offset:    8 Size:     4
++//   uint xe_texture_load_guest_z_stride_block_rows_aligned;// Offset:   12 Size:     4 [unused]
++//   uint3 xe_texture_load_size_blocks; // Offset:   16 Size:    12
++//   uint xe_texture_load_host_offset;  // Offset:   28 Size:     4 [unused]
++//   uint xe_texture_load_host_pitch;   // Offset:   32 Size:     4 [unused]
++//   uint xe_texture_load_height_texels;// Offset:   36 Size:     4 [unused]
++//
++// }
++//
++//
++// Resource Bindings:
++//
++// Name                                 Type  Format         Dim      ID      HLSL Bind  Count
++// ------------------------------ ---------- ------- ----------- ------- -------------- ------
++// xe_texture_load_source            texture   uint4         buf      T0             t0      1 
++// xe_texture_load_dest                  UAV   float          2d      U0             u0      1 
++// push_consts_xe                    cbuffer      NA          NA     CB0            cb0      1 
++//
++//
++//
++// Input signature:
++//
++// Name                 Index   Mask Register SysValue  Format   Used
++// -------------------- ----- ------ -------- -------- ------- ------
++// no Input
++//
++// Output signature:
++//
++// Name                 Index   Mask Register SysValue  Format   Used
++// -------------------- ----- ------ -------- -------- ------- ------
++// no Output
++cs_5_1
++dcl_globalFlags refactoringAllowed
++dcl_constantbuffer CB0[0:0][2], immediateIndexed, space=0
++dcl_resource_buffer (uint,uint,uint,uint) T0[0:0], space=0
++dcl_uav_typed_texture2d (float,float,float,float) U0[0:0], space=0
++dcl_input vThreadID.xy
++dcl_temps 9
++dcl_thread_group 4, 32, 1
++ishl r0.x, vThreadID.x, l(3)
++mov r0.yzw, vThreadID.yyyy
++uge r1.xy, r0.xwxx, CB0[0][1].xyxx
++or r1.x, r1.y, r1.x
++if_nz r1.x
++  ret 
++endif 
++ubfe r1.xyz, l(2, 3, 3, 0), l(2, 4, 7, 0), CB0[0][0].xxxx
++ushr r1.w, r0.x, l(2)
++udiv r2.x, null, r1.w, r1.y
++udiv r2.y, null, vThreadID.y, r1.z
++imad r1.w, -r2.x, r1.y, r1.w
++imad r2.z, -r2.y, r1.z, vThreadID.y
++ishl r2.w, r2.x, l(2)
++ushr r3.x, CB0[0][0].z, l(5)
++ishr r4.xyzw, r2.yyyy, l(5, 1, 4, 3)
++ibfe r3.yz, l(0, 27, 29, 0), l(0, 3, 1, 0), r2.xxxx
++imad r2.x, r4.x, r3.x, r3.y
++bfi r4.xyz, l(3, 1, 1, 0), l(3, 1, 11, 0), r4.ywzy, l(0, 0, 0, 0)
++bfi r2.w, l(3), l(0), r2.w, r4.x
++bfi r2.x, l(26), l(6), r2.x, r2.w
++and r2.w, r3.z, l(3)
++xor r2.w, r4.y, r2.w
++bfi r2.y, l(1), l(4), r2.y, l(0)
++imad r2.y, r2.w, l(64), r2.y
++iadd r2.y, r4.z, r2.y
++ibfe r3.yzw, l(0, 28, 27, 24), l(0, 2, 3, 6), r2.xxxx
++bfi r2.x, l(1), l(5), r3.y, r2.y
++bfi r2.x, l(3), l(8), r3.z, r2.x
++bfi r2.x, l(20), l(12), r3.w, r2.x
++imul null, r2.y, r1.z, r1.y
++imad r1.w, r1.w, r1.z, r2.z
++ishl r1.w, r1.w, l(4)
++imad r1.w, r2.x, r2.y, r1.w
++iadd r1.w, r1.w, CB0[0][0].y
++ushr r1.w, r1.w, l(4)
++ld r4.xyzw, r1.wwww, T0[0].xyzw
++ieq r2.xzw, r1.xxxx, l(1, 0, 2, 3)
++or r1.xw, r2.zzzw, r2.xxxz
++if_nz r1.x
++  ishl r5.xyzw, r4.xyzw, l(8, 8, 8, 8)
++  and r5.xyzw, r5.xyzw, l(0xff00ff00, 0xff00ff00, 0xff00ff00, 0xff00ff00)
++  ushr r6.xyzw, r4.xyzw, l(8, 8, 8, 8)
++  and r6.xyzw, r6.xyzw, l(0x00ff00ff, 0x00ff00ff, 0x00ff00ff, 0x00ff00ff)
++  iadd r4.xyzw, r5.xyzw, r6.xyzw
++endif 
++if_nz r1.w
++  ushr r5.xyzw, r4.xyzw, l(16, 16, 16, 16)
++  bfi r4.xyzw, l(16, 16, 16, 16), l(16, 16, 16, 16), r4.xyzw, r5.xyzw
++endif 
++ushr r5.xyzw, r4.xyzw, l(8, 8, 8, 8)
++ubfe r4.xyzw, l(20, 20, 20, 20), l(8, 8, 8, 8), r4.xyzw
++ushr r6.xyzw, r5.xyzw, l(20, 20, 20, 20)
++firstbit_hi r7.xyzw, r4.xyzw
++iadd r7.xyzw, r7.xyzw, l(-11, -11, -11, -11)
++movc r7.xyzw, r4.xyzw, r7.xyzw, l(21,21,21,21)
++iadd r8.xyzw, -r7.xyzw, l(1, 1, 1, 1)
++movc r8.xyzw, r6.xyzw, r6.xyzw, r8.xyzw
++ishl r7.xyzw, r4.xyzw, r7.xyzw
++and r7.xyzw, r7.xyzw, l(0x000fffff, 0x000fffff, 0x000fffff, 0x000fffff)
++movc r4.xyzw, r6.xyzw, r4.xyzw, r7.xyzw
++ishl r6.xyzw, r8.xyzw, l(23, 23, 23, 23)
++iadd r6.xyzw, r6.xyzw, l(0x38000000, 0x38000000, 0x38000000, 0x38000000)
++ishl r4.xyzw, r4.xyzw, l(3, 3, 3, 3)
++iadd r4.xyzw, r6.xyzw, r4.xyzw
++movc r4.xyzw, r5.xyzw, r4.xyzw, l(0,0,0,0)
++store_uav_typed U0[0].xyzw, r0.xwww, r4.xxxx
++iadd r5.xyzw, r0.xwww, l(1, 0, 0, 0)
++store_uav_typed U0[0].xyzw, r5.xyzw, r4.yyyy
++iadd r5.xyzw, r0.xwww, l(2, 0, 0, 0)
++store_uav_typed U0[0].xyzw, r5.xyzw, r4.zzzz
++iadd r5.xyzw, r0.xwww, l(3, 0, 0, 0)
++store_uav_typed U0[0].xyzw, r5.xyzw, r4.wwww
++iadd r4.xyzw, r0.xwww, l(4, 0, 0, 0)
++ushr r2.x, r4.x, l(2)
++udiv r2.z, null, r2.x, r1.y
++udiv r2.w, null, r4.w, r1.z
++imad r1.y, -r2.z, r1.y, r2.x
++imad r2.x, -r2.w, r1.z, r4.w
++ishl r3.y, r2.z, l(2)
++ishr r5.xyzw, r2.wwww, l(5, 1, 4, 3)
++ibfe r3.zw, l(0, 0, 27, 29), l(0, 0, 3, 1), r2.zzzz
++imad r2.z, r5.x, r3.x, r3.z
++bfi r5.xyz, l(3, 1, 1, 0), l(3, 1, 11, 0), r5.ywzy, l(0, 0, 0, 0)
++bfi r3.x, l(3), l(0), r3.y, r5.x
++bfi r2.z, l(26), l(6), r2.z, r3.x
++and r3.x, r3.w, l(3)
++xor r3.x, r5.y, r3.x
++bfi r2.w, l(1), l(4), r2.w, l(0)
++imad r2.w, r3.x, l(64), r2.w
++iadd r2.w, r5.z, r2.w
++ibfe r3.xyz, l(28, 27, 24, 0), l(2, 3, 6, 0), r2.zzzz
++bfi r2.z, l(1), l(5), r3.x, r2.w
++bfi r2.z, l(3), l(8), r3.y, r2.z
++bfi r2.z, l(20), l(12), r3.z, r2.z
++imad r1.y, r1.y, r1.z, r2.x
++ishl r1.y, r1.y, l(4)
++imad r1.y, r2.z, r2.y, r1.y
++iadd r1.y, r1.y, CB0[0][0].y
++ushr r1.y, r1.y, l(4)
++ld r2.xyzw, r1.yyyy, T0[0].xyzw
++if_nz r1.x
++  ishl r3.xyzw, r2.xyzw, l(8, 8, 8, 8)
++  and r3.xyzw, r3.xyzw, l(0xff00ff00, 0xff00ff00, 0xff00ff00, 0xff00ff00)
++  ushr r5.xyzw, r2.xyzw, l(8, 8, 8, 8)
++  and r5.xyzw, r5.xyzw, l(0x00ff00ff, 0x00ff00ff, 0x00ff00ff, 0x00ff00ff)
++  iadd r2.xyzw, r3.xyzw, r5.xyzw
++endif 
++if_nz r1.w
++  ushr r1.xyzw, r2.xyzw, l(16, 16, 16, 16)
++  bfi r2.xyzw, l(16, 16, 16, 16), l(16, 16, 16, 16), r2.xyzw, r1.xyzw
++endif 
++ushr r1.xyzw, r2.xyzw, l(8, 8, 8, 8)
++ubfe r2.xyzw, l(20, 20, 20, 20), l(8, 8, 8, 8), r2.xyzw
++ushr r3.xyzw, r1.xyzw, l(20, 20, 20, 20)
++firstbit_hi r5.xyzw, r2.xyzw
++iadd r5.xyzw, r5.xyzw, l(-11, -11, -11, -11)
++movc r5.xyzw, r2.xyzw, r5.xyzw, l(21,21,21,21)
++iadd r6.xyzw, -r5.xyzw, l(1, 1, 1, 1)
++movc r6.xyzw, r3.xyzw, r3.xyzw, r6.xyzw
++ishl r5.xyzw, r2.xyzw, r5.xyzw
++and r5.xyzw, r5.xyzw, l(0x000fffff, 0x000fffff, 0x000fffff, 0x000fffff)
++movc r2.xyzw, r3.xyzw, r2.xyzw, r5.xyzw
++ishl r3.xyzw, r6.xyzw, l(23, 23, 23, 23)
++iadd r3.xyzw, r3.xyzw, l(0x38000000, 0x38000000, 0x38000000, 0x38000000)
++ishl r2.xyzw, r2.xyzw, l(3, 3, 3, 3)
++iadd r2.xyzw, r3.xyzw, r2.xyzw
++movc r1.xyzw, r1.xyzw, r2.xyzw, l(0,0,0,0)
++store_uav_typed U0[0].xyzw, r4.xyzw, r1.xxxx
++iadd r2.xyzw, r0.xwww, l(5, 0, 0, 0)
++store_uav_typed U0[0].xyzw, r2.xyzw, r1.yyyy
++iadd r2.xyzw, r0.xwww, l(6, 0, 0, 0)
++store_uav_typed U0[0].xyzw, r2.xyzw, r1.zzzz
++iadd r2.xyzw, r0.xyzw, l(7, 0, 0, 0)
++store_uav_typed U0[0].xyzw, r2.xyzw, r1.wwww
++ret 
++// Approximately 136 instruction slots used
++#endif
++
++const BYTE texture_load_direct_depth_float_scaled_cs[] =
++{
++     68,  88,  66,  67, 118,  77, 
++    119, 192,  55, 137, 241,  49, 
++    244,  75,  45, 164, 190, 161, 
++     22, 201,   1,   0,   0,   0, 
++    108,  24,   0,   0,   5,   0, 
++      0,   0,  52,   0,   0,   0, 
++     20,   4,   0,   0,  36,   4, 
++      0,   0,  52,   4,   0,   0, 
++    208,  23,   0,   0,  82,  68, 
++     69,  70, 216,   3,   0,   0, 
++      1,   0,   0,   0, 240,   0, 
++      0,   0,   3,   0,   0,   0, 
++     60,   0,   0,   0,   1,   5, 
++     83,  67,   0, 133,   0,   0, 
++    173,   3,   0,   0,  19,  19, 
++     68,  37,  60,   0,   0,   0, 
++     24,   0,   0,   0,  40,   0, 
++      0,   0,  40,   0,   0,   0, 
++     36,   0,   0,   0,  12,   0, 
++      0,   0,   0,   0,   0,   0, 
++    180,   0,   0,   0,   2,   0, 
++      0,   0,   4,   0,   0,   0, 
++      1,   0,   0,   0, 255, 255, 
++    255, 255,   0,   0,   0,   0, 
++      1,   0,   0,   0,  12,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0, 203,   0, 
++      0,   0,   4,   0,   0,   0, 
++      5,   0,   0,   0,   4,   0, 
++      0,   0, 255, 255, 255, 255, 
++      0,   0,   0,   0,   1,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0, 224,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   1,   0,   0,   0, 
++      1,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++    120, 101,  95, 116, 101, 120, 
++    116, 117, 114, 101,  95, 108, 
++    111,  97, 100,  95, 115, 111, 
++    117, 114,  99, 101,   0, 120, 
++    101,  95, 116, 101, 120, 116, 
++    117, 114, 101,  95, 108, 111, 
++     97, 100,  95, 100, 101, 115, 
++    116,   0, 112, 117, 115, 104, 
++     95,  99, 111, 110, 115, 116, 
++    115,  95, 120, 101,   0, 171, 
++    224,   0,   0,   0,   8,   0, 
++      0,   0,   8,   1,   0,   0, 
++     48,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     72,   2,   0,   0,   0,   0, 
++      0,   0,   4,   0,   0,   0, 
++      2,   0,   0,   0, 120,   2, 
++      0,   0,   0,   0,   0,   0, 
++    255, 255, 255, 255,   0,   0, 
++      0,   0, 255, 255, 255, 255, 
++      0,   0,   0,   0, 156,   2, 
++      0,   0,   4,   0,   0,   0, 
++      4,   0,   0,   0,   2,   0, 
++      0,   0, 120,   2,   0,   0, 
++      0,   0,   0,   0, 255, 255, 
++    255, 255,   0,   0,   0,   0, 
++    255, 255, 255, 255,   0,   0, 
++      0,   0, 185,   2,   0,   0, 
++      8,   0,   0,   0,   4,   0, 
++      0,   0,   2,   0,   0,   0, 
++    120,   2,   0,   0,   0,   0, 
++      0,   0, 255, 255, 255, 255, 
++      0,   0,   0,   0, 255, 255, 
++    255, 255,   0,   0,   0,   0, 
++    221,   2,   0,   0,  12,   0, 
++      0,   0,   4,   0,   0,   0, 
++      0,   0,   0,   0, 120,   2, 
++      0,   0,   0,   0,   0,   0, 
++    255, 255, 255, 255,   0,   0, 
++      0,   0, 255, 255, 255, 255, 
++      0,   0,   0,   0,  15,   3, 
++      0,   0,  16,   0,   0,   0, 
++     12,   0,   0,   0,   2,   0, 
++      0,   0,  52,   3,   0,   0, 
++      0,   0,   0,   0, 255, 255, 
++    255, 255,   0,   0,   0,   0, 
++    255, 255, 255, 255,   0,   0, 
++      0,   0,  88,   3,   0,   0, 
++     28,   0,   0,   0,   4,   0, 
++      0,   0,   0,   0,   0,   0, 
++    120,   2,   0,   0,   0,   0, 
++      0,   0, 255, 255, 255, 255, 
++      0,   0,   0,   0, 255, 255, 
++    255, 255,   0,   0,   0,   0, 
++    116,   3,   0,   0,  32,   0, 
++      0,   0,   4,   0,   0,   0, 
++      0,   0,   0,   0, 120,   2, 
++      0,   0,   0,   0,   0,   0, 
++    255, 255, 255, 255,   0,   0, 
++      0,   0, 255, 255, 255, 255, 
++      0,   0,   0,   0, 143,   3, 
++      0,   0,  36,   0,   0,   0, 
++      4,   0,   0,   0,   0,   0, 
++      0,   0, 120,   2,   0,   0, 
++      0,   0,   0,   0, 255, 255, 
++    255, 255,   0,   0,   0,   0, 
++    255, 255, 255, 255,   0,   0, 
++      0,   0, 120, 101,  95, 116, 
++    101, 120, 116, 117, 114, 101, 
++     95, 108, 111,  97, 100,  95, 
++    105, 115,  95, 116, 105, 108, 
++    101, 100,  95,  51, 100,  95, 
++    101, 110, 100, 105,  97, 110, 
++     95, 115,  99,  97, 108, 101, 
++      0, 100, 119, 111, 114, 100, 
++      0, 171,   0,   0,  19,   0, 
++      1,   0,   1,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0, 113,   2, 
++      0,   0, 120, 101,  95, 116, 
++    101, 120, 116, 117, 114, 101, 
++     95, 108, 111,  97, 100,  95, 
++    103, 117, 101, 115, 116,  95, 
++    111, 102, 102, 115, 101, 116, 
++      0, 120, 101,  95, 116, 101, 
++    120, 116, 117, 114, 101,  95, 
++    108, 111,  97, 100,  95, 103, 
++    117, 101, 115, 116,  95, 112, 
++    105, 116,  99, 104,  95,  97, 
++    108, 105, 103, 110, 101, 100, 
++      0, 120, 101,  95, 116, 101, 
++    120, 116, 117, 114, 101,  95, 
++    108, 111,  97, 100,  95, 103, 
++    117, 101, 115, 116,  95, 122, 
++     95, 115, 116, 114, 105, 100, 
++    101,  95,  98, 108, 111,  99, 
++    107,  95, 114, 111, 119, 115, 
++     95,  97, 108, 105, 103, 110, 
++    101, 100,   0, 120, 101,  95, 
++    116, 101, 120, 116, 117, 114, 
++    101,  95, 108, 111,  97, 100, 
++     95, 115, 105, 122, 101,  95, 
++     98, 108, 111,  99, 107, 115, 
++      0, 117, 105, 110, 116,  51, 
++      0, 171, 171, 171,   1,   0, 
++     19,   0,   1,   0,   3,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     43,   3,   0,   0, 120, 101, 
++     95, 116, 101, 120, 116, 117, 
++    114, 101,  95, 108, 111,  97, 
++    100,  95, 104, 111, 115, 116, 
++     95, 111, 102, 102, 115, 101, 
++    116,   0, 120, 101,  95, 116, 
++    101, 120, 116, 117, 114, 101, 
++     95, 108, 111,  97, 100,  95, 
++    104, 111, 115, 116,  95, 112, 
++    105, 116,  99, 104,   0, 120, 
++    101,  95, 116, 101, 120, 116, 
++    117, 114, 101,  95, 108, 111, 
++     97, 100,  95, 104, 101, 105, 
++    103, 104, 116,  95, 116, 101, 
++    120, 101, 108, 115,   0,  77, 
++    105,  99, 114, 111, 115, 111, 
++    102, 116,  32,  40,  82,  41, 
++     32,  72,  76,  83,  76,  32, 
++     83, 104,  97, 100, 101, 114, 
++     32,  67, 111, 109, 112, 105, 
++    108, 101, 114,  32,  49,  48, 
++     46,  49,   0, 171, 171, 171, 
++     73,  83,  71,  78,   8,   0, 
++      0,   0,   0,   0,   0,   0, 
++      8,   0,   0,   0,  79,  83, 
++     71,  78,   8,   0,   0,   0, 
++      0,   0,   0,   0,   8,   0, 
++      0,   0,  83,  72,  69,  88, 
++    148,  19,   0,   0,  81,   0, 
++      5,   0, 229,   4,   0,   0, 
++    106,   8,   0,   1,  89,   0, 
++      0,   7,  70, 142,  48,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      2,   0,   0,   0,   0,   0, 
++      0,   0,  88,   8,   0,   7, 
++     70, 126,  48,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,  68,  68, 
++      0,   0,   0,   0,   0,   0, 
++    156,  24,   0,   7,  70, 238, 
++     49,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,  85,  85,   0,   0, 
++      0,   0,   0,   0,  95,   0, 
++      0,   2,  50,   0,   2,   0, 
++    104,   0,   0,   2,   9,   0, 
++      0,   0, 155,   0,   0,   4, 
++      4,   0,   0,   0,  32,   0, 
++      0,   0,   1,   0,   0,   0, 
++     41,   0,   0,   6,  18,   0, 
++     16,   0,   0,   0,   0,   0, 
++     10,   0,   2,   0,   1,  64, 
++      0,   0,   3,   0,   0,   0, 
++     54,   0,   0,   4, 226,   0, 
++     16,   0,   0,   0,   0,   0, 
++     86,   5,   2,   0,  80,   0, 
++      0,   9,  50,   0,  16,   0, 
++      1,   0,   0,   0, 198,   0, 
++     16,   0,   0,   0,   0,   0, 
++     70, 128,  48,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      1,   0,   0,   0,  60,   0, 
++      0,   7,  18,   0,  16,   0, 
++      1,   0,   0,   0,  26,   0, 
++     16,   0,   1,   0,   0,   0, 
++     10,   0,  16,   0,   1,   0, 
++      0,   0,  31,   0,   4,   3, 
++     10,   0,  16,   0,   1,   0, 
++      0,   0,  62,   0,   0,   1, 
++     21,   0,   0,   1, 138,   0, 
++      0,  17, 114,   0,  16,   0, 
++      1,   0,   0,   0,   2,  64, 
++      0,   0,   2,   0,   0,   0, 
++      3,   0,   0,   0,   3,   0, 
++      0,   0,   0,   0,   0,   0, 
++      2,  64,   0,   0,   2,   0, 
++      0,   0,   4,   0,   0,   0, 
++      7,   0,   0,   0,   0,   0, 
++      0,   0,   6, 128,  48,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     85,   0,   0,   7, 130,   0, 
++     16,   0,   1,   0,   0,   0, 
++     10,   0,  16,   0,   0,   0, 
++      0,   0,   1,  64,   0,   0, 
++      2,   0,   0,   0,  78,   0, 
++      0,   8,  18,   0,  16,   0, 
++      2,   0,   0,   0,   0, 208, 
++      0,   0,  58,   0,  16,   0, 
++      1,   0,   0,   0,  26,   0, 
++     16,   0,   1,   0,   0,   0, 
++     78,   0,   0,   7,  34,   0, 
++     16,   0,   2,   0,   0,   0, 
++      0, 208,   0,   0,  26,   0, 
++      2,   0,  42,   0,  16,   0, 
++      1,   0,   0,   0,  35,   0, 
++      0,  10, 130,   0,  16,   0, 
++      1,   0,   0,   0,  10,   0, 
++     16, 128,  65,   0,   0,   0, 
++      2,   0,   0,   0,  26,   0, 
++     16,   0,   1,   0,   0,   0, 
++     58,   0,  16,   0,   1,   0, 
++      0,   0,  35,   0,   0,   9, 
++     66,   0,  16,   0,   2,   0, 
++      0,   0,  26,   0,  16, 128, 
++     65,   0,   0,   0,   2,   0, 
++      0,   0,  42,   0,  16,   0, 
++      1,   0,   0,   0,  26,   0, 
++      2,   0,  41,   0,   0,   7, 
++    130,   0,  16,   0,   2,   0, 
++      0,   0,  10,   0,  16,   0, 
++      2,   0,   0,   0,   1,  64, 
++      0,   0,   2,   0,   0,   0, 
++     85,   0,   0,   9,  18,   0, 
++     16,   0,   3,   0,   0,   0, 
++     42, 128,  48,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   1,  64, 
++      0,   0,   5,   0,   0,   0, 
++     42,   0,   0,  10, 242,   0, 
++     16,   0,   4,   0,   0,   0, 
++     86,   5,  16,   0,   2,   0, 
++      0,   0,   2,  64,   0,   0, 
++      5,   0,   0,   0,   1,   0, 
++      0,   0,   4,   0,   0,   0, 
++      3,   0,   0,   0, 139,   0, 
++      0,  15,  98,   0,  16,   0, 
++      3,   0,   0,   0,   2,  64, 
++      0,   0,   0,   0,   0,   0, 
++     27,   0,   0,   0,  29,   0, 
++      0,   0,   0,   0,   0,   0, 
++      2,  64,   0,   0,   0,   0, 
++      0,   0,   3,   0,   0,   0, 
++      1,   0,   0,   0,   0,   0, 
++      0,   0,   6,   0,  16,   0, 
++      2,   0,   0,   0,  35,   0, 
++      0,   9,  18,   0,  16,   0, 
++      2,   0,   0,   0,  10,   0, 
++     16,   0,   4,   0,   0,   0, 
++     10,   0,  16,   0,   3,   0, 
++      0,   0,  26,   0,  16,   0, 
++      3,   0,   0,   0, 140,   0, 
++      0,  20, 114,   0,  16,   0, 
++      4,   0,   0,   0,   2,  64, 
++      0,   0,   3,   0,   0,   0, 
++      1,   0,   0,   0,   1,   0, 
++      0,   0,   0,   0,   0,   0, 
++      2,  64,   0,   0,   3,   0, 
++      0,   0,   1,   0,   0,   0, 
++     11,   0,   0,   0,   0,   0, 
++      0,   0, 214,   6,  16,   0, 
++      4,   0,   0,   0,   2,  64, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++    140,   0,   0,  11, 130,   0, 
++     16,   0,   2,   0,   0,   0, 
++      1,  64,   0,   0,   3,   0, 
++      0,   0,   1,  64,   0,   0, 
++      0,   0,   0,   0,  58,   0, 
++     16,   0,   2,   0,   0,   0, 
++     10,   0,  16,   0,   4,   0, 
++      0,   0, 140,   0,   0,  11, 
++     18,   0,  16,   0,   2,   0, 
++      0,   0,   1,  64,   0,   0, 
++     26,   0,   0,   0,   1,  64, 
++      0,   0,   6,   0,   0,   0, 
++     10,   0,  16,   0,   2,   0, 
++      0,   0,  58,   0,  16,   0, 
++      2,   0,   0,   0,   1,   0, 
++      0,   7, 130,   0,  16,   0, 
++      2,   0,   0,   0,  42,   0, 
++     16,   0,   3,   0,   0,   0, 
++      1,  64,   0,   0,   3,   0, 
++      0,   0,  87,   0,   0,   7, 
++    130,   0,  16,   0,   2,   0, 
++      0,   0,  26,   0,  16,   0, 
++      4,   0,   0,   0,  58,   0, 
++     16,   0,   2,   0,   0,   0, 
++    140,   0,   0,  11,  34,   0, 
++     16,   0,   2,   0,   0,   0, 
++      1,  64,   0,   0,   1,   0, 
++      0,   0,   1,  64,   0,   0, 
++      4,   0,   0,   0,  26,   0, 
++     16,   0,   2,   0,   0,   0, 
++      1,  64,   0,   0,   0,   0, 
++      0,   0,  35,   0,   0,   9, 
++     34,   0,  16,   0,   2,   0, 
++      0,   0,  58,   0,  16,   0, 
++      2,   0,   0,   0,   1,  64, 
++      0,   0,  64,   0,   0,   0, 
++     26,   0,  16,   0,   2,   0, 
++      0,   0,  30,   0,   0,   7, 
++     34,   0,  16,   0,   2,   0, 
++      0,   0,  42,   0,  16,   0, 
++      4,   0,   0,   0,  26,   0, 
++     16,   0,   2,   0,   0,   0, 
++    139,   0,   0,  15, 226,   0, 
++     16,   0,   3,   0,   0,   0, 
++      2,  64,   0,   0,   0,   0, 
++      0,   0,  28,   0,   0,   0, 
++     27,   0,   0,   0,  24,   0, 
++      0,   0,   2,  64,   0,   0, 
++      0,   0,   0,   0,   2,   0, 
++      0,   0,   3,   0,   0,   0, 
++      6,   0,   0,   0,   6,   0, 
++     16,   0,   2,   0,   0,   0, 
++    140,   0,   0,  11,  18,   0, 
++     16,   0,   2,   0,   0,   0, 
++      1,  64,   0,   0,   1,   0, 
++      0,   0,   1,  64,   0,   0, 
++      5,   0,   0,   0,  26,   0, 
++     16,   0,   3,   0,   0,   0, 
++     26,   0,  16,   0,   2,   0, 
++      0,   0, 140,   0,   0,  11, 
++     18,   0,  16,   0,   2,   0, 
++      0,   0,   1,  64,   0,   0, 
++      3,   0,   0,   0,   1,  64, 
++      0,   0,   8,   0,   0,   0, 
++     42,   0,  16,   0,   3,   0, 
++      0,   0,  10,   0,  16,   0, 
++      2,   0,   0,   0, 140,   0, 
++      0,  11,  18,   0,  16,   0, 
++      2,   0,   0,   0,   1,  64, 
++      0,   0,  20,   0,   0,   0, 
++      1,  64,   0,   0,  12,   0, 
++      0,   0,  58,   0,  16,   0, 
++      3,   0,   0,   0,  10,   0, 
++     16,   0,   2,   0,   0,   0, 
++     38,   0,   0,   8,   0, 208, 
++      0,   0,  34,   0,  16,   0, 
++      2,   0,   0,   0,  42,   0, 
++     16,   0,   1,   0,   0,   0, 
++     26,   0,  16,   0,   1,   0, 
++      0,   0,  35,   0,   0,   9, 
++    130,   0,  16,   0,   1,   0, 
++      0,   0,  58,   0,  16,   0, 
++      1,   0,   0,   0,  42,   0, 
++     16,   0,   1,   0,   0,   0, 
++     42,   0,  16,   0,   2,   0, 
++      0,   0,  41,   0,   0,   7, 
++    130,   0,  16,   0,   1,   0, 
++      0,   0,  58,   0,  16,   0, 
++      1,   0,   0,   0,   1,  64, 
++      0,   0,   4,   0,   0,   0, 
++     35,   0,   0,   9, 130,   0, 
++     16,   0,   1,   0,   0,   0, 
++     10,   0,  16,   0,   2,   0, 
++      0,   0,  26,   0,  16,   0, 
++      2,   0,   0,   0,  58,   0, 
++     16,   0,   1,   0,   0,   0, 
++     30,   0,   0,   9, 130,   0, 
++     16,   0,   1,   0,   0,   0, 
++     58,   0,  16,   0,   1,   0, 
++      0,   0,  26, 128,  48,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     85,   0,   0,   7, 130,   0, 
++     16,   0,   1,   0,   0,   0, 
++     58,   0,  16,   0,   1,   0, 
++      0,   0,   1,  64,   0,   0, 
++      4,   0,   0,   0,  45,   0, 
++      0,   8, 242,   0,  16,   0, 
++      4,   0,   0,   0, 246,  15, 
++     16,   0,   1,   0,   0,   0, 
++     70, 126,  32,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     32,   0,   0,  10, 210,   0, 
++     16,   0,   2,   0,   0,   0, 
++      6,   0,  16,   0,   1,   0, 
++      0,   0,   2,  64,   0,   0, 
++      1,   0,   0,   0,   0,   0, 
++      0,   0,   2,   0,   0,   0, 
++      3,   0,   0,   0,  60,   0, 
++      0,   7, 146,   0,  16,   0, 
++      1,   0,   0,   0, 166,  14, 
++     16,   0,   2,   0,   0,   0, 
++      6,   8,  16,   0,   2,   0, 
++      0,   0,  31,   0,   4,   3, 
++     10,   0,  16,   0,   1,   0, 
++      0,   0,  41,   0,   0,  10, 
++    242,   0,  16,   0,   5,   0, 
++      0,   0,  70,  14,  16,   0, 
++      4,   0,   0,   0,   2,  64, 
++      0,   0,   8,   0,   0,   0, 
++      8,   0,   0,   0,   8,   0, 
++      0,   0,   8,   0,   0,   0, 
++      1,   0,   0,  10, 242,   0, 
++     16,   0,   5,   0,   0,   0, 
++     70,  14,  16,   0,   5,   0, 
++      0,   0,   2,  64,   0,   0, 
++      0, 255,   0, 255,   0, 255, 
++      0, 255,   0, 255,   0, 255, 
++      0, 255,   0, 255,  85,   0, 
++      0,  10, 242,   0,  16,   0, 
++      6,   0,   0,   0,  70,  14, 
++     16,   0,   4,   0,   0,   0, 
++      2,  64,   0,   0,   8,   0, 
++      0,   0,   8,   0,   0,   0, 
++      8,   0,   0,   0,   8,   0, 
++      0,   0,   1,   0,   0,  10, 
++    242,   0,  16,   0,   6,   0, 
++      0,   0,  70,  14,  16,   0, 
++      6,   0,   0,   0,   2,  64, 
++      0,   0, 255,   0, 255,   0, 
++    255,   0, 255,   0, 255,   0, 
++    255,   0, 255,   0, 255,   0, 
++     30,   0,   0,   7, 242,   0, 
++     16,   0,   4,   0,   0,   0, 
++     70,  14,  16,   0,   5,   0, 
++      0,   0,  70,  14,  16,   0, 
++      6,   0,   0,   0,  21,   0, 
++      0,   1,  31,   0,   4,   3, 
++     58,   0,  16,   0,   1,   0, 
++      0,   0,  85,   0,   0,  10, 
++    242,   0,  16,   0,   5,   0, 
++      0,   0,  70,  14,  16,   0, 
++      4,   0,   0,   0,   2,  64, 
++      0,   0,  16,   0,   0,   0, 
++     16,   0,   0,   0,  16,   0, 
++      0,   0,  16,   0,   0,   0, 
++    140,   0,   0,  17, 242,   0, 
++     16,   0,   4,   0,   0,   0, 
++      2,  64,   0,   0,  16,   0, 
++      0,   0,  16,   0,   0,   0, 
++     16,   0,   0,   0,  16,   0, 
++      0,   0,   2,  64,   0,   0, 
++     16,   0,   0,   0,  16,   0, 
++      0,   0,  16,   0,   0,   0, 
++     16,   0,   0,   0,  70,  14, 
++     16,   0,   4,   0,   0,   0, 
++     70,  14,  16,   0,   5,   0, 
++      0,   0,  21,   0,   0,   1, 
++     85,   0,   0,  10, 242,   0, 
++     16,   0,   5,   0,   0,   0, 
++     70,  14,  16,   0,   4,   0, 
++      0,   0,   2,  64,   0,   0, 
++      8,   0,   0,   0,   8,   0, 
++      0,   0,   8,   0,   0,   0, 
++      8,   0,   0,   0, 138,   0, 
++      0,  15, 242,   0,  16,   0, 
++      4,   0,   0,   0,   2,  64, 
++      0,   0,  20,   0,   0,   0, 
++     20,   0,   0,   0,  20,   0, 
++      0,   0,  20,   0,   0,   0, 
++      2,  64,   0,   0,   8,   0, 
++      0,   0,   8,   0,   0,   0, 
++      8,   0,   0,   0,   8,   0, 
++      0,   0,  70,  14,  16,   0, 
++      4,   0,   0,   0,  85,   0, 
++      0,  10, 242,   0,  16,   0, 
++      6,   0,   0,   0,  70,  14, 
++     16,   0,   5,   0,   0,   0, 
++      2,  64,   0,   0,  20,   0, 
++      0,   0,  20,   0,   0,   0, 
++     20,   0,   0,   0,  20,   0, 
++      0,   0, 135,   0,   0,   5, 
++    242,   0,  16,   0,   7,   0, 
++      0,   0,  70,  14,  16,   0, 
++      4,   0,   0,   0,  30,   0, 
++      0,  10, 242,   0,  16,   0, 
++      7,   0,   0,   0,  70,  14, 
++     16,   0,   7,   0,   0,   0, 
++      2,  64,   0,   0, 245, 255, 
++    255, 255, 245, 255, 255, 255, 
++    245, 255, 255, 255, 245, 255, 
++    255, 255,  55,   0,   0,  12, 
++    242,   0,  16,   0,   7,   0, 
++      0,   0,  70,  14,  16,   0, 
++      4,   0,   0,   0,  70,  14, 
++     16,   0,   7,   0,   0,   0, 
++      2,  64,   0,   0,  21,   0, 
++      0,   0,  21,   0,   0,   0, 
++     21,   0,   0,   0,  21,   0, 
++      0,   0,  30,   0,   0,  11, 
++    242,   0,  16,   0,   8,   0, 
++      0,   0,  70,  14,  16, 128, 
++     65,   0,   0,   0,   7,   0, 
++      0,   0,   2,  64,   0,   0, 
++      1,   0,   0,   0,   1,   0, 
++      0,   0,   1,   0,   0,   0, 
++      1,   0,   0,   0,  55,   0, 
++      0,   9, 242,   0,  16,   0, 
++      8,   0,   0,   0,  70,  14, 
++     16,   0,   6,   0,   0,   0, 
++     70,  14,  16,   0,   6,   0, 
++      0,   0,  70,  14,  16,   0, 
++      8,   0,   0,   0,  41,   0, 
++      0,   7, 242,   0,  16,   0, 
++      7,   0,   0,   0,  70,  14, 
++     16,   0,   4,   0,   0,   0, 
++     70,  14,  16,   0,   7,   0, 
++      0,   0,   1,   0,   0,  10, 
++    242,   0,  16,   0,   7,   0, 
++      0,   0,  70,  14,  16,   0, 
++      7,   0,   0,   0,   2,  64, 
++      0,   0, 255, 255,  15,   0, 
++    255, 255,  15,   0, 255, 255, 
++     15,   0, 255, 255,  15,   0, 
++     55,   0,   0,   9, 242,   0, 
++     16,   0,   4,   0,   0,   0, 
++     70,  14,  16,   0,   6,   0, 
++      0,   0,  70,  14,  16,   0, 
++      4,   0,   0,   0,  70,  14, 
++     16,   0,   7,   0,   0,   0, 
++     41,   0,   0,  10, 242,   0, 
++     16,   0,   6,   0,   0,   0, 
++     70,  14,  16,   0,   8,   0, 
++      0,   0,   2,  64,   0,   0, 
++     23,   0,   0,   0,  23,   0, 
++      0,   0,  23,   0,   0,   0, 
++     23,   0,   0,   0,  30,   0, 
++      0,  10, 242,   0,  16,   0, 
++      6,   0,   0,   0,  70,  14, 
++     16,   0,   6,   0,   0,   0, 
++      2,  64,   0,   0,   0,   0, 
++      0,  56,   0,   0,   0,  56, 
++      0,   0,   0,  56,   0,   0, 
++      0,  56,  41,   0,   0,  10, 
++    242,   0,  16,   0,   4,   0, 
++      0,   0,  70,  14,  16,   0, 
++      4,   0,   0,   0,   2,  64, 
++      0,   0,   3,   0,   0,   0, 
++      3,   0,   0,   0,   3,   0, 
++      0,   0,   3,   0,   0,   0, 
++     30,   0,   0,   7, 242,   0, 
++     16,   0,   4,   0,   0,   0, 
++     70,  14,  16,   0,   6,   0, 
++      0,   0,  70,  14,  16,   0, 
++      4,   0,   0,   0,  55,   0, 
++      0,  12, 242,   0,  16,   0, 
++      4,   0,   0,   0,  70,  14, 
++     16,   0,   5,   0,   0,   0, 
++     70,  14,  16,   0,   4,   0, 
++      0,   0,   2,  64,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0, 164,   0, 
++      0,   8, 242, 224,  33,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0, 198,  15,  16,   0, 
++      0,   0,   0,   0,   6,   0, 
++     16,   0,   4,   0,   0,   0, 
++     30,   0,   0,  10, 242,   0, 
++     16,   0,   5,   0,   0,   0, 
++    198,  15,  16,   0,   0,   0, 
++      0,   0,   2,  64,   0,   0, 
++      1,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0, 164,   0, 
++      0,   8, 242, 224,  33,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,  70,  14,  16,   0, 
++      5,   0,   0,   0,  86,   5, 
++     16,   0,   4,   0,   0,   0, 
++     30,   0,   0,  10, 242,   0, 
++     16,   0,   5,   0,   0,   0, 
++    198,  15,  16,   0,   0,   0, 
++      0,   0,   2,  64,   0,   0, 
++      2,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0, 164,   0, 
++      0,   8, 242, 224,  33,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,  70,  14,  16,   0, 
++      5,   0,   0,   0, 166,  10, 
++     16,   0,   4,   0,   0,   0, 
++     30,   0,   0,  10, 242,   0, 
++     16,   0,   5,   0,   0,   0, 
++    198,  15,  16,   0,   0,   0, 
++      0,   0,   2,  64,   0,   0, 
++      3,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0, 164,   0, 
++      0,   8, 242, 224,  33,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,  70,  14,  16,   0, 
++      5,   0,   0,   0, 246,  15, 
++     16,   0,   4,   0,   0,   0, 
++     30,   0,   0,  10, 242,   0, 
++     16,   0,   4,   0,   0,   0, 
++    198,  15,  16,   0,   0,   0, 
++      0,   0,   2,  64,   0,   0, 
++      4,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,  85,   0, 
++      0,   7,  18,   0,  16,   0, 
++      2,   0,   0,   0,  10,   0, 
++     16,   0,   4,   0,   0,   0, 
++      1,  64,   0,   0,   2,   0, 
++      0,   0,  78,   0,   0,   8, 
++     66,   0,  16,   0,   2,   0, 
++      0,   0,   0, 208,   0,   0, 
++     10,   0,  16,   0,   2,   0, 
++      0,   0,  26,   0,  16,   0, 
++      1,   0,   0,   0,  78,   0, 
++      0,   8, 130,   0,  16,   0, 
++      2,   0,   0,   0,   0, 208, 
++      0,   0,  58,   0,  16,   0, 
++      4,   0,   0,   0,  42,   0, 
++     16,   0,   1,   0,   0,   0, 
++     35,   0,   0,  10,  34,   0, 
++     16,   0,   1,   0,   0,   0, 
++     42,   0,  16, 128,  65,   0, 
++      0,   0,   2,   0,   0,   0, 
++     26,   0,  16,   0,   1,   0, 
++      0,   0,  10,   0,  16,   0, 
++      2,   0,   0,   0,  35,   0, 
++      0,  10,  18,   0,  16,   0, 
++      2,   0,   0,   0,  58,   0, 
++     16, 128,  65,   0,   0,   0, 
++      2,   0,   0,   0,  42,   0, 
++     16,   0,   1,   0,   0,   0, 
++     58,   0,  16,   0,   4,   0, 
++      0,   0,  41,   0,   0,   7, 
++     34,   0,  16,   0,   3,   0, 
++      0,   0,  42,   0,  16,   0, 
++      2,   0,   0,   0,   1,  64, 
++      0,   0,   2,   0,   0,   0, 
++     42,   0,   0,  10, 242,   0, 
++     16,   0,   5,   0,   0,   0, 
++    246,  15,  16,   0,   2,   0, 
++      0,   0,   2,  64,   0,   0, 
++      5,   0,   0,   0,   1,   0, 
++      0,   0,   4,   0,   0,   0, 
++      3,   0,   0,   0, 139,   0, 
++      0,  15, 194,   0,  16,   0, 
++      3,   0,   0,   0,   2,  64, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,  27,   0, 
++      0,   0,  29,   0,   0,   0, 
++      2,  64,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      3,   0,   0,   0,   1,   0, 
++      0,   0, 166,  10,  16,   0, 
++      2,   0,   0,   0,  35,   0, 
++      0,   9,  66,   0,  16,   0, 
++      2,   0,   0,   0,  10,   0, 
++     16,   0,   5,   0,   0,   0, 
++     10,   0,  16,   0,   3,   0, 
++      0,   0,  42,   0,  16,   0, 
++      3,   0,   0,   0, 140,   0, 
++      0,  20, 114,   0,  16,   0, 
++      5,   0,   0,   0,   2,  64, 
++      0,   0,   3,   0,   0,   0, 
++      1,   0,   0,   0,   1,   0, 
++      0,   0,   0,   0,   0,   0, 
++      2,  64,   0,   0,   3,   0, 
++      0,   0,   1,   0,   0,   0, 
++     11,   0,   0,   0,   0,   0, 
++      0,   0, 214,   6,  16,   0, 
++      5,   0,   0,   0,   2,  64, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++    140,   0,   0,  11,  18,   0, 
++     16,   0,   3,   0,   0,   0, 
++      1,  64,   0,   0,   3,   0, 
++      0,   0,   1,  64,   0,   0, 
++      0,   0,   0,   0,  26,   0, 
++     16,   0,   3,   0,   0,   0, 
++     10,   0,  16,   0,   5,   0, 
++      0,   0, 140,   0,   0,  11, 
++     66,   0,  16,   0,   2,   0, 
++      0,   0,   1,  64,   0,   0, 
++     26,   0,   0,   0,   1,  64, 
++      0,   0,   6,   0,   0,   0, 
++     42,   0,  16,   0,   2,   0, 
++      0,   0,  10,   0,  16,   0, 
++      3,   0,   0,   0,   1,   0, 
++      0,   7,  18,   0,  16,   0, 
++      3,   0,   0,   0,  58,   0, 
++     16,   0,   3,   0,   0,   0, 
++      1,  64,   0,   0,   3,   0, 
++      0,   0,  87,   0,   0,   7, 
++     18,   0,  16,   0,   3,   0, 
++      0,   0,  26,   0,  16,   0, 
++      5,   0,   0,   0,  10,   0, 
++     16,   0,   3,   0,   0,   0, 
++    140,   0,   0,  11, 130,   0, 
++     16,   0,   2,   0,   0,   0, 
++      1,  64,   0,   0,   1,   0, 
++      0,   0,   1,  64,   0,   0, 
++      4,   0,   0,   0,  58,   0, 
++     16,   0,   2,   0,   0,   0, 
++      1,  64,   0,   0,   0,   0, 
++      0,   0,  35,   0,   0,   9, 
++    130,   0,  16,   0,   2,   0, 
++      0,   0,  10,   0,  16,   0, 
++      3,   0,   0,   0,   1,  64, 
++      0,   0,  64,   0,   0,   0, 
++     58,   0,  16,   0,   2,   0, 
++      0,   0,  30,   0,   0,   7, 
++    130,   0,  16,   0,   2,   0, 
++      0,   0,  42,   0,  16,   0, 
++      5,   0,   0,   0,  58,   0, 
++     16,   0,   2,   0,   0,   0, 
++    139,   0,   0,  15, 114,   0, 
++     16,   0,   3,   0,   0,   0, 
++      2,  64,   0,   0,  28,   0, 
++      0,   0,  27,   0,   0,   0, 
++     24,   0,   0,   0,   0,   0, 
++      0,   0,   2,  64,   0,   0, 
++      2,   0,   0,   0,   3,   0, 
++      0,   0,   6,   0,   0,   0, 
++      0,   0,   0,   0, 166,  10, 
++     16,   0,   2,   0,   0,   0, 
++    140,   0,   0,  11,  66,   0, 
++     16,   0,   2,   0,   0,   0, 
++      1,  64,   0,   0,   1,   0, 
++      0,   0,   1,  64,   0,   0, 
++      5,   0,   0,   0,  10,   0, 
++     16,   0,   3,   0,   0,   0, 
++     58,   0,  16,   0,   2,   0, 
++      0,   0, 140,   0,   0,  11, 
++     66,   0,  16,   0,   2,   0, 
++      0,   0,   1,  64,   0,   0, 
++      3,   0,   0,   0,   1,  64, 
++      0,   0,   8,   0,   0,   0, 
++     26,   0,  16,   0,   3,   0, 
++      0,   0,  42,   0,  16,   0, 
++      2,   0,   0,   0, 140,   0, 
++      0,  11,  66,   0,  16,   0, 
++      2,   0,   0,   0,   1,  64, 
++      0,   0,  20,   0,   0,   0, 
++      1,  64,   0,   0,  12,   0, 
++      0,   0,  42,   0,  16,   0, 
++      3,   0,   0,   0,  42,   0, 
++     16,   0,   2,   0,   0,   0, 
++     35,   0,   0,   9,  34,   0, 
++     16,   0,   1,   0,   0,   0, 
++     26,   0,  16,   0,   1,   0, 
++      0,   0,  42,   0,  16,   0, 
++      1,   0,   0,   0,  10,   0, 
++     16,   0,   2,   0,   0,   0, 
++     41,   0,   0,   7,  34,   0, 
++     16,   0,   1,   0,   0,   0, 
++     26,   0,  16,   0,   1,   0, 
++      0,   0,   1,  64,   0,   0, 
++      4,   0,   0,   0,  35,   0, 
++      0,   9,  34,   0,  16,   0, 
++      1,   0,   0,   0,  42,   0, 
++     16,   0,   2,   0,   0,   0, 
++     26,   0,  16,   0,   2,   0, 
++      0,   0,  26,   0,  16,   0, 
++      1,   0,   0,   0,  30,   0, 
++      0,   9,  34,   0,  16,   0, 
++      1,   0,   0,   0,  26,   0, 
++     16,   0,   1,   0,   0,   0, 
++     26, 128,  48,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,  85,   0, 
++      0,   7,  34,   0,  16,   0, 
++      1,   0,   0,   0,  26,   0, 
++     16,   0,   1,   0,   0,   0, 
++      1,  64,   0,   0,   4,   0, 
++      0,   0,  45,   0,   0,   8, 
++    242,   0,  16,   0,   2,   0, 
++      0,   0,  86,   5,  16,   0, 
++      1,   0,   0,   0,  70, 126, 
++     32,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,  31,   0, 
++      4,   3,  10,   0,  16,   0, 
++      1,   0,   0,   0,  41,   0, 
++      0,  10, 242,   0,  16,   0, 
++      3,   0,   0,   0,  70,  14, 
++     16,   0,   2,   0,   0,   0, 
++      2,  64,   0,   0,   8,   0, 
++      0,   0,   8,   0,   0,   0, 
++      8,   0,   0,   0,   8,   0, 
++      0,   0,   1,   0,   0,  10, 
++    242,   0,  16,   0,   3,   0, 
++      0,   0,  70,  14,  16,   0, 
++      3,   0,   0,   0,   2,  64, 
++      0,   0,   0, 255,   0, 255, 
++      0, 255,   0, 255,   0, 255, 
++      0, 255,   0, 255,   0, 255, 
++     85,   0,   0,  10, 242,   0, 
++     16,   0,   5,   0,   0,   0, 
++     70,  14,  16,   0,   2,   0, 
++      0,   0,   2,  64,   0,   0, 
++      8,   0,   0,   0,   8,   0, 
++      0,   0,   8,   0,   0,   0, 
++      8,   0,   0,   0,   1,   0, 
++      0,  10, 242,   0,  16,   0, 
++      5,   0,   0,   0,  70,  14, 
++     16,   0,   5,   0,   0,   0, 
++      2,  64,   0,   0, 255,   0, 
++    255,   0, 255,   0, 255,   0, 
++    255,   0, 255,   0, 255,   0, 
++    255,   0,  30,   0,   0,   7, 
++    242,   0,  16,   0,   2,   0, 
++      0,   0,  70,  14,  16,   0, 
++      3,   0,   0,   0,  70,  14, 
++     16,   0,   5,   0,   0,   0, 
++     21,   0,   0,   1,  31,   0, 
++      4,   3,  58,   0,  16,   0, 
++      1,   0,   0,   0,  85,   0, 
++      0,  10, 242,   0,  16,   0, 
++      1,   0,   0,   0,  70,  14, 
++     16,   0,   2,   0,   0,   0, 
++      2,  64,   0,   0,  16,   0, 
++      0,   0,  16,   0,   0,   0, 
++     16,   0,   0,   0,  16,   0, 
++      0,   0, 140,   0,   0,  17, 
++    242,   0,  16,   0,   2,   0, 
++      0,   0,   2,  64,   0,   0, 
++     16,   0,   0,   0,  16,   0, 
++      0,   0,  16,   0,   0,   0, 
++     16,   0,   0,   0,   2,  64, 
++      0,   0,  16,   0,   0,   0, 
++     16,   0,   0,   0,  16,   0, 
++      0,   0,  16,   0,   0,   0, 
++     70,  14,  16,   0,   2,   0, 
++      0,   0,  70,  14,  16,   0, 
++      1,   0,   0,   0,  21,   0, 
++      0,   1,  85,   0,   0,  10, 
++    242,   0,  16,   0,   1,   0, 
++      0,   0,  70,  14,  16,   0, 
++      2,   0,   0,   0,   2,  64, 
++      0,   0,   8,   0,   0,   0, 
++      8,   0,   0,   0,   8,   0, 
++      0,   0,   8,   0,   0,   0, 
++    138,   0,   0,  15, 242,   0, 
++     16,   0,   2,   0,   0,   0, 
++      2,  64,   0,   0,  20,   0, 
++      0,   0,  20,   0,   0,   0, 
++     20,   0,   0,   0,  20,   0, 
++      0,   0,   2,  64,   0,   0, 
++      8,   0,   0,   0,   8,   0, 
++      0,   0,   8,   0,   0,   0, 
++      8,   0,   0,   0,  70,  14, 
++     16,   0,   2,   0,   0,   0, 
++     85,   0,   0,  10, 242,   0, 
++     16,   0,   3,   0,   0,   0, 
++     70,  14,  16,   0,   1,   0, 
++      0,   0,   2,  64,   0,   0, 
++     20,   0,   0,   0,  20,   0, 
++      0,   0,  20,   0,   0,   0, 
++     20,   0,   0,   0, 135,   0, 
++      0,   5, 242,   0,  16,   0, 
++      5,   0,   0,   0,  70,  14, 
++     16,   0,   2,   0,   0,   0, 
++     30,   0,   0,  10, 242,   0, 
++     16,   0,   5,   0,   0,   0, 
++     70,  14,  16,   0,   5,   0, 
++      0,   0,   2,  64,   0,   0, 
++    245, 255, 255, 255, 245, 255, 
++    255, 255, 245, 255, 255, 255, 
++    245, 255, 255, 255,  55,   0, 
++      0,  12, 242,   0,  16,   0, 
++      5,   0,   0,   0,  70,  14, 
++     16,   0,   2,   0,   0,   0, 
++     70,  14,  16,   0,   5,   0, 
++      0,   0,   2,  64,   0,   0, 
++     21,   0,   0,   0,  21,   0, 
++      0,   0,  21,   0,   0,   0, 
++     21,   0,   0,   0,  30,   0, 
++      0,  11, 242,   0,  16,   0, 
++      6,   0,   0,   0,  70,  14, 
++     16, 128,  65,   0,   0,   0, 
++      5,   0,   0,   0,   2,  64, 
++      0,   0,   1,   0,   0,   0, 
++      1,   0,   0,   0,   1,   0, 
++      0,   0,   1,   0,   0,   0, 
++     55,   0,   0,   9, 242,   0, 
++     16,   0,   6,   0,   0,   0, 
++     70,  14,  16,   0,   3,   0, 
++      0,   0,  70,  14,  16,   0, 
++      3,   0,   0,   0,  70,  14, 
++     16,   0,   6,   0,   0,   0, 
++     41,   0,   0,   7, 242,   0, 
++     16,   0,   5,   0,   0,   0, 
++     70,  14,  16,   0,   2,   0, 
++      0,   0,  70,  14,  16,   0, 
++      5,   0,   0,   0,   1,   0, 
++      0,  10, 242,   0,  16,   0, 
++      5,   0,   0,   0,  70,  14, 
++     16,   0,   5,   0,   0,   0, 
++      2,  64,   0,   0, 255, 255, 
++     15,   0, 255, 255,  15,   0, 
++    255, 255,  15,   0, 255, 255, 
++     15,   0,  55,   0,   0,   9, 
++    242,   0,  16,   0,   2,   0, 
++      0,   0,  70,  14,  16,   0, 
++      3,   0,   0,   0,  70,  14, 
++     16,   0,   2,   0,   0,   0, 
++     70,  14,  16,   0,   5,   0, 
++      0,   0,  41,   0,   0,  10, 
++    242,   0,  16,   0,   3,   0, 
++      0,   0,  70,  14,  16,   0, 
++      6,   0,   0,   0,   2,  64, 
++      0,   0,  23,   0,   0,   0, 
++     23,   0,   0,   0,  23,   0, 
++      0,   0,  23,   0,   0,   0, 
++     30,   0,   0,  10, 242,   0, 
++     16,   0,   3,   0,   0,   0, 
++     70,  14,  16,   0,   3,   0, 
++      0,   0,   2,  64,   0,   0, 
++      0,   0,   0,  56,   0,   0, 
++      0,  56,   0,   0,   0,  56, 
++      0,   0,   0,  56,  41,   0, 
++      0,  10, 242,   0,  16,   0, 
++      2,   0,   0,   0,  70,  14, 
++     16,   0,   2,   0,   0,   0, 
++      2,  64,   0,   0,   3,   0, 
++      0,   0,   3,   0,   0,   0, 
++      3,   0,   0,   0,   3,   0, 
++      0,   0,  30,   0,   0,   7, 
++    242,   0,  16,   0,   2,   0, 
++      0,   0,  70,  14,  16,   0, 
++      3,   0,   0,   0,  70,  14, 
++     16,   0,   2,   0,   0,   0, 
++     55,   0,   0,  12, 242,   0, 
++     16,   0,   1,   0,   0,   0, 
++     70,  14,  16,   0,   1,   0, 
++      0,   0,  70,  14,  16,   0, 
++      2,   0,   0,   0,   2,  64, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++    164,   0,   0,   8, 242, 224, 
++     33,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,  70,  14, 
++     16,   0,   4,   0,   0,   0, 
++      6,   0,  16,   0,   1,   0, 
++      0,   0,  30,   0,   0,  10, 
++    242,   0,  16,   0,   2,   0, 
++      0,   0, 198,  15,  16,   0, 
++      0,   0,   0,   0,   2,  64, 
++      0,   0,   5,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++    164,   0,   0,   8, 242, 224, 
++     33,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,  70,  14, 
++     16,   0,   2,   0,   0,   0, 
++     86,   5,  16,   0,   1,   0, 
++      0,   0,  30,   0,   0,  10, 
++    242,   0,  16,   0,   2,   0, 
++      0,   0, 198,  15,  16,   0, 
++      0,   0,   0,   0,   2,  64, 
++      0,   0,   6,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++    164,   0,   0,   8, 242, 224, 
++     33,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,  70,  14, 
++     16,   0,   2,   0,   0,   0, 
++    166,  10,  16,   0,   1,   0, 
++      0,   0,  30,   0,   0,  10, 
++    242,   0,  16,   0,   2,   0, 
++      0,   0,  70,  14,  16,   0, 
++      0,   0,   0,   0,   2,  64, 
++      0,   0,   7,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++    164,   0,   0,   8, 242, 224, 
++     33,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,  70,  14, 
++     16,   0,   2,   0,   0,   0, 
++    246,  15,  16,   0,   1,   0, 
++      0,   0,  62,   0,   0,   1, 
++     83,  84,  65,  84, 148,   0, 
++      0,   0, 136,   0,   0,   0, 
++      9,   0,   0,   0,   0,   0, 
++      0,   0,   1,   0,   0,   0, 
++      0,   0,   0,   0,  50,   0, 
++      0,   0,  30,   0,   0,   0, 
++      2,   0,   0,   0,   5,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   2,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      1,   0,   0,   0,   8,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   8,   0,   0,   0
++};
+diff --git a/src/graphics/shaders/bytecode/d3d12_5_1/texture_load_direct_rgba16f_scaled_cs.h b/src/graphics/shaders/bytecode/d3d12_5_1/texture_load_direct_rgba16f_scaled_cs.h
+new file mode 100644
+index 0000000..9fe796d
+--- /dev/null
++++ b/src/graphics/shaders/bytecode/d3d12_5_1/texture_load_direct_rgba16f_scaled_cs.h
+@@ -0,0 +1,1003 @@
++#if 0
++//
++// Generated by Microsoft (R) HLSL Shader Compiler 10.1
++//
++//
++// Buffer Definitions: 
++//
++// cbuffer push_consts_xe
++// {
++//
++//   uint xe_texture_load_is_tiled_3d_endian_scale;// Offset:    0 Size:     4
++//   uint xe_texture_load_guest_offset; // Offset:    4 Size:     4
++//   uint xe_texture_load_guest_pitch_aligned;// Offset:    8 Size:     4
++//   uint xe_texture_load_guest_z_stride_block_rows_aligned;// Offset:   12 Size:     4 [unused]
++//   uint3 xe_texture_load_size_blocks; // Offset:   16 Size:    12
++//   uint xe_texture_load_host_offset;  // Offset:   28 Size:     4 [unused]
++//   uint xe_texture_load_host_pitch;   // Offset:   32 Size:     4 [unused]
++//   uint xe_texture_load_height_texels;// Offset:   36 Size:     4 [unused]
++//
++// }
++//
++//
++// Resource Bindings:
++//
++// Name                                 Type  Format         Dim      ID      HLSL Bind  Count
++// ------------------------------ ---------- ------- ----------- ------- -------------- ------
++// xe_texture_load_source            texture   uint4         buf      T0             t0      1 
++// xe_texture_load_dest                  UAV  float4          2d      U0             u0      1 
++// push_consts_xe                    cbuffer      NA          NA     CB0            cb0      1 
++//
++//
++//
++// Input signature:
++//
++// Name                 Index   Mask Register SysValue  Format   Used
++// -------------------- ----- ------ -------- -------- ------- ------
++// no Input
++//
++// Output signature:
++//
++// Name                 Index   Mask Register SysValue  Format   Used
++// -------------------- ----- ------ -------- -------- ------- ------
++// no Output
++cs_5_1
++dcl_globalFlags refactoringAllowed
++dcl_constantbuffer CB0[0:0][2], immediateIndexed, space=0
++dcl_resource_buffer (uint,uint,uint,uint) T0[0:0], space=0
++dcl_uav_typed_texture2d (float,float,float,float) U0[0:0], space=0
++dcl_input vThreadID.xy
++dcl_temps 7
++dcl_thread_group 4, 32, 1
++ishl r0.x, vThreadID.x, l(2)
++mov r0.yzw, vThreadID.yyyy
++uge r1.xy, r0.xwxx, CB0[0][1].xyxx
++or r1.x, r1.y, r1.x
++if_nz r1.x
++  ret 
++endif 
++ubfe r1.xyz, l(2, 3, 3, 0), l(2, 4, 7, 0), CB0[0][0].xxxx
++ushr r1.w, r0.x, l(1)
++udiv r2.x, null, r1.w, r1.y
++udiv r2.y, null, vThreadID.y, r1.z
++imad r1.w, -r2.x, r1.y, r1.w
++imad r2.z, -r2.y, r1.z, vThreadID.y
++ishl r2.w, r2.x, l(1)
++ushr r3.x, CB0[0][0].z, l(5)
++ishr r4.xyzw, r2.yyyy, l(5, 1, 4, 3)
++ibfe r3.yz, l(0, 27, 29, 0), l(0, 4, 2, 0), r2.xxxx
++imad r2.x, r4.x, r3.x, r3.y
++bfi r4.xyz, l(3, 1, 1, 0), l(3, 1, 11, 0), r4.ywzy, l(0, 0, 0, 0)
++bfi r2.w, l(3), l(0), r2.w, r4.x
++bfi r2.x, l(26), l(6), r2.x, r2.w
++and r2.w, r3.z, l(3)
++xor r2.w, r4.y, r2.w
++bfi r2.y, l(1), l(4), r2.y, l(0)
++imad r2.y, r2.w, l(64), r2.y
++iadd r2.y, r4.z, r2.y
++ibfe r3.yzw, l(0, 28, 27, 24), l(0, 1, 2, 5), r2.xxxx
++bfi r2.x, l(1), l(5), r3.y, r2.y
++bfi r2.x, l(3), l(8), r3.z, r2.x
++bfi r2.x, l(20), l(12), r3.w, r2.x
++imul null, r2.y, r1.z, r1.y
++imad r1.w, r1.w, r1.z, r2.z
++ishl r1.w, r1.w, l(4)
++imad r1.w, r2.x, r2.y, r1.w
++iadd r1.w, r1.w, CB0[0][0].y
++ushr r1.w, r1.w, l(4)
++ld r4.xyzw, r1.wwww, T0[0].xyzw
++ieq r2.xzw, r1.xxxx, l(1, 0, 2, 3)
++or r1.xw, r2.zzzw, r2.xxxz
++if_nz r1.x
++  ishl r5.xyzw, r4.xyzw, l(8, 8, 8, 8)
++  and r5.xyzw, r5.xyzw, l(0xff00ff00, 0xff00ff00, 0xff00ff00, 0xff00ff00)
++  ushr r6.xyzw, r4.xyzw, l(8, 8, 8, 8)
++  and r6.xyzw, r6.xyzw, l(0x00ff00ff, 0x00ff00ff, 0x00ff00ff, 0x00ff00ff)
++  iadd r4.xyzw, r5.xyzw, r6.xyzw
++endif 
++if_nz r1.w
++  ushr r5.xyzw, r4.xyzw, l(16, 16, 16, 16)
++  bfi r4.xyzw, l(16, 16, 16, 16), l(16, 16, 16, 16), r4.xyzw, r5.xyzw
++endif 
++ushr r2.xz, r4.xxyx, l(16, 0, 16, 0)
++f16tof32 r5.xz, r4.xxyx
++f16tof32 r5.yw, r2.xxxz
++store_uav_typed U0[0].xyzw, r0.xwww, r5.xyzw
++iadd r5.xyzw, r0.xwww, l(1, 0, 0, 0)
++ushr r2.xz, r4.zzwz, l(16, 0, 16, 0)
++f16tof32 r4.xz, r4.zzwz
++f16tof32 r4.yw, r2.xxxz
++store_uav_typed U0[0].xyzw, r5.xyzw, r4.xyzw
++iadd r4.xyzw, r0.xwww, l(2, 0, 0, 0)
++ushr r2.x, r4.x, l(1)
++udiv r2.z, null, r2.x, r1.y
++udiv r2.w, null, r4.w, r1.z
++imad r1.y, -r2.z, r1.y, r2.x
++imad r2.x, -r2.w, r1.z, r4.w
++ishl r3.y, r2.z, l(1)
++ishr r5.xyzw, r2.wwww, l(5, 1, 4, 3)
++ibfe r3.zw, l(0, 0, 27, 29), l(0, 0, 4, 2), r2.zzzz
++imad r2.z, r5.x, r3.x, r3.z
++bfi r5.xyz, l(3, 1, 1, 0), l(3, 1, 11, 0), r5.ywzy, l(0, 0, 0, 0)
++bfi r3.x, l(3), l(0), r3.y, r5.x
++bfi r2.z, l(26), l(6), r2.z, r3.x
++and r3.x, r3.w, l(3)
++xor r3.x, r5.y, r3.x
++bfi r2.w, l(1), l(4), r2.w, l(0)
++imad r2.w, r3.x, l(64), r2.w
++iadd r2.w, r5.z, r2.w
++ibfe r3.xyz, l(28, 27, 24, 0), l(1, 2, 5, 0), r2.zzzz
++bfi r2.z, l(1), l(5), r3.x, r2.w
++bfi r2.z, l(3), l(8), r3.y, r2.z
++bfi r2.z, l(20), l(12), r3.z, r2.z
++imad r1.y, r1.y, r1.z, r2.x
++ishl r1.y, r1.y, l(4)
++imad r1.y, r2.z, r2.y, r1.y
++iadd r1.y, r1.y, CB0[0][0].y
++ushr r1.y, r1.y, l(4)
++ld r2.xyzw, r1.yyyy, T0[0].xyzw
++if_nz r1.x
++  ishl r3.xyzw, r2.xyzw, l(8, 8, 8, 8)
++  and r3.xyzw, r3.xyzw, l(0xff00ff00, 0xff00ff00, 0xff00ff00, 0xff00ff00)
++  ushr r5.xyzw, r2.xyzw, l(8, 8, 8, 8)
++  and r5.xyzw, r5.xyzw, l(0x00ff00ff, 0x00ff00ff, 0x00ff00ff, 0x00ff00ff)
++  iadd r2.xyzw, r3.xyzw, r5.xyzw
++endif 
++if_nz r1.w
++  ushr r1.xyzw, r2.xyzw, l(16, 16, 16, 16)
++  bfi r2.xyzw, l(16, 16, 16, 16), l(16, 16, 16, 16), r2.xyzw, r1.xyzw
++endif 
++ushr r1.xy, r2.xyxx, l(16, 16, 0, 0)
++f16tof32 r3.xz, r2.xxyx
++f16tof32 r3.yw, r1.xxxy
++store_uav_typed U0[0].xyzw, r4.xyzw, r3.xyzw
++iadd r1.xyzw, r0.xyzw, l(3, 0, 0, 0)
++ushr r0.yz, r2.zzwz, l(0, 16, 16, 0)
++f16tof32 r2.xz, r2.zzwz
++f16tof32 r2.yw, r0.yyyz
++store_uav_typed U0[0].xyzw, r1.xyzw, r2.xyzw
++ret 
++// Approximately 108 instruction slots used
++#endif
++
++const BYTE texture_load_direct_rgba16f_scaled_cs[] =
++{
++     68,  88,  66,  67, 164, 170, 
++    167,   8, 222,  16,  13,  96, 
++    197, 185, 193, 242, 140, 235, 
++    230, 190,   1,   0,   0,   0, 
++    164,  19,   0,   0,   5,   0, 
++      0,   0,  52,   0,   0,   0, 
++     20,   4,   0,   0,  36,   4, 
++      0,   0,  52,   4,   0,   0, 
++      8,  19,   0,   0,  82,  68, 
++     69,  70, 216,   3,   0,   0, 
++      1,   0,   0,   0, 240,   0, 
++      0,   0,   3,   0,   0,   0, 
++     60,   0,   0,   0,   1,   5, 
++     83,  67,   0, 133,   0,   0, 
++    173,   3,   0,   0,  19,  19, 
++     68,  37,  60,   0,   0,   0, 
++     24,   0,   0,   0,  40,   0, 
++      0,   0,  40,   0,   0,   0, 
++     36,   0,   0,   0,  12,   0, 
++      0,   0,   0,   0,   0,   0, 
++    180,   0,   0,   0,   2,   0, 
++      0,   0,   4,   0,   0,   0, 
++      1,   0,   0,   0, 255, 255, 
++    255, 255,   0,   0,   0,   0, 
++      1,   0,   0,   0,  12,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0, 203,   0, 
++      0,   0,   4,   0,   0,   0, 
++      5,   0,   0,   0,   4,   0, 
++      0,   0, 255, 255, 255, 255, 
++      0,   0,   0,   0,   1,   0, 
++      0,   0,  12,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0, 224,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   1,   0,   0,   0, 
++      1,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++    120, 101,  95, 116, 101, 120, 
++    116, 117, 114, 101,  95, 108, 
++    111,  97, 100,  95, 115, 111, 
++    117, 114,  99, 101,   0, 120, 
++    101,  95, 116, 101, 120, 116, 
++    117, 114, 101,  95, 108, 111, 
++     97, 100,  95, 100, 101, 115, 
++    116,   0, 112, 117, 115, 104, 
++     95,  99, 111, 110, 115, 116, 
++    115,  95, 120, 101,   0, 171, 
++    224,   0,   0,   0,   8,   0, 
++      0,   0,   8,   1,   0,   0, 
++     48,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     72,   2,   0,   0,   0,   0, 
++      0,   0,   4,   0,   0,   0, 
++      2,   0,   0,   0, 120,   2, 
++      0,   0,   0,   0,   0,   0, 
++    255, 255, 255, 255,   0,   0, 
++      0,   0, 255, 255, 255, 255, 
++      0,   0,   0,   0, 156,   2, 
++      0,   0,   4,   0,   0,   0, 
++      4,   0,   0,   0,   2,   0, 
++      0,   0, 120,   2,   0,   0, 
++      0,   0,   0,   0, 255, 255, 
++    255, 255,   0,   0,   0,   0, 
++    255, 255, 255, 255,   0,   0, 
++      0,   0, 185,   2,   0,   0, 
++      8,   0,   0,   0,   4,   0, 
++      0,   0,   2,   0,   0,   0, 
++    120,   2,   0,   0,   0,   0, 
++      0,   0, 255, 255, 255, 255, 
++      0,   0,   0,   0, 255, 255, 
++    255, 255,   0,   0,   0,   0, 
++    221,   2,   0,   0,  12,   0, 
++      0,   0,   4,   0,   0,   0, 
++      0,   0,   0,   0, 120,   2, 
++      0,   0,   0,   0,   0,   0, 
++    255, 255, 255, 255,   0,   0, 
++      0,   0, 255, 255, 255, 255, 
++      0,   0,   0,   0,  15,   3, 
++      0,   0,  16,   0,   0,   0, 
++     12,   0,   0,   0,   2,   0, 
++      0,   0,  52,   3,   0,   0, 
++      0,   0,   0,   0, 255, 255, 
++    255, 255,   0,   0,   0,   0, 
++    255, 255, 255, 255,   0,   0, 
++      0,   0,  88,   3,   0,   0, 
++     28,   0,   0,   0,   4,   0, 
++      0,   0,   0,   0,   0,   0, 
++    120,   2,   0,   0,   0,   0, 
++      0,   0, 255, 255, 255, 255, 
++      0,   0,   0,   0, 255, 255, 
++    255, 255,   0,   0,   0,   0, 
++    116,   3,   0,   0,  32,   0, 
++      0,   0,   4,   0,   0,   0, 
++      0,   0,   0,   0, 120,   2, 
++      0,   0,   0,   0,   0,   0, 
++    255, 255, 255, 255,   0,   0, 
++      0,   0, 255, 255, 255, 255, 
++      0,   0,   0,   0, 143,   3, 
++      0,   0,  36,   0,   0,   0, 
++      4,   0,   0,   0,   0,   0, 
++      0,   0, 120,   2,   0,   0, 
++      0,   0,   0,   0, 255, 255, 
++    255, 255,   0,   0,   0,   0, 
++    255, 255, 255, 255,   0,   0, 
++      0,   0, 120, 101,  95, 116, 
++    101, 120, 116, 117, 114, 101, 
++     95, 108, 111,  97, 100,  95, 
++    105, 115,  95, 116, 105, 108, 
++    101, 100,  95,  51, 100,  95, 
++    101, 110, 100, 105,  97, 110, 
++     95, 115,  99,  97, 108, 101, 
++      0, 100, 119, 111, 114, 100, 
++      0, 171,   0,   0,  19,   0, 
++      1,   0,   1,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0, 113,   2, 
++      0,   0, 120, 101,  95, 116, 
++    101, 120, 116, 117, 114, 101, 
++     95, 108, 111,  97, 100,  95, 
++    103, 117, 101, 115, 116,  95, 
++    111, 102, 102, 115, 101, 116, 
++      0, 120, 101,  95, 116, 101, 
++    120, 116, 117, 114, 101,  95, 
++    108, 111,  97, 100,  95, 103, 
++    117, 101, 115, 116,  95, 112, 
++    105, 116,  99, 104,  95,  97, 
++    108, 105, 103, 110, 101, 100, 
++      0, 120, 101,  95, 116, 101, 
++    120, 116, 117, 114, 101,  95, 
++    108, 111,  97, 100,  95, 103, 
++    117, 101, 115, 116,  95, 122, 
++     95, 115, 116, 114, 105, 100, 
++    101,  95,  98, 108, 111,  99, 
++    107,  95, 114, 111, 119, 115, 
++     95,  97, 108, 105, 103, 110, 
++    101, 100,   0, 120, 101,  95, 
++    116, 101, 120, 116, 117, 114, 
++    101,  95, 108, 111,  97, 100, 
++     95, 115, 105, 122, 101,  95, 
++     98, 108, 111,  99, 107, 115, 
++      0, 117, 105, 110, 116,  51, 
++      0, 171, 171, 171,   1,   0, 
++     19,   0,   1,   0,   3,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     43,   3,   0,   0, 120, 101, 
++     95, 116, 101, 120, 116, 117, 
++    114, 101,  95, 108, 111,  97, 
++    100,  95, 104, 111, 115, 116, 
++     95, 111, 102, 102, 115, 101, 
++    116,   0, 120, 101,  95, 116, 
++    101, 120, 116, 117, 114, 101, 
++     95, 108, 111,  97, 100,  95, 
++    104, 111, 115, 116,  95, 112, 
++    105, 116,  99, 104,   0, 120, 
++    101,  95, 116, 101, 120, 116, 
++    117, 114, 101,  95, 108, 111, 
++     97, 100,  95, 104, 101, 105, 
++    103, 104, 116,  95, 116, 101, 
++    120, 101, 108, 115,   0,  77, 
++    105,  99, 114, 111, 115, 111, 
++    102, 116,  32,  40,  82,  41, 
++     32,  72,  76,  83,  76,  32, 
++     83, 104,  97, 100, 101, 114, 
++     32,  67, 111, 109, 112, 105, 
++    108, 101, 114,  32,  49,  48, 
++     46,  49,   0, 171, 171, 171, 
++     73,  83,  71,  78,   8,   0, 
++      0,   0,   0,   0,   0,   0, 
++      8,   0,   0,   0,  79,  83, 
++     71,  78,   8,   0,   0,   0, 
++      0,   0,   0,   0,   8,   0, 
++      0,   0,  83,  72,  69,  88, 
++    204,  14,   0,   0,  81,   0, 
++      5,   0, 179,   3,   0,   0, 
++    106,   8,   0,   1,  89,   0, 
++      0,   7,  70, 142,  48,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      2,   0,   0,   0,   0,   0, 
++      0,   0,  88,   8,   0,   7, 
++     70, 126,  48,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,  68,  68, 
++      0,   0,   0,   0,   0,   0, 
++    156,  24,   0,   7,  70, 238, 
++     49,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,  85,  85,   0,   0, 
++      0,   0,   0,   0,  95,   0, 
++      0,   2,  50,   0,   2,   0, 
++    104,   0,   0,   2,   7,   0, 
++      0,   0, 155,   0,   0,   4, 
++      4,   0,   0,   0,  32,   0, 
++      0,   0,   1,   0,   0,   0, 
++     41,   0,   0,   6,  18,   0, 
++     16,   0,   0,   0,   0,   0, 
++     10,   0,   2,   0,   1,  64, 
++      0,   0,   2,   0,   0,   0, 
++     54,   0,   0,   4, 226,   0, 
++     16,   0,   0,   0,   0,   0, 
++     86,   5,   2,   0,  80,   0, 
++      0,   9,  50,   0,  16,   0, 
++      1,   0,   0,   0, 198,   0, 
++     16,   0,   0,   0,   0,   0, 
++     70, 128,  48,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      1,   0,   0,   0,  60,   0, 
++      0,   7,  18,   0,  16,   0, 
++      1,   0,   0,   0,  26,   0, 
++     16,   0,   1,   0,   0,   0, 
++     10,   0,  16,   0,   1,   0, 
++      0,   0,  31,   0,   4,   3, 
++     10,   0,  16,   0,   1,   0, 
++      0,   0,  62,   0,   0,   1, 
++     21,   0,   0,   1, 138,   0, 
++      0,  17, 114,   0,  16,   0, 
++      1,   0,   0,   0,   2,  64, 
++      0,   0,   2,   0,   0,   0, 
++      3,   0,   0,   0,   3,   0, 
++      0,   0,   0,   0,   0,   0, 
++      2,  64,   0,   0,   2,   0, 
++      0,   0,   4,   0,   0,   0, 
++      7,   0,   0,   0,   0,   0, 
++      0,   0,   6, 128,  48,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     85,   0,   0,   7, 130,   0, 
++     16,   0,   1,   0,   0,   0, 
++     10,   0,  16,   0,   0,   0, 
++      0,   0,   1,  64,   0,   0, 
++      1,   0,   0,   0,  78,   0, 
++      0,   8,  18,   0,  16,   0, 
++      2,   0,   0,   0,   0, 208, 
++      0,   0,  58,   0,  16,   0, 
++      1,   0,   0,   0,  26,   0, 
++     16,   0,   1,   0,   0,   0, 
++     78,   0,   0,   7,  34,   0, 
++     16,   0,   2,   0,   0,   0, 
++      0, 208,   0,   0,  26,   0, 
++      2,   0,  42,   0,  16,   0, 
++      1,   0,   0,   0,  35,   0, 
++      0,  10, 130,   0,  16,   0, 
++      1,   0,   0,   0,  10,   0, 
++     16, 128,  65,   0,   0,   0, 
++      2,   0,   0,   0,  26,   0, 
++     16,   0,   1,   0,   0,   0, 
++     58,   0,  16,   0,   1,   0, 
++      0,   0,  35,   0,   0,   9, 
++     66,   0,  16,   0,   2,   0, 
++      0,   0,  26,   0,  16, 128, 
++     65,   0,   0,   0,   2,   0, 
++      0,   0,  42,   0,  16,   0, 
++      1,   0,   0,   0,  26,   0, 
++      2,   0,  41,   0,   0,   7, 
++    130,   0,  16,   0,   2,   0, 
++      0,   0,  10,   0,  16,   0, 
++      2,   0,   0,   0,   1,  64, 
++      0,   0,   1,   0,   0,   0, 
++     85,   0,   0,   9,  18,   0, 
++     16,   0,   3,   0,   0,   0, 
++     42, 128,  48,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   1,  64, 
++      0,   0,   5,   0,   0,   0, 
++     42,   0,   0,  10, 242,   0, 
++     16,   0,   4,   0,   0,   0, 
++     86,   5,  16,   0,   2,   0, 
++      0,   0,   2,  64,   0,   0, 
++      5,   0,   0,   0,   1,   0, 
++      0,   0,   4,   0,   0,   0, 
++      3,   0,   0,   0, 139,   0, 
++      0,  15,  98,   0,  16,   0, 
++      3,   0,   0,   0,   2,  64, 
++      0,   0,   0,   0,   0,   0, 
++     27,   0,   0,   0,  29,   0, 
++      0,   0,   0,   0,   0,   0, 
++      2,  64,   0,   0,   0,   0, 
++      0,   0,   4,   0,   0,   0, 
++      2,   0,   0,   0,   0,   0, 
++      0,   0,   6,   0,  16,   0, 
++      2,   0,   0,   0,  35,   0, 
++      0,   9,  18,   0,  16,   0, 
++      2,   0,   0,   0,  10,   0, 
++     16,   0,   4,   0,   0,   0, 
++     10,   0,  16,   0,   3,   0, 
++      0,   0,  26,   0,  16,   0, 
++      3,   0,   0,   0, 140,   0, 
++      0,  20, 114,   0,  16,   0, 
++      4,   0,   0,   0,   2,  64, 
++      0,   0,   3,   0,   0,   0, 
++      1,   0,   0,   0,   1,   0, 
++      0,   0,   0,   0,   0,   0, 
++      2,  64,   0,   0,   3,   0, 
++      0,   0,   1,   0,   0,   0, 
++     11,   0,   0,   0,   0,   0, 
++      0,   0, 214,   6,  16,   0, 
++      4,   0,   0,   0,   2,  64, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++    140,   0,   0,  11, 130,   0, 
++     16,   0,   2,   0,   0,   0, 
++      1,  64,   0,   0,   3,   0, 
++      0,   0,   1,  64,   0,   0, 
++      0,   0,   0,   0,  58,   0, 
++     16,   0,   2,   0,   0,   0, 
++     10,   0,  16,   0,   4,   0, 
++      0,   0, 140,   0,   0,  11, 
++     18,   0,  16,   0,   2,   0, 
++      0,   0,   1,  64,   0,   0, 
++     26,   0,   0,   0,   1,  64, 
++      0,   0,   6,   0,   0,   0, 
++     10,   0,  16,   0,   2,   0, 
++      0,   0,  58,   0,  16,   0, 
++      2,   0,   0,   0,   1,   0, 
++      0,   7, 130,   0,  16,   0, 
++      2,   0,   0,   0,  42,   0, 
++     16,   0,   3,   0,   0,   0, 
++      1,  64,   0,   0,   3,   0, 
++      0,   0,  87,   0,   0,   7, 
++    130,   0,  16,   0,   2,   0, 
++      0,   0,  26,   0,  16,   0, 
++      4,   0,   0,   0,  58,   0, 
++     16,   0,   2,   0,   0,   0, 
++    140,   0,   0,  11,  34,   0, 
++     16,   0,   2,   0,   0,   0, 
++      1,  64,   0,   0,   1,   0, 
++      0,   0,   1,  64,   0,   0, 
++      4,   0,   0,   0,  26,   0, 
++     16,   0,   2,   0,   0,   0, 
++      1,  64,   0,   0,   0,   0, 
++      0,   0,  35,   0,   0,   9, 
++     34,   0,  16,   0,   2,   0, 
++      0,   0,  58,   0,  16,   0, 
++      2,   0,   0,   0,   1,  64, 
++      0,   0,  64,   0,   0,   0, 
++     26,   0,  16,   0,   2,   0, 
++      0,   0,  30,   0,   0,   7, 
++     34,   0,  16,   0,   2,   0, 
++      0,   0,  42,   0,  16,   0, 
++      4,   0,   0,   0,  26,   0, 
++     16,   0,   2,   0,   0,   0, 
++    139,   0,   0,  15, 226,   0, 
++     16,   0,   3,   0,   0,   0, 
++      2,  64,   0,   0,   0,   0, 
++      0,   0,  28,   0,   0,   0, 
++     27,   0,   0,   0,  24,   0, 
++      0,   0,   2,  64,   0,   0, 
++      0,   0,   0,   0,   1,   0, 
++      0,   0,   2,   0,   0,   0, 
++      5,   0,   0,   0,   6,   0, 
++     16,   0,   2,   0,   0,   0, 
++    140,   0,   0,  11,  18,   0, 
++     16,   0,   2,   0,   0,   0, 
++      1,  64,   0,   0,   1,   0, 
++      0,   0,   1,  64,   0,   0, 
++      5,   0,   0,   0,  26,   0, 
++     16,   0,   3,   0,   0,   0, 
++     26,   0,  16,   0,   2,   0, 
++      0,   0, 140,   0,   0,  11, 
++     18,   0,  16,   0,   2,   0, 
++      0,   0,   1,  64,   0,   0, 
++      3,   0,   0,   0,   1,  64, 
++      0,   0,   8,   0,   0,   0, 
++     42,   0,  16,   0,   3,   0, 
++      0,   0,  10,   0,  16,   0, 
++      2,   0,   0,   0, 140,   0, 
++      0,  11,  18,   0,  16,   0, 
++      2,   0,   0,   0,   1,  64, 
++      0,   0,  20,   0,   0,   0, 
++      1,  64,   0,   0,  12,   0, 
++      0,   0,  58,   0,  16,   0, 
++      3,   0,   0,   0,  10,   0, 
++     16,   0,   2,   0,   0,   0, 
++     38,   0,   0,   8,   0, 208, 
++      0,   0,  34,   0,  16,   0, 
++      2,   0,   0,   0,  42,   0, 
++     16,   0,   1,   0,   0,   0, 
++     26,   0,  16,   0,   1,   0, 
++      0,   0,  35,   0,   0,   9, 
++    130,   0,  16,   0,   1,   0, 
++      0,   0,  58,   0,  16,   0, 
++      1,   0,   0,   0,  42,   0, 
++     16,   0,   1,   0,   0,   0, 
++     42,   0,  16,   0,   2,   0, 
++      0,   0,  41,   0,   0,   7, 
++    130,   0,  16,   0,   1,   0, 
++      0,   0,  58,   0,  16,   0, 
++      1,   0,   0,   0,   1,  64, 
++      0,   0,   4,   0,   0,   0, 
++     35,   0,   0,   9, 130,   0, 
++     16,   0,   1,   0,   0,   0, 
++     10,   0,  16,   0,   2,   0, 
++      0,   0,  26,   0,  16,   0, 
++      2,   0,   0,   0,  58,   0, 
++     16,   0,   1,   0,   0,   0, 
++     30,   0,   0,   9, 130,   0, 
++     16,   0,   1,   0,   0,   0, 
++     58,   0,  16,   0,   1,   0, 
++      0,   0,  26, 128,  48,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     85,   0,   0,   7, 130,   0, 
++     16,   0,   1,   0,   0,   0, 
++     58,   0,  16,   0,   1,   0, 
++      0,   0,   1,  64,   0,   0, 
++      4,   0,   0,   0,  45,   0, 
++      0,   8, 242,   0,  16,   0, 
++      4,   0,   0,   0, 246,  15, 
++     16,   0,   1,   0,   0,   0, 
++     70, 126,  32,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     32,   0,   0,  10, 210,   0, 
++     16,   0,   2,   0,   0,   0, 
++      6,   0,  16,   0,   1,   0, 
++      0,   0,   2,  64,   0,   0, 
++      1,   0,   0,   0,   0,   0, 
++      0,   0,   2,   0,   0,   0, 
++      3,   0,   0,   0,  60,   0, 
++      0,   7, 146,   0,  16,   0, 
++      1,   0,   0,   0, 166,  14, 
++     16,   0,   2,   0,   0,   0, 
++      6,   8,  16,   0,   2,   0, 
++      0,   0,  31,   0,   4,   3, 
++     10,   0,  16,   0,   1,   0, 
++      0,   0,  41,   0,   0,  10, 
++    242,   0,  16,   0,   5,   0, 
++      0,   0,  70,  14,  16,   0, 
++      4,   0,   0,   0,   2,  64, 
++      0,   0,   8,   0,   0,   0, 
++      8,   0,   0,   0,   8,   0, 
++      0,   0,   8,   0,   0,   0, 
++      1,   0,   0,  10, 242,   0, 
++     16,   0,   5,   0,   0,   0, 
++     70,  14,  16,   0,   5,   0, 
++      0,   0,   2,  64,   0,   0, 
++      0, 255,   0, 255,   0, 255, 
++      0, 255,   0, 255,   0, 255, 
++      0, 255,   0, 255,  85,   0, 
++      0,  10, 242,   0,  16,   0, 
++      6,   0,   0,   0,  70,  14, 
++     16,   0,   4,   0,   0,   0, 
++      2,  64,   0,   0,   8,   0, 
++      0,   0,   8,   0,   0,   0, 
++      8,   0,   0,   0,   8,   0, 
++      0,   0,   1,   0,   0,  10, 
++    242,   0,  16,   0,   6,   0, 
++      0,   0,  70,  14,  16,   0, 
++      6,   0,   0,   0,   2,  64, 
++      0,   0, 255,   0, 255,   0, 
++    255,   0, 255,   0, 255,   0, 
++    255,   0, 255,   0, 255,   0, 
++     30,   0,   0,   7, 242,   0, 
++     16,   0,   4,   0,   0,   0, 
++     70,  14,  16,   0,   5,   0, 
++      0,   0,  70,  14,  16,   0, 
++      6,   0,   0,   0,  21,   0, 
++      0,   1,  31,   0,   4,   3, 
++     58,   0,  16,   0,   1,   0, 
++      0,   0,  85,   0,   0,  10, 
++    242,   0,  16,   0,   5,   0, 
++      0,   0,  70,  14,  16,   0, 
++      4,   0,   0,   0,   2,  64, 
++      0,   0,  16,   0,   0,   0, 
++     16,   0,   0,   0,  16,   0, 
++      0,   0,  16,   0,   0,   0, 
++    140,   0,   0,  17, 242,   0, 
++     16,   0,   4,   0,   0,   0, 
++      2,  64,   0,   0,  16,   0, 
++      0,   0,  16,   0,   0,   0, 
++     16,   0,   0,   0,  16,   0, 
++      0,   0,   2,  64,   0,   0, 
++     16,   0,   0,   0,  16,   0, 
++      0,   0,  16,   0,   0,   0, 
++     16,   0,   0,   0,  70,  14, 
++     16,   0,   4,   0,   0,   0, 
++     70,  14,  16,   0,   5,   0, 
++      0,   0,  21,   0,   0,   1, 
++     85,   0,   0,  10,  82,   0, 
++     16,   0,   2,   0,   0,   0, 
++      6,   1,  16,   0,   4,   0, 
++      0,   0,   2,  64,   0,   0, 
++     16,   0,   0,   0,   0,   0, 
++      0,   0,  16,   0,   0,   0, 
++      0,   0,   0,   0, 131,   0, 
++      0,   5,  82,   0,  16,   0, 
++      5,   0,   0,   0,   6,   1, 
++     16,   0,   4,   0,   0,   0, 
++    131,   0,   0,   5, 162,   0, 
++     16,   0,   5,   0,   0,   0, 
++      6,   8,  16,   0,   2,   0, 
++      0,   0, 164,   0,   0,   8, 
++    242, 224,  33,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++    198,  15,  16,   0,   0,   0, 
++      0,   0,  70,  14,  16,   0, 
++      5,   0,   0,   0,  30,   0, 
++      0,  10, 242,   0,  16,   0, 
++      5,   0,   0,   0, 198,  15, 
++     16,   0,   0,   0,   0,   0, 
++      2,  64,   0,   0,   1,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,  85,   0,   0,  10, 
++     82,   0,  16,   0,   2,   0, 
++      0,   0, 166,  11,  16,   0, 
++      4,   0,   0,   0,   2,  64, 
++      0,   0,  16,   0,   0,   0, 
++      0,   0,   0,   0,  16,   0, 
++      0,   0,   0,   0,   0,   0, 
++    131,   0,   0,   5,  82,   0, 
++     16,   0,   4,   0,   0,   0, 
++    166,  11,  16,   0,   4,   0, 
++      0,   0, 131,   0,   0,   5, 
++    162,   0,  16,   0,   4,   0, 
++      0,   0,   6,   8,  16,   0, 
++      2,   0,   0,   0, 164,   0, 
++      0,   8, 242, 224,  33,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,  70,  14,  16,   0, 
++      5,   0,   0,   0,  70,  14, 
++     16,   0,   4,   0,   0,   0, 
++     30,   0,   0,  10, 242,   0, 
++     16,   0,   4,   0,   0,   0, 
++    198,  15,  16,   0,   0,   0, 
++      0,   0,   2,  64,   0,   0, 
++      2,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,  85,   0, 
++      0,   7,  18,   0,  16,   0, 
++      2,   0,   0,   0,  10,   0, 
++     16,   0,   4,   0,   0,   0, 
++      1,  64,   0,   0,   1,   0, 
++      0,   0,  78,   0,   0,   8, 
++     66,   0,  16,   0,   2,   0, 
++      0,   0,   0, 208,   0,   0, 
++     10,   0,  16,   0,   2,   0, 
++      0,   0,  26,   0,  16,   0, 
++      1,   0,   0,   0,  78,   0, 
++      0,   8, 130,   0,  16,   0, 
++      2,   0,   0,   0,   0, 208, 
++      0,   0,  58,   0,  16,   0, 
++      4,   0,   0,   0,  42,   0, 
++     16,   0,   1,   0,   0,   0, 
++     35,   0,   0,  10,  34,   0, 
++     16,   0,   1,   0,   0,   0, 
++     42,   0,  16, 128,  65,   0, 
++      0,   0,   2,   0,   0,   0, 
++     26,   0,  16,   0,   1,   0, 
++      0,   0,  10,   0,  16,   0, 
++      2,   0,   0,   0,  35,   0, 
++      0,  10,  18,   0,  16,   0, 
++      2,   0,   0,   0,  58,   0, 
++     16, 128,  65,   0,   0,   0, 
++      2,   0,   0,   0,  42,   0, 
++     16,   0,   1,   0,   0,   0, 
++     58,   0,  16,   0,   4,   0, 
++      0,   0,  41,   0,   0,   7, 
++     34,   0,  16,   0,   3,   0, 
++      0,   0,  42,   0,  16,   0, 
++      2,   0,   0,   0,   1,  64, 
++      0,   0,   1,   0,   0,   0, 
++     42,   0,   0,  10, 242,   0, 
++     16,   0,   5,   0,   0,   0, 
++    246,  15,  16,   0,   2,   0, 
++      0,   0,   2,  64,   0,   0, 
++      5,   0,   0,   0,   1,   0, 
++      0,   0,   4,   0,   0,   0, 
++      3,   0,   0,   0, 139,   0, 
++      0,  15, 194,   0,  16,   0, 
++      3,   0,   0,   0,   2,  64, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,  27,   0, 
++      0,   0,  29,   0,   0,   0, 
++      2,  64,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      4,   0,   0,   0,   2,   0, 
++      0,   0, 166,  10,  16,   0, 
++      2,   0,   0,   0,  35,   0, 
++      0,   9,  66,   0,  16,   0, 
++      2,   0,   0,   0,  10,   0, 
++     16,   0,   5,   0,   0,   0, 
++     10,   0,  16,   0,   3,   0, 
++      0,   0,  42,   0,  16,   0, 
++      3,   0,   0,   0, 140,   0, 
++      0,  20, 114,   0,  16,   0, 
++      5,   0,   0,   0,   2,  64, 
++      0,   0,   3,   0,   0,   0, 
++      1,   0,   0,   0,   1,   0, 
++      0,   0,   0,   0,   0,   0, 
++      2,  64,   0,   0,   3,   0, 
++      0,   0,   1,   0,   0,   0, 
++     11,   0,   0,   0,   0,   0, 
++      0,   0, 214,   6,  16,   0, 
++      5,   0,   0,   0,   2,  64, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++    140,   0,   0,  11,  18,   0, 
++     16,   0,   3,   0,   0,   0, 
++      1,  64,   0,   0,   3,   0, 
++      0,   0,   1,  64,   0,   0, 
++      0,   0,   0,   0,  26,   0, 
++     16,   0,   3,   0,   0,   0, 
++     10,   0,  16,   0,   5,   0, 
++      0,   0, 140,   0,   0,  11, 
++     66,   0,  16,   0,   2,   0, 
++      0,   0,   1,  64,   0,   0, 
++     26,   0,   0,   0,   1,  64, 
++      0,   0,   6,   0,   0,   0, 
++     42,   0,  16,   0,   2,   0, 
++      0,   0,  10,   0,  16,   0, 
++      3,   0,   0,   0,   1,   0, 
++      0,   7,  18,   0,  16,   0, 
++      3,   0,   0,   0,  58,   0, 
++     16,   0,   3,   0,   0,   0, 
++      1,  64,   0,   0,   3,   0, 
++      0,   0,  87,   0,   0,   7, 
++     18,   0,  16,   0,   3,   0, 
++      0,   0,  26,   0,  16,   0, 
++      5,   0,   0,   0,  10,   0, 
++     16,   0,   3,   0,   0,   0, 
++    140,   0,   0,  11, 130,   0, 
++     16,   0,   2,   0,   0,   0, 
++      1,  64,   0,   0,   1,   0, 
++      0,   0,   1,  64,   0,   0, 
++      4,   0,   0,   0,  58,   0, 
++     16,   0,   2,   0,   0,   0, 
++      1,  64,   0,   0,   0,   0, 
++      0,   0,  35,   0,   0,   9, 
++    130,   0,  16,   0,   2,   0, 
++      0,   0,  10,   0,  16,   0, 
++      3,   0,   0,   0,   1,  64, 
++      0,   0,  64,   0,   0,   0, 
++     58,   0,  16,   0,   2,   0, 
++      0,   0,  30,   0,   0,   7, 
++    130,   0,  16,   0,   2,   0, 
++      0,   0,  42,   0,  16,   0, 
++      5,   0,   0,   0,  58,   0, 
++     16,   0,   2,   0,   0,   0, 
++    139,   0,   0,  15, 114,   0, 
++     16,   0,   3,   0,   0,   0, 
++      2,  64,   0,   0,  28,   0, 
++      0,   0,  27,   0,   0,   0, 
++     24,   0,   0,   0,   0,   0, 
++      0,   0,   2,  64,   0,   0, 
++      1,   0,   0,   0,   2,   0, 
++      0,   0,   5,   0,   0,   0, 
++      0,   0,   0,   0, 166,  10, 
++     16,   0,   2,   0,   0,   0, 
++    140,   0,   0,  11,  66,   0, 
++     16,   0,   2,   0,   0,   0, 
++      1,  64,   0,   0,   1,   0, 
++      0,   0,   1,  64,   0,   0, 
++      5,   0,   0,   0,  10,   0, 
++     16,   0,   3,   0,   0,   0, 
++     58,   0,  16,   0,   2,   0, 
++      0,   0, 140,   0,   0,  11, 
++     66,   0,  16,   0,   2,   0, 
++      0,   0,   1,  64,   0,   0, 
++      3,   0,   0,   0,   1,  64, 
++      0,   0,   8,   0,   0,   0, 
++     26,   0,  16,   0,   3,   0, 
++      0,   0,  42,   0,  16,   0, 
++      2,   0,   0,   0, 140,   0, 
++      0,  11,  66,   0,  16,   0, 
++      2,   0,   0,   0,   1,  64, 
++      0,   0,  20,   0,   0,   0, 
++      1,  64,   0,   0,  12,   0, 
++      0,   0,  42,   0,  16,   0, 
++      3,   0,   0,   0,  42,   0, 
++     16,   0,   2,   0,   0,   0, 
++     35,   0,   0,   9,  34,   0, 
++     16,   0,   1,   0,   0,   0, 
++     26,   0,  16,   0,   1,   0, 
++      0,   0,  42,   0,  16,   0, 
++      1,   0,   0,   0,  10,   0, 
++     16,   0,   2,   0,   0,   0, 
++     41,   0,   0,   7,  34,   0, 
++     16,   0,   1,   0,   0,   0, 
++     26,   0,  16,   0,   1,   0, 
++      0,   0,   1,  64,   0,   0, 
++      4,   0,   0,   0,  35,   0, 
++      0,   9,  34,   0,  16,   0, 
++      1,   0,   0,   0,  42,   0, 
++     16,   0,   2,   0,   0,   0, 
++     26,   0,  16,   0,   2,   0, 
++      0,   0,  26,   0,  16,   0, 
++      1,   0,   0,   0,  30,   0, 
++      0,   9,  34,   0,  16,   0, 
++      1,   0,   0,   0,  26,   0, 
++     16,   0,   1,   0,   0,   0, 
++     26, 128,  48,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,  85,   0, 
++      0,   7,  34,   0,  16,   0, 
++      1,   0,   0,   0,  26,   0, 
++     16,   0,   1,   0,   0,   0, 
++      1,  64,   0,   0,   4,   0, 
++      0,   0,  45,   0,   0,   8, 
++    242,   0,  16,   0,   2,   0, 
++      0,   0,  86,   5,  16,   0, 
++      1,   0,   0,   0,  70, 126, 
++     32,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,  31,   0, 
++      4,   3,  10,   0,  16,   0, 
++      1,   0,   0,   0,  41,   0, 
++      0,  10, 242,   0,  16,   0, 
++      3,   0,   0,   0,  70,  14, 
++     16,   0,   2,   0,   0,   0, 
++      2,  64,   0,   0,   8,   0, 
++      0,   0,   8,   0,   0,   0, 
++      8,   0,   0,   0,   8,   0, 
++      0,   0,   1,   0,   0,  10, 
++    242,   0,  16,   0,   3,   0, 
++      0,   0,  70,  14,  16,   0, 
++      3,   0,   0,   0,   2,  64, 
++      0,   0,   0, 255,   0, 255, 
++      0, 255,   0, 255,   0, 255, 
++      0, 255,   0, 255,   0, 255, 
++     85,   0,   0,  10, 242,   0, 
++     16,   0,   5,   0,   0,   0, 
++     70,  14,  16,   0,   2,   0, 
++      0,   0,   2,  64,   0,   0, 
++      8,   0,   0,   0,   8,   0, 
++      0,   0,   8,   0,   0,   0, 
++      8,   0,   0,   0,   1,   0, 
++      0,  10, 242,   0,  16,   0, 
++      5,   0,   0,   0,  70,  14, 
++     16,   0,   5,   0,   0,   0, 
++      2,  64,   0,   0, 255,   0, 
++    255,   0, 255,   0, 255,   0, 
++    255,   0, 255,   0, 255,   0, 
++    255,   0,  30,   0,   0,   7, 
++    242,   0,  16,   0,   2,   0, 
++      0,   0,  70,  14,  16,   0, 
++      3,   0,   0,   0,  70,  14, 
++     16,   0,   5,   0,   0,   0, 
++     21,   0,   0,   1,  31,   0, 
++      4,   3,  58,   0,  16,   0, 
++      1,   0,   0,   0,  85,   0, 
++      0,  10, 242,   0,  16,   0, 
++      1,   0,   0,   0,  70,  14, 
++     16,   0,   2,   0,   0,   0, 
++      2,  64,   0,   0,  16,   0, 
++      0,   0,  16,   0,   0,   0, 
++     16,   0,   0,   0,  16,   0, 
++      0,   0, 140,   0,   0,  17, 
++    242,   0,  16,   0,   2,   0, 
++      0,   0,   2,  64,   0,   0, 
++     16,   0,   0,   0,  16,   0, 
++      0,   0,  16,   0,   0,   0, 
++     16,   0,   0,   0,   2,  64, 
++      0,   0,  16,   0,   0,   0, 
++     16,   0,   0,   0,  16,   0, 
++      0,   0,  16,   0,   0,   0, 
++     70,  14,  16,   0,   2,   0, 
++      0,   0,  70,  14,  16,   0, 
++      1,   0,   0,   0,  21,   0, 
++      0,   1,  85,   0,   0,  10, 
++     50,   0,  16,   0,   1,   0, 
++      0,   0,  70,   0,  16,   0, 
++      2,   0,   0,   0,   2,  64, 
++      0,   0,  16,   0,   0,   0, 
++     16,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++    131,   0,   0,   5,  82,   0, 
++     16,   0,   3,   0,   0,   0, 
++      6,   1,  16,   0,   2,   0, 
++      0,   0, 131,   0,   0,   5, 
++    162,   0,  16,   0,   3,   0, 
++      0,   0,   6,   4,  16,   0, 
++      1,   0,   0,   0, 164,   0, 
++      0,   8, 242, 224,  33,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,  70,  14,  16,   0, 
++      4,   0,   0,   0,  70,  14, 
++     16,   0,   3,   0,   0,   0, 
++     30,   0,   0,  10, 242,   0, 
++     16,   0,   1,   0,   0,   0, 
++     70,  14,  16,   0,   0,   0, 
++      0,   0,   2,  64,   0,   0, 
++      3,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,  85,   0, 
++      0,  10,  98,   0,  16,   0, 
++      0,   0,   0,   0, 166,  11, 
++     16,   0,   2,   0,   0,   0, 
++      2,  64,   0,   0,   0,   0, 
++      0,   0,  16,   0,   0,   0, 
++     16,   0,   0,   0,   0,   0, 
++      0,   0, 131,   0,   0,   5, 
++     82,   0,  16,   0,   2,   0, 
++      0,   0, 166,  11,  16,   0, 
++      2,   0,   0,   0, 131,   0, 
++      0,   5, 162,   0,  16,   0, 
++      2,   0,   0,   0,  86,   9, 
++     16,   0,   0,   0,   0,   0, 
++    164,   0,   0,   8, 242, 224, 
++     33,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,  70,  14, 
++     16,   0,   1,   0,   0,   0, 
++     70,  14,  16,   0,   2,   0, 
++      0,   0,  62,   0,   0,   1, 
++     83,  84,  65,  84, 148,   0, 
++      0,   0, 108,   0,   0,   0, 
++      7,   0,   0,   0,   0,   0, 
++      0,   0,   1,   0,   0,   0, 
++      0,   0,   0,   0,  32,   0, 
++      0,   0,  28,   0,   0,   0, 
++      2,   0,   0,   0,   5,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   2,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      1,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   4,   0,   0,   0
++};
+diff --git a/src/graphics/shaders/bytecode/d3d12_5_1/texture_load_direct_rgba8_scaled_cs.h b/src/graphics/shaders/bytecode/d3d12_5_1/texture_load_direct_rgba8_scaled_cs.h
+new file mode 100644
+index 0000000..a8befaf
+--- /dev/null
++++ b/src/graphics/shaders/bytecode/d3d12_5_1/texture_load_direct_rgba8_scaled_cs.h
+@@ -0,0 +1,1172 @@
++#if 0
++//
++// Generated by Microsoft (R) HLSL Shader Compiler 10.1
++//
++//
++// Buffer Definitions: 
++//
++// cbuffer push_consts_xe
++// {
++//
++//   uint xe_texture_load_is_tiled_3d_endian_scale;// Offset:    0 Size:     4
++//   uint xe_texture_load_guest_offset; // Offset:    4 Size:     4
++//   uint xe_texture_load_guest_pitch_aligned;// Offset:    8 Size:     4
++//   uint xe_texture_load_guest_z_stride_block_rows_aligned;// Offset:   12 Size:     4 [unused]
++//   uint3 xe_texture_load_size_blocks; // Offset:   16 Size:    12
++//   uint xe_texture_load_host_offset;  // Offset:   28 Size:     4 [unused]
++//   uint xe_texture_load_host_pitch;   // Offset:   32 Size:     4 [unused]
++//   uint xe_texture_load_height_texels;// Offset:   36 Size:     4 [unused]
++//
++// }
++//
++//
++// Resource Bindings:
++//
++// Name                                 Type  Format         Dim      ID      HLSL Bind  Count
++// ------------------------------ ---------- ------- ----------- ------- -------------- ------
++// xe_texture_load_source            texture   uint4         buf      T0             t0      1 
++// xe_texture_load_dest                  UAV   uint4          2d      U0             u0      1 
++// push_consts_xe                    cbuffer      NA          NA     CB0            cb0      1 
++//
++//
++//
++// Input signature:
++//
++// Name                 Index   Mask Register SysValue  Format   Used
++// -------------------- ----- ------ -------- -------- ------- ------
++// no Input
++//
++// Output signature:
++//
++// Name                 Index   Mask Register SysValue  Format   Used
++// -------------------- ----- ------ -------- -------- ------- ------
++// no Output
++cs_5_1
++dcl_globalFlags refactoringAllowed
++dcl_constantbuffer CB0[0:0][2], immediateIndexed, space=0
++dcl_resource_buffer (uint,uint,uint,uint) T0[0:0], space=0
++dcl_uav_typed_texture2d (uint,uint,uint,uint) U0[0:0], space=0
++dcl_input vThreadID.xy
++dcl_temps 8
++dcl_thread_group 4, 32, 1
++ishl r0.x, vThreadID.x, l(3)
++mov r0.yzw, vThreadID.yyyy
++uge r1.xy, r0.xwxx, CB0[0][1].xyxx
++or r1.x, r1.y, r1.x
++if_nz r1.x
++  ret 
++endif 
++ubfe r1.xyz, l(2, 3, 3, 0), l(2, 4, 7, 0), CB0[0][0].xxxx
++ushr r1.w, r0.x, l(2)
++udiv r2.x, null, r1.w, r1.y
++udiv r2.y, null, vThreadID.y, r1.z
++imad r1.w, -r2.x, r1.y, r1.w
++imad r2.z, -r2.y, r1.z, vThreadID.y
++ishl r2.w, r2.x, l(2)
++ushr r3.x, CB0[0][0].z, l(5)
++ishr r4.xyzw, r2.yyyy, l(5, 1, 4, 3)
++ibfe r3.yz, l(0, 27, 29, 0), l(0, 3, 1, 0), r2.xxxx
++imad r2.x, r4.x, r3.x, r3.y
++bfi r4.xyz, l(3, 1, 1, 0), l(3, 1, 11, 0), r4.ywzy, l(0, 0, 0, 0)
++bfi r2.w, l(3), l(0), r2.w, r4.x
++bfi r2.x, l(26), l(6), r2.x, r2.w
++and r2.w, r3.z, l(3)
++xor r2.w, r4.y, r2.w
++bfi r2.y, l(1), l(4), r2.y, l(0)
++imad r2.y, r2.w, l(64), r2.y
++iadd r2.y, r4.z, r2.y
++ibfe r3.yzw, l(0, 28, 27, 24), l(0, 2, 3, 6), r2.xxxx
++bfi r2.x, l(1), l(5), r3.y, r2.y
++bfi r2.x, l(3), l(8), r3.z, r2.x
++bfi r2.x, l(20), l(12), r3.w, r2.x
++imul null, r2.y, r1.z, r1.y
++imad r1.w, r1.w, r1.z, r2.z
++ishl r1.w, r1.w, l(4)
++imad r1.w, r2.x, r2.y, r1.w
++iadd r1.w, r1.w, CB0[0][0].y
++ushr r1.w, r1.w, l(4)
++ld r4.xyzw, r1.wwww, T0[0].wxyz
++ieq r2.xzw, r1.xxxx, l(1, 0, 2, 3)
++or r1.xw, r2.zzzw, r2.xxxz
++if_nz r1.x
++  ishl r5.xyzw, r4.yzwx, l(8, 8, 8, 8)
++  and r5.xyzw, r5.xyzw, l(0xff00ff00, 0xff00ff00, 0xff00ff00, 0xff00ff00)
++  ushr r6.xyzw, r4.yzwx, l(8, 8, 8, 8)
++  and r6.xyzw, r6.xyzw, l(0x00ff00ff, 0x00ff00ff, 0x00ff00ff, 0x00ff00ff)
++  iadd r4.xyzw, r5.wxyz, r6.wxyz
++endif 
++if_nz r1.w
++  ushr r5.xyzw, r4.yzwx, l(16, 16, 16, 16)
++  bfi r4.xyzw, l(16, 16, 16, 16), l(16, 16, 16, 16), r4.xyzw, r5.wxyz
++  mov r5.x, r4.y
++  mov r6.x, r4.z
++  mov r7.x, r4.w
++else 
++  mov r5.x, r4.y
++  mov r6.x, r4.z
++  mov r7.x, r4.w
++endif 
++ushr r5.yzw, r5.xxxx, l(0, 8, 16, 24)
++and r5.xyzw, r5.xyzw, l(255, 255, 255, 255)
++store_uav_typed U0[0].xyzw, r0.xwww, r5.xyzw
++iadd r5.xyzw, r0.xwww, l(1, 0, 0, 0)
++ushr r6.yzw, r6.xxxx, l(0, 8, 16, 24)
++and r6.xyzw, r6.xyzw, l(255, 255, 255, 255)
++store_uav_typed U0[0].xyzw, r5.xyzw, r6.xyzw
++iadd r5.xyzw, r0.xwww, l(2, 0, 0, 0)
++ushr r7.yzw, r7.xxxx, l(0, 8, 16, 24)
++and r6.xyzw, r7.xyzw, l(255, 255, 255, 255)
++store_uav_typed U0[0].xyzw, r5.xyzw, r6.xyzw
++iadd r5.xyzw, r0.xwww, l(3, 0, 0, 0)
++ushr r4.yzw, r4.xxxx, l(0, 8, 16, 24)
++and r4.xyzw, r4.xyzw, l(255, 255, 255, 255)
++store_uav_typed U0[0].xyzw, r5.xyzw, r4.xyzw
++iadd r4.xyzw, r0.xwww, l(4, 0, 0, 0)
++ushr r2.x, r4.x, l(2)
++udiv r2.z, null, r2.x, r1.y
++udiv r2.w, null, r4.w, r1.z
++imad r1.y, -r2.z, r1.y, r2.x
++imad r2.x, -r2.w, r1.z, r4.w
++ishl r3.y, r2.z, l(2)
++ishr r5.xyzw, r2.wwww, l(5, 1, 4, 3)
++ibfe r3.zw, l(0, 0, 27, 29), l(0, 0, 3, 1), r2.zzzz
++imad r2.z, r5.x, r3.x, r3.z
++bfi r5.xyz, l(3, 1, 1, 0), l(3, 1, 11, 0), r5.ywzy, l(0, 0, 0, 0)
++bfi r3.x, l(3), l(0), r3.y, r5.x
++bfi r2.z, l(26), l(6), r2.z, r3.x
++and r3.x, r3.w, l(3)
++xor r3.x, r5.y, r3.x
++bfi r2.w, l(1), l(4), r2.w, l(0)
++imad r2.w, r3.x, l(64), r2.w
++iadd r2.w, r5.z, r2.w
++ibfe r3.xyz, l(28, 27, 24, 0), l(2, 3, 6, 0), r2.zzzz
++bfi r2.z, l(1), l(5), r3.x, r2.w
++bfi r2.z, l(3), l(8), r3.y, r2.z
++bfi r2.z, l(20), l(12), r3.z, r2.z
++imad r1.y, r1.y, r1.z, r2.x
++ishl r1.y, r1.y, l(4)
++imad r1.y, r2.z, r2.y, r1.y
++iadd r1.y, r1.y, CB0[0][0].y
++ushr r1.y, r1.y, l(4)
++ld r2.xyzw, r1.yyyy, T0[0].wxyz
++if_nz r1.x
++  ishl r3.xyzw, r2.yzwx, l(8, 8, 8, 8)
++  and r3.xyzw, r3.xyzw, l(0xff00ff00, 0xff00ff00, 0xff00ff00, 0xff00ff00)
++  ushr r5.xyzw, r2.yzwx, l(8, 8, 8, 8)
++  and r5.xyzw, r5.xyzw, l(0x00ff00ff, 0x00ff00ff, 0x00ff00ff, 0x00ff00ff)
++  iadd r2.xyzw, r3.wxyz, r5.wxyz
++endif 
++if_nz r1.w
++  ushr r1.xyzw, r2.yzwx, l(16, 16, 16, 16)
++  bfi r2.xyzw, l(16, 16, 16, 16), l(16, 16, 16, 16), r2.xyzw, r1.wxyz
++  mov r1.x, r2.y
++  mov r3.x, r2.z
++  mov r5.x, r2.w
++else 
++  mov r1.x, r2.y
++  mov r3.x, r2.z
++  mov r5.x, r2.w
++endif 
++ushr r1.yzw, r1.xxxx, l(0, 8, 16, 24)
++and r1.xyzw, r1.xyzw, l(255, 255, 255, 255)
++store_uav_typed U0[0].xyzw, r4.xyzw, r1.xyzw
++iadd r1.xyzw, r0.xwww, l(5, 0, 0, 0)
++ushr r3.yzw, r3.xxxx, l(0, 8, 16, 24)
++and r3.xyzw, r3.xyzw, l(255, 255, 255, 255)
++store_uav_typed U0[0].xyzw, r1.xyzw, r3.xyzw
++iadd r1.xyzw, r0.xwww, l(6, 0, 0, 0)
++ushr r5.yzw, r5.xxxx, l(0, 8, 16, 24)
++and r3.xyzw, r5.xyzw, l(255, 255, 255, 255)
++store_uav_typed U0[0].xyzw, r1.xyzw, r3.xyzw
++iadd r1.xyzw, r0.xyzw, l(7, 0, 0, 0)
++ushr r2.yzw, r2.xxxx, l(0, 8, 16, 24)
++and r2.xyzw, r2.xyzw, l(255, 255, 255, 255)
++store_uav_typed U0[0].xyzw, r1.xyzw, r2.xyzw
++ret 
++// Approximately 134 instruction slots used
++#endif
++
++const BYTE texture_load_direct_rgba8_scaled_cs[] =
++{
++     68,  88,  66,  67,  15,  95, 
++     48,  64,  34,  14,  45,  71, 
++    102,  48,  88, 115, 143, 246, 
++     85, 228,   1,   0,   0,   0, 
++    252,  22,   0,   0,   5,   0, 
++      0,   0,  52,   0,   0,   0, 
++     20,   4,   0,   0,  36,   4, 
++      0,   0,  52,   4,   0,   0, 
++     96,  22,   0,   0,  82,  68, 
++     69,  70, 216,   3,   0,   0, 
++      1,   0,   0,   0, 240,   0, 
++      0,   0,   3,   0,   0,   0, 
++     60,   0,   0,   0,   1,   5, 
++     83,  67,   0, 133,   0,   0, 
++    173,   3,   0,   0,  19,  19, 
++     68,  37,  60,   0,   0,   0, 
++     24,   0,   0,   0,  40,   0, 
++      0,   0,  40,   0,   0,   0, 
++     36,   0,   0,   0,  12,   0, 
++      0,   0,   0,   0,   0,   0, 
++    180,   0,   0,   0,   2,   0, 
++      0,   0,   4,   0,   0,   0, 
++      1,   0,   0,   0, 255, 255, 
++    255, 255,   0,   0,   0,   0, 
++      1,   0,   0,   0,  12,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0, 203,   0, 
++      0,   0,   4,   0,   0,   0, 
++      4,   0,   0,   0,   4,   0, 
++      0,   0, 255, 255, 255, 255, 
++      0,   0,   0,   0,   1,   0, 
++      0,   0,  12,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0, 224,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   1,   0,   0,   0, 
++      1,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++    120, 101,  95, 116, 101, 120, 
++    116, 117, 114, 101,  95, 108, 
++    111,  97, 100,  95, 115, 111, 
++    117, 114,  99, 101,   0, 120, 
++    101,  95, 116, 101, 120, 116, 
++    117, 114, 101,  95, 108, 111, 
++     97, 100,  95, 100, 101, 115, 
++    116,   0, 112, 117, 115, 104, 
++     95,  99, 111, 110, 115, 116, 
++    115,  95, 120, 101,   0, 171, 
++    224,   0,   0,   0,   8,   0, 
++      0,   0,   8,   1,   0,   0, 
++     48,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     72,   2,   0,   0,   0,   0, 
++      0,   0,   4,   0,   0,   0, 
++      2,   0,   0,   0, 120,   2, 
++      0,   0,   0,   0,   0,   0, 
++    255, 255, 255, 255,   0,   0, 
++      0,   0, 255, 255, 255, 255, 
++      0,   0,   0,   0, 156,   2, 
++      0,   0,   4,   0,   0,   0, 
++      4,   0,   0,   0,   2,   0, 
++      0,   0, 120,   2,   0,   0, 
++      0,   0,   0,   0, 255, 255, 
++    255, 255,   0,   0,   0,   0, 
++    255, 255, 255, 255,   0,   0, 
++      0,   0, 185,   2,   0,   0, 
++      8,   0,   0,   0,   4,   0, 
++      0,   0,   2,   0,   0,   0, 
++    120,   2,   0,   0,   0,   0, 
++      0,   0, 255, 255, 255, 255, 
++      0,   0,   0,   0, 255, 255, 
++    255, 255,   0,   0,   0,   0, 
++    221,   2,   0,   0,  12,   0, 
++      0,   0,   4,   0,   0,   0, 
++      0,   0,   0,   0, 120,   2, 
++      0,   0,   0,   0,   0,   0, 
++    255, 255, 255, 255,   0,   0, 
++      0,   0, 255, 255, 255, 255, 
++      0,   0,   0,   0,  15,   3, 
++      0,   0,  16,   0,   0,   0, 
++     12,   0,   0,   0,   2,   0, 
++      0,   0,  52,   3,   0,   0, 
++      0,   0,   0,   0, 255, 255, 
++    255, 255,   0,   0,   0,   0, 
++    255, 255, 255, 255,   0,   0, 
++      0,   0,  88,   3,   0,   0, 
++     28,   0,   0,   0,   4,   0, 
++      0,   0,   0,   0,   0,   0, 
++    120,   2,   0,   0,   0,   0, 
++      0,   0, 255, 255, 255, 255, 
++      0,   0,   0,   0, 255, 255, 
++    255, 255,   0,   0,   0,   0, 
++    116,   3,   0,   0,  32,   0, 
++      0,   0,   4,   0,   0,   0, 
++      0,   0,   0,   0, 120,   2, 
++      0,   0,   0,   0,   0,   0, 
++    255, 255, 255, 255,   0,   0, 
++      0,   0, 255, 255, 255, 255, 
++      0,   0,   0,   0, 143,   3, 
++      0,   0,  36,   0,   0,   0, 
++      4,   0,   0,   0,   0,   0, 
++      0,   0, 120,   2,   0,   0, 
++      0,   0,   0,   0, 255, 255, 
++    255, 255,   0,   0,   0,   0, 
++    255, 255, 255, 255,   0,   0, 
++      0,   0, 120, 101,  95, 116, 
++    101, 120, 116, 117, 114, 101, 
++     95, 108, 111,  97, 100,  95, 
++    105, 115,  95, 116, 105, 108, 
++    101, 100,  95,  51, 100,  95, 
++    101, 110, 100, 105,  97, 110, 
++     95, 115,  99,  97, 108, 101, 
++      0, 100, 119, 111, 114, 100, 
++      0, 171,   0,   0,  19,   0, 
++      1,   0,   1,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0, 113,   2, 
++      0,   0, 120, 101,  95, 116, 
++    101, 120, 116, 117, 114, 101, 
++     95, 108, 111,  97, 100,  95, 
++    103, 117, 101, 115, 116,  95, 
++    111, 102, 102, 115, 101, 116, 
++      0, 120, 101,  95, 116, 101, 
++    120, 116, 117, 114, 101,  95, 
++    108, 111,  97, 100,  95, 103, 
++    117, 101, 115, 116,  95, 112, 
++    105, 116,  99, 104,  95,  97, 
++    108, 105, 103, 110, 101, 100, 
++      0, 120, 101,  95, 116, 101, 
++    120, 116, 117, 114, 101,  95, 
++    108, 111,  97, 100,  95, 103, 
++    117, 101, 115, 116,  95, 122, 
++     95, 115, 116, 114, 105, 100, 
++    101,  95,  98, 108, 111,  99, 
++    107,  95, 114, 111, 119, 115, 
++     95,  97, 108, 105, 103, 110, 
++    101, 100,   0, 120, 101,  95, 
++    116, 101, 120, 116, 117, 114, 
++    101,  95, 108, 111,  97, 100, 
++     95, 115, 105, 122, 101,  95, 
++     98, 108, 111,  99, 107, 115, 
++      0, 117, 105, 110, 116,  51, 
++      0, 171, 171, 171,   1,   0, 
++     19,   0,   1,   0,   3,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     43,   3,   0,   0, 120, 101, 
++     95, 116, 101, 120, 116, 117, 
++    114, 101,  95, 108, 111,  97, 
++    100,  95, 104, 111, 115, 116, 
++     95, 111, 102, 102, 115, 101, 
++    116,   0, 120, 101,  95, 116, 
++    101, 120, 116, 117, 114, 101, 
++     95, 108, 111,  97, 100,  95, 
++    104, 111, 115, 116,  95, 112, 
++    105, 116,  99, 104,   0, 120, 
++    101,  95, 116, 101, 120, 116, 
++    117, 114, 101,  95, 108, 111, 
++     97, 100,  95, 104, 101, 105, 
++    103, 104, 116,  95, 116, 101, 
++    120, 101, 108, 115,   0,  77, 
++    105,  99, 114, 111, 115, 111, 
++    102, 116,  32,  40,  82,  41, 
++     32,  72,  76,  83,  76,  32, 
++     83, 104,  97, 100, 101, 114, 
++     32,  67, 111, 109, 112, 105, 
++    108, 101, 114,  32,  49,  48, 
++     46,  49,   0, 171, 171, 171, 
++     73,  83,  71,  78,   8,   0, 
++      0,   0,   0,   0,   0,   0, 
++      8,   0,   0,   0,  79,  83, 
++     71,  78,   8,   0,   0,   0, 
++      0,   0,   0,   0,   8,   0, 
++      0,   0,  83,  72,  69,  88, 
++     36,  18,   0,   0,  81,   0, 
++      5,   0, 137,   4,   0,   0, 
++    106,   8,   0,   1,  89,   0, 
++      0,   7,  70, 142,  48,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      2,   0,   0,   0,   0,   0, 
++      0,   0,  88,   8,   0,   7, 
++     70, 126,  48,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,  68,  68, 
++      0,   0,   0,   0,   0,   0, 
++    156,  24,   0,   7,  70, 238, 
++     49,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,  68,  68,   0,   0, 
++      0,   0,   0,   0,  95,   0, 
++      0,   2,  50,   0,   2,   0, 
++    104,   0,   0,   2,   8,   0, 
++      0,   0, 155,   0,   0,   4, 
++      4,   0,   0,   0,  32,   0, 
++      0,   0,   1,   0,   0,   0, 
++     41,   0,   0,   6,  18,   0, 
++     16,   0,   0,   0,   0,   0, 
++     10,   0,   2,   0,   1,  64, 
++      0,   0,   3,   0,   0,   0, 
++     54,   0,   0,   4, 226,   0, 
++     16,   0,   0,   0,   0,   0, 
++     86,   5,   2,   0,  80,   0, 
++      0,   9,  50,   0,  16,   0, 
++      1,   0,   0,   0, 198,   0, 
++     16,   0,   0,   0,   0,   0, 
++     70, 128,  48,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      1,   0,   0,   0,  60,   0, 
++      0,   7,  18,   0,  16,   0, 
++      1,   0,   0,   0,  26,   0, 
++     16,   0,   1,   0,   0,   0, 
++     10,   0,  16,   0,   1,   0, 
++      0,   0,  31,   0,   4,   3, 
++     10,   0,  16,   0,   1,   0, 
++      0,   0,  62,   0,   0,   1, 
++     21,   0,   0,   1, 138,   0, 
++      0,  17, 114,   0,  16,   0, 
++      1,   0,   0,   0,   2,  64, 
++      0,   0,   2,   0,   0,   0, 
++      3,   0,   0,   0,   3,   0, 
++      0,   0,   0,   0,   0,   0, 
++      2,  64,   0,   0,   2,   0, 
++      0,   0,   4,   0,   0,   0, 
++      7,   0,   0,   0,   0,   0, 
++      0,   0,   6, 128,  48,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     85,   0,   0,   7, 130,   0, 
++     16,   0,   1,   0,   0,   0, 
++     10,   0,  16,   0,   0,   0, 
++      0,   0,   1,  64,   0,   0, 
++      2,   0,   0,   0,  78,   0, 
++      0,   8,  18,   0,  16,   0, 
++      2,   0,   0,   0,   0, 208, 
++      0,   0,  58,   0,  16,   0, 
++      1,   0,   0,   0,  26,   0, 
++     16,   0,   1,   0,   0,   0, 
++     78,   0,   0,   7,  34,   0, 
++     16,   0,   2,   0,   0,   0, 
++      0, 208,   0,   0,  26,   0, 
++      2,   0,  42,   0,  16,   0, 
++      1,   0,   0,   0,  35,   0, 
++      0,  10, 130,   0,  16,   0, 
++      1,   0,   0,   0,  10,   0, 
++     16, 128,  65,   0,   0,   0, 
++      2,   0,   0,   0,  26,   0, 
++     16,   0,   1,   0,   0,   0, 
++     58,   0,  16,   0,   1,   0, 
++      0,   0,  35,   0,   0,   9, 
++     66,   0,  16,   0,   2,   0, 
++      0,   0,  26,   0,  16, 128, 
++     65,   0,   0,   0,   2,   0, 
++      0,   0,  42,   0,  16,   0, 
++      1,   0,   0,   0,  26,   0, 
++      2,   0,  41,   0,   0,   7, 
++    130,   0,  16,   0,   2,   0, 
++      0,   0,  10,   0,  16,   0, 
++      2,   0,   0,   0,   1,  64, 
++      0,   0,   2,   0,   0,   0, 
++     85,   0,   0,   9,  18,   0, 
++     16,   0,   3,   0,   0,   0, 
++     42, 128,  48,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   1,  64, 
++      0,   0,   5,   0,   0,   0, 
++     42,   0,   0,  10, 242,   0, 
++     16,   0,   4,   0,   0,   0, 
++     86,   5,  16,   0,   2,   0, 
++      0,   0,   2,  64,   0,   0, 
++      5,   0,   0,   0,   1,   0, 
++      0,   0,   4,   0,   0,   0, 
++      3,   0,   0,   0, 139,   0, 
++      0,  15,  98,   0,  16,   0, 
++      3,   0,   0,   0,   2,  64, 
++      0,   0,   0,   0,   0,   0, 
++     27,   0,   0,   0,  29,   0, 
++      0,   0,   0,   0,   0,   0, 
++      2,  64,   0,   0,   0,   0, 
++      0,   0,   3,   0,   0,   0, 
++      1,   0,   0,   0,   0,   0, 
++      0,   0,   6,   0,  16,   0, 
++      2,   0,   0,   0,  35,   0, 
++      0,   9,  18,   0,  16,   0, 
++      2,   0,   0,   0,  10,   0, 
++     16,   0,   4,   0,   0,   0, 
++     10,   0,  16,   0,   3,   0, 
++      0,   0,  26,   0,  16,   0, 
++      3,   0,   0,   0, 140,   0, 
++      0,  20, 114,   0,  16,   0, 
++      4,   0,   0,   0,   2,  64, 
++      0,   0,   3,   0,   0,   0, 
++      1,   0,   0,   0,   1,   0, 
++      0,   0,   0,   0,   0,   0, 
++      2,  64,   0,   0,   3,   0, 
++      0,   0,   1,   0,   0,   0, 
++     11,   0,   0,   0,   0,   0, 
++      0,   0, 214,   6,  16,   0, 
++      4,   0,   0,   0,   2,  64, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++    140,   0,   0,  11, 130,   0, 
++     16,   0,   2,   0,   0,   0, 
++      1,  64,   0,   0,   3,   0, 
++      0,   0,   1,  64,   0,   0, 
++      0,   0,   0,   0,  58,   0, 
++     16,   0,   2,   0,   0,   0, 
++     10,   0,  16,   0,   4,   0, 
++      0,   0, 140,   0,   0,  11, 
++     18,   0,  16,   0,   2,   0, 
++      0,   0,   1,  64,   0,   0, 
++     26,   0,   0,   0,   1,  64, 
++      0,   0,   6,   0,   0,   0, 
++     10,   0,  16,   0,   2,   0, 
++      0,   0,  58,   0,  16,   0, 
++      2,   0,   0,   0,   1,   0, 
++      0,   7, 130,   0,  16,   0, 
++      2,   0,   0,   0,  42,   0, 
++     16,   0,   3,   0,   0,   0, 
++      1,  64,   0,   0,   3,   0, 
++      0,   0,  87,   0,   0,   7, 
++    130,   0,  16,   0,   2,   0, 
++      0,   0,  26,   0,  16,   0, 
++      4,   0,   0,   0,  58,   0, 
++     16,   0,   2,   0,   0,   0, 
++    140,   0,   0,  11,  34,   0, 
++     16,   0,   2,   0,   0,   0, 
++      1,  64,   0,   0,   1,   0, 
++      0,   0,   1,  64,   0,   0, 
++      4,   0,   0,   0,  26,   0, 
++     16,   0,   2,   0,   0,   0, 
++      1,  64,   0,   0,   0,   0, 
++      0,   0,  35,   0,   0,   9, 
++     34,   0,  16,   0,   2,   0, 
++      0,   0,  58,   0,  16,   0, 
++      2,   0,   0,   0,   1,  64, 
++      0,   0,  64,   0,   0,   0, 
++     26,   0,  16,   0,   2,   0, 
++      0,   0,  30,   0,   0,   7, 
++     34,   0,  16,   0,   2,   0, 
++      0,   0,  42,   0,  16,   0, 
++      4,   0,   0,   0,  26,   0, 
++     16,   0,   2,   0,   0,   0, 
++    139,   0,   0,  15, 226,   0, 
++     16,   0,   3,   0,   0,   0, 
++      2,  64,   0,   0,   0,   0, 
++      0,   0,  28,   0,   0,   0, 
++     27,   0,   0,   0,  24,   0, 
++      0,   0,   2,  64,   0,   0, 
++      0,   0,   0,   0,   2,   0, 
++      0,   0,   3,   0,   0,   0, 
++      6,   0,   0,   0,   6,   0, 
++     16,   0,   2,   0,   0,   0, 
++    140,   0,   0,  11,  18,   0, 
++     16,   0,   2,   0,   0,   0, 
++      1,  64,   0,   0,   1,   0, 
++      0,   0,   1,  64,   0,   0, 
++      5,   0,   0,   0,  26,   0, 
++     16,   0,   3,   0,   0,   0, 
++     26,   0,  16,   0,   2,   0, 
++      0,   0, 140,   0,   0,  11, 
++     18,   0,  16,   0,   2,   0, 
++      0,   0,   1,  64,   0,   0, 
++      3,   0,   0,   0,   1,  64, 
++      0,   0,   8,   0,   0,   0, 
++     42,   0,  16,   0,   3,   0, 
++      0,   0,  10,   0,  16,   0, 
++      2,   0,   0,   0, 140,   0, 
++      0,  11,  18,   0,  16,   0, 
++      2,   0,   0,   0,   1,  64, 
++      0,   0,  20,   0,   0,   0, 
++      1,  64,   0,   0,  12,   0, 
++      0,   0,  58,   0,  16,   0, 
++      3,   0,   0,   0,  10,   0, 
++     16,   0,   2,   0,   0,   0, 
++     38,   0,   0,   8,   0, 208, 
++      0,   0,  34,   0,  16,   0, 
++      2,   0,   0,   0,  42,   0, 
++     16,   0,   1,   0,   0,   0, 
++     26,   0,  16,   0,   1,   0, 
++      0,   0,  35,   0,   0,   9, 
++    130,   0,  16,   0,   1,   0, 
++      0,   0,  58,   0,  16,   0, 
++      1,   0,   0,   0,  42,   0, 
++     16,   0,   1,   0,   0,   0, 
++     42,   0,  16,   0,   2,   0, 
++      0,   0,  41,   0,   0,   7, 
++    130,   0,  16,   0,   1,   0, 
++      0,   0,  58,   0,  16,   0, 
++      1,   0,   0,   0,   1,  64, 
++      0,   0,   4,   0,   0,   0, 
++     35,   0,   0,   9, 130,   0, 
++     16,   0,   1,   0,   0,   0, 
++     10,   0,  16,   0,   2,   0, 
++      0,   0,  26,   0,  16,   0, 
++      2,   0,   0,   0,  58,   0, 
++     16,   0,   1,   0,   0,   0, 
++     30,   0,   0,   9, 130,   0, 
++     16,   0,   1,   0,   0,   0, 
++     58,   0,  16,   0,   1,   0, 
++      0,   0,  26, 128,  48,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     85,   0,   0,   7, 130,   0, 
++     16,   0,   1,   0,   0,   0, 
++     58,   0,  16,   0,   1,   0, 
++      0,   0,   1,  64,   0,   0, 
++      4,   0,   0,   0,  45,   0, 
++      0,   8, 242,   0,  16,   0, 
++      4,   0,   0,   0, 246,  15, 
++     16,   0,   1,   0,   0,   0, 
++     54, 121,  32,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     32,   0,   0,  10, 210,   0, 
++     16,   0,   2,   0,   0,   0, 
++      6,   0,  16,   0,   1,   0, 
++      0,   0,   2,  64,   0,   0, 
++      1,   0,   0,   0,   0,   0, 
++      0,   0,   2,   0,   0,   0, 
++      3,   0,   0,   0,  60,   0, 
++      0,   7, 146,   0,  16,   0, 
++      1,   0,   0,   0, 166,  14, 
++     16,   0,   2,   0,   0,   0, 
++      6,   8,  16,   0,   2,   0, 
++      0,   0,  31,   0,   4,   3, 
++     10,   0,  16,   0,   1,   0, 
++      0,   0,  41,   0,   0,  10, 
++    242,   0,  16,   0,   5,   0, 
++      0,   0, 150,   3,  16,   0, 
++      4,   0,   0,   0,   2,  64, 
++      0,   0,   8,   0,   0,   0, 
++      8,   0,   0,   0,   8,   0, 
++      0,   0,   8,   0,   0,   0, 
++      1,   0,   0,  10, 242,   0, 
++     16,   0,   5,   0,   0,   0, 
++     70,  14,  16,   0,   5,   0, 
++      0,   0,   2,  64,   0,   0, 
++      0, 255,   0, 255,   0, 255, 
++      0, 255,   0, 255,   0, 255, 
++      0, 255,   0, 255,  85,   0, 
++      0,  10, 242,   0,  16,   0, 
++      6,   0,   0,   0, 150,   3, 
++     16,   0,   4,   0,   0,   0, 
++      2,  64,   0,   0,   8,   0, 
++      0,   0,   8,   0,   0,   0, 
++      8,   0,   0,   0,   8,   0, 
++      0,   0,   1,   0,   0,  10, 
++    242,   0,  16,   0,   6,   0, 
++      0,   0,  70,  14,  16,   0, 
++      6,   0,   0,   0,   2,  64, 
++      0,   0, 255,   0, 255,   0, 
++    255,   0, 255,   0, 255,   0, 
++    255,   0, 255,   0, 255,   0, 
++     30,   0,   0,   7, 242,   0, 
++     16,   0,   4,   0,   0,   0, 
++     54,   9,  16,   0,   5,   0, 
++      0,   0,  54,   9,  16,   0, 
++      6,   0,   0,   0,  21,   0, 
++      0,   1,  31,   0,   4,   3, 
++     58,   0,  16,   0,   1,   0, 
++      0,   0,  85,   0,   0,  10, 
++    242,   0,  16,   0,   5,   0, 
++      0,   0, 150,   3,  16,   0, 
++      4,   0,   0,   0,   2,  64, 
++      0,   0,  16,   0,   0,   0, 
++     16,   0,   0,   0,  16,   0, 
++      0,   0,  16,   0,   0,   0, 
++    140,   0,   0,  17, 242,   0, 
++     16,   0,   4,   0,   0,   0, 
++      2,  64,   0,   0,  16,   0, 
++      0,   0,  16,   0,   0,   0, 
++     16,   0,   0,   0,  16,   0, 
++      0,   0,   2,  64,   0,   0, 
++     16,   0,   0,   0,  16,   0, 
++      0,   0,  16,   0,   0,   0, 
++     16,   0,   0,   0,  70,  14, 
++     16,   0,   4,   0,   0,   0, 
++     54,   9,  16,   0,   5,   0, 
++      0,   0,  54,   0,   0,   5, 
++     18,   0,  16,   0,   5,   0, 
++      0,   0,  26,   0,  16,   0, 
++      4,   0,   0,   0,  54,   0, 
++      0,   5,  18,   0,  16,   0, 
++      6,   0,   0,   0,  42,   0, 
++     16,   0,   4,   0,   0,   0, 
++     54,   0,   0,   5,  18,   0, 
++     16,   0,   7,   0,   0,   0, 
++     58,   0,  16,   0,   4,   0, 
++      0,   0,  18,   0,   0,   1, 
++     54,   0,   0,   5,  18,   0, 
++     16,   0,   5,   0,   0,   0, 
++     26,   0,  16,   0,   4,   0, 
++      0,   0,  54,   0,   0,   5, 
++     18,   0,  16,   0,   6,   0, 
++      0,   0,  42,   0,  16,   0, 
++      4,   0,   0,   0,  54,   0, 
++      0,   5,  18,   0,  16,   0, 
++      7,   0,   0,   0,  58,   0, 
++     16,   0,   4,   0,   0,   0, 
++     21,   0,   0,   1,  85,   0, 
++      0,  10, 226,   0,  16,   0, 
++      5,   0,   0,   0,   6,   0, 
++     16,   0,   5,   0,   0,   0, 
++      2,  64,   0,   0,   0,   0, 
++      0,   0,   8,   0,   0,   0, 
++     16,   0,   0,   0,  24,   0, 
++      0,   0,   1,   0,   0,  10, 
++    242,   0,  16,   0,   5,   0, 
++      0,   0,  70,  14,  16,   0, 
++      5,   0,   0,   0,   2,  64, 
++      0,   0, 255,   0,   0,   0, 
++    255,   0,   0,   0, 255,   0, 
++      0,   0, 255,   0,   0,   0, 
++    164,   0,   0,   8, 242, 224, 
++     33,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0, 198,  15, 
++     16,   0,   0,   0,   0,   0, 
++     70,  14,  16,   0,   5,   0, 
++      0,   0,  30,   0,   0,  10, 
++    242,   0,  16,   0,   5,   0, 
++      0,   0, 198,  15,  16,   0, 
++      0,   0,   0,   0,   2,  64, 
++      0,   0,   1,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     85,   0,   0,  10, 226,   0, 
++     16,   0,   6,   0,   0,   0, 
++      6,   0,  16,   0,   6,   0, 
++      0,   0,   2,  64,   0,   0, 
++      0,   0,   0,   0,   8,   0, 
++      0,   0,  16,   0,   0,   0, 
++     24,   0,   0,   0,   1,   0, 
++      0,  10, 242,   0,  16,   0, 
++      6,   0,   0,   0,  70,  14, 
++     16,   0,   6,   0,   0,   0, 
++      2,  64,   0,   0, 255,   0, 
++      0,   0, 255,   0,   0,   0, 
++    255,   0,   0,   0, 255,   0, 
++      0,   0, 164,   0,   0,   8, 
++    242, 224,  33,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     70,  14,  16,   0,   5,   0, 
++      0,   0,  70,  14,  16,   0, 
++      6,   0,   0,   0,  30,   0, 
++      0,  10, 242,   0,  16,   0, 
++      5,   0,   0,   0, 198,  15, 
++     16,   0,   0,   0,   0,   0, 
++      2,  64,   0,   0,   2,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,  85,   0,   0,  10, 
++    226,   0,  16,   0,   7,   0, 
++      0,   0,   6,   0,  16,   0, 
++      7,   0,   0,   0,   2,  64, 
++      0,   0,   0,   0,   0,   0, 
++      8,   0,   0,   0,  16,   0, 
++      0,   0,  24,   0,   0,   0, 
++      1,   0,   0,  10, 242,   0, 
++     16,   0,   6,   0,   0,   0, 
++     70,  14,  16,   0,   7,   0, 
++      0,   0,   2,  64,   0,   0, 
++    255,   0,   0,   0, 255,   0, 
++      0,   0, 255,   0,   0,   0, 
++    255,   0,   0,   0, 164,   0, 
++      0,   8, 242, 224,  33,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,  70,  14,  16,   0, 
++      5,   0,   0,   0,  70,  14, 
++     16,   0,   6,   0,   0,   0, 
++     30,   0,   0,  10, 242,   0, 
++     16,   0,   5,   0,   0,   0, 
++    198,  15,  16,   0,   0,   0, 
++      0,   0,   2,  64,   0,   0, 
++      3,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,  85,   0, 
++      0,  10, 226,   0,  16,   0, 
++      4,   0,   0,   0,   6,   0, 
++     16,   0,   4,   0,   0,   0, 
++      2,  64,   0,   0,   0,   0, 
++      0,   0,   8,   0,   0,   0, 
++     16,   0,   0,   0,  24,   0, 
++      0,   0,   1,   0,   0,  10, 
++    242,   0,  16,   0,   4,   0, 
++      0,   0,  70,  14,  16,   0, 
++      4,   0,   0,   0,   2,  64, 
++      0,   0, 255,   0,   0,   0, 
++    255,   0,   0,   0, 255,   0, 
++      0,   0, 255,   0,   0,   0, 
++    164,   0,   0,   8, 242, 224, 
++     33,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,  70,  14, 
++     16,   0,   5,   0,   0,   0, 
++     70,  14,  16,   0,   4,   0, 
++      0,   0,  30,   0,   0,  10, 
++    242,   0,  16,   0,   4,   0, 
++      0,   0, 198,  15,  16,   0, 
++      0,   0,   0,   0,   2,  64, 
++      0,   0,   4,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     85,   0,   0,   7,  18,   0, 
++     16,   0,   2,   0,   0,   0, 
++     10,   0,  16,   0,   4,   0, 
++      0,   0,   1,  64,   0,   0, 
++      2,   0,   0,   0,  78,   0, 
++      0,   8,  66,   0,  16,   0, 
++      2,   0,   0,   0,   0, 208, 
++      0,   0,  10,   0,  16,   0, 
++      2,   0,   0,   0,  26,   0, 
++     16,   0,   1,   0,   0,   0, 
++     78,   0,   0,   8, 130,   0, 
++     16,   0,   2,   0,   0,   0, 
++      0, 208,   0,   0,  58,   0, 
++     16,   0,   4,   0,   0,   0, 
++     42,   0,  16,   0,   1,   0, 
++      0,   0,  35,   0,   0,  10, 
++     34,   0,  16,   0,   1,   0, 
++      0,   0,  42,   0,  16, 128, 
++     65,   0,   0,   0,   2,   0, 
++      0,   0,  26,   0,  16,   0, 
++      1,   0,   0,   0,  10,   0, 
++     16,   0,   2,   0,   0,   0, 
++     35,   0,   0,  10,  18,   0, 
++     16,   0,   2,   0,   0,   0, 
++     58,   0,  16, 128,  65,   0, 
++      0,   0,   2,   0,   0,   0, 
++     42,   0,  16,   0,   1,   0, 
++      0,   0,  58,   0,  16,   0, 
++      4,   0,   0,   0,  41,   0, 
++      0,   7,  34,   0,  16,   0, 
++      3,   0,   0,   0,  42,   0, 
++     16,   0,   2,   0,   0,   0, 
++      1,  64,   0,   0,   2,   0, 
++      0,   0,  42,   0,   0,  10, 
++    242,   0,  16,   0,   5,   0, 
++      0,   0, 246,  15,  16,   0, 
++      2,   0,   0,   0,   2,  64, 
++      0,   0,   5,   0,   0,   0, 
++      1,   0,   0,   0,   4,   0, 
++      0,   0,   3,   0,   0,   0, 
++    139,   0,   0,  15, 194,   0, 
++     16,   0,   3,   0,   0,   0, 
++      2,  64,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     27,   0,   0,   0,  29,   0, 
++      0,   0,   2,  64,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   3,   0,   0,   0, 
++      1,   0,   0,   0, 166,  10, 
++     16,   0,   2,   0,   0,   0, 
++     35,   0,   0,   9,  66,   0, 
++     16,   0,   2,   0,   0,   0, 
++     10,   0,  16,   0,   5,   0, 
++      0,   0,  10,   0,  16,   0, 
++      3,   0,   0,   0,  42,   0, 
++     16,   0,   3,   0,   0,   0, 
++    140,   0,   0,  20, 114,   0, 
++     16,   0,   5,   0,   0,   0, 
++      2,  64,   0,   0,   3,   0, 
++      0,   0,   1,   0,   0,   0, 
++      1,   0,   0,   0,   0,   0, 
++      0,   0,   2,  64,   0,   0, 
++      3,   0,   0,   0,   1,   0, 
++      0,   0,  11,   0,   0,   0, 
++      0,   0,   0,   0, 214,   6, 
++     16,   0,   5,   0,   0,   0, 
++      2,  64,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0, 140,   0,   0,  11, 
++     18,   0,  16,   0,   3,   0, 
++      0,   0,   1,  64,   0,   0, 
++      3,   0,   0,   0,   1,  64, 
++      0,   0,   0,   0,   0,   0, 
++     26,   0,  16,   0,   3,   0, 
++      0,   0,  10,   0,  16,   0, 
++      5,   0,   0,   0, 140,   0, 
++      0,  11,  66,   0,  16,   0, 
++      2,   0,   0,   0,   1,  64, 
++      0,   0,  26,   0,   0,   0, 
++      1,  64,   0,   0,   6,   0, 
++      0,   0,  42,   0,  16,   0, 
++      2,   0,   0,   0,  10,   0, 
++     16,   0,   3,   0,   0,   0, 
++      1,   0,   0,   7,  18,   0, 
++     16,   0,   3,   0,   0,   0, 
++     58,   0,  16,   0,   3,   0, 
++      0,   0,   1,  64,   0,   0, 
++      3,   0,   0,   0,  87,   0, 
++      0,   7,  18,   0,  16,   0, 
++      3,   0,   0,   0,  26,   0, 
++     16,   0,   5,   0,   0,   0, 
++     10,   0,  16,   0,   3,   0, 
++      0,   0, 140,   0,   0,  11, 
++    130,   0,  16,   0,   2,   0, 
++      0,   0,   1,  64,   0,   0, 
++      1,   0,   0,   0,   1,  64, 
++      0,   0,   4,   0,   0,   0, 
++     58,   0,  16,   0,   2,   0, 
++      0,   0,   1,  64,   0,   0, 
++      0,   0,   0,   0,  35,   0, 
++      0,   9, 130,   0,  16,   0, 
++      2,   0,   0,   0,  10,   0, 
++     16,   0,   3,   0,   0,   0, 
++      1,  64,   0,   0,  64,   0, 
++      0,   0,  58,   0,  16,   0, 
++      2,   0,   0,   0,  30,   0, 
++      0,   7, 130,   0,  16,   0, 
++      2,   0,   0,   0,  42,   0, 
++     16,   0,   5,   0,   0,   0, 
++     58,   0,  16,   0,   2,   0, 
++      0,   0, 139,   0,   0,  15, 
++    114,   0,  16,   0,   3,   0, 
++      0,   0,   2,  64,   0,   0, 
++     28,   0,   0,   0,  27,   0, 
++      0,   0,  24,   0,   0,   0, 
++      0,   0,   0,   0,   2,  64, 
++      0,   0,   2,   0,   0,   0, 
++      3,   0,   0,   0,   6,   0, 
++      0,   0,   0,   0,   0,   0, 
++    166,  10,  16,   0,   2,   0, 
++      0,   0, 140,   0,   0,  11, 
++     66,   0,  16,   0,   2,   0, 
++      0,   0,   1,  64,   0,   0, 
++      1,   0,   0,   0,   1,  64, 
++      0,   0,   5,   0,   0,   0, 
++     10,   0,  16,   0,   3,   0, 
++      0,   0,  58,   0,  16,   0, 
++      2,   0,   0,   0, 140,   0, 
++      0,  11,  66,   0,  16,   0, 
++      2,   0,   0,   0,   1,  64, 
++      0,   0,   3,   0,   0,   0, 
++      1,  64,   0,   0,   8,   0, 
++      0,   0,  26,   0,  16,   0, 
++      3,   0,   0,   0,  42,   0, 
++     16,   0,   2,   0,   0,   0, 
++    140,   0,   0,  11,  66,   0, 
++     16,   0,   2,   0,   0,   0, 
++      1,  64,   0,   0,  20,   0, 
++      0,   0,   1,  64,   0,   0, 
++     12,   0,   0,   0,  42,   0, 
++     16,   0,   3,   0,   0,   0, 
++     42,   0,  16,   0,   2,   0, 
++      0,   0,  35,   0,   0,   9, 
++     34,   0,  16,   0,   1,   0, 
++      0,   0,  26,   0,  16,   0, 
++      1,   0,   0,   0,  42,   0, 
++     16,   0,   1,   0,   0,   0, 
++     10,   0,  16,   0,   2,   0, 
++      0,   0,  41,   0,   0,   7, 
++     34,   0,  16,   0,   1,   0, 
++      0,   0,  26,   0,  16,   0, 
++      1,   0,   0,   0,   1,  64, 
++      0,   0,   4,   0,   0,   0, 
++     35,   0,   0,   9,  34,   0, 
++     16,   0,   1,   0,   0,   0, 
++     42,   0,  16,   0,   2,   0, 
++      0,   0,  26,   0,  16,   0, 
++      2,   0,   0,   0,  26,   0, 
++     16,   0,   1,   0,   0,   0, 
++     30,   0,   0,   9,  34,   0, 
++     16,   0,   1,   0,   0,   0, 
++     26,   0,  16,   0,   1,   0, 
++      0,   0,  26, 128,  48,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     85,   0,   0,   7,  34,   0, 
++     16,   0,   1,   0,   0,   0, 
++     26,   0,  16,   0,   1,   0, 
++      0,   0,   1,  64,   0,   0, 
++      4,   0,   0,   0,  45,   0, 
++      0,   8, 242,   0,  16,   0, 
++      2,   0,   0,   0,  86,   5, 
++     16,   0,   1,   0,   0,   0, 
++     54, 121,  32,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     31,   0,   4,   3,  10,   0, 
++     16,   0,   1,   0,   0,   0, 
++     41,   0,   0,  10, 242,   0, 
++     16,   0,   3,   0,   0,   0, 
++    150,   3,  16,   0,   2,   0, 
++      0,   0,   2,  64,   0,   0, 
++      8,   0,   0,   0,   8,   0, 
++      0,   0,   8,   0,   0,   0, 
++      8,   0,   0,   0,   1,   0, 
++      0,  10, 242,   0,  16,   0, 
++      3,   0,   0,   0,  70,  14, 
++     16,   0,   3,   0,   0,   0, 
++      2,  64,   0,   0,   0, 255, 
++      0, 255,   0, 255,   0, 255, 
++      0, 255,   0, 255,   0, 255, 
++      0, 255,  85,   0,   0,  10, 
++    242,   0,  16,   0,   5,   0, 
++      0,   0, 150,   3,  16,   0, 
++      2,   0,   0,   0,   2,  64, 
++      0,   0,   8,   0,   0,   0, 
++      8,   0,   0,   0,   8,   0, 
++      0,   0,   8,   0,   0,   0, 
++      1,   0,   0,  10, 242,   0, 
++     16,   0,   5,   0,   0,   0, 
++     70,  14,  16,   0,   5,   0, 
++      0,   0,   2,  64,   0,   0, 
++    255,   0, 255,   0, 255,   0, 
++    255,   0, 255,   0, 255,   0, 
++    255,   0, 255,   0,  30,   0, 
++      0,   7, 242,   0,  16,   0, 
++      2,   0,   0,   0,  54,   9, 
++     16,   0,   3,   0,   0,   0, 
++     54,   9,  16,   0,   5,   0, 
++      0,   0,  21,   0,   0,   1, 
++     31,   0,   4,   3,  58,   0, 
++     16,   0,   1,   0,   0,   0, 
++     85,   0,   0,  10, 242,   0, 
++     16,   0,   1,   0,   0,   0, 
++    150,   3,  16,   0,   2,   0, 
++      0,   0,   2,  64,   0,   0, 
++     16,   0,   0,   0,  16,   0, 
++      0,   0,  16,   0,   0,   0, 
++     16,   0,   0,   0, 140,   0, 
++      0,  17, 242,   0,  16,   0, 
++      2,   0,   0,   0,   2,  64, 
++      0,   0,  16,   0,   0,   0, 
++     16,   0,   0,   0,  16,   0, 
++      0,   0,  16,   0,   0,   0, 
++      2,  64,   0,   0,  16,   0, 
++      0,   0,  16,   0,   0,   0, 
++     16,   0,   0,   0,  16,   0, 
++      0,   0,  70,  14,  16,   0, 
++      2,   0,   0,   0,  54,   9, 
++     16,   0,   1,   0,   0,   0, 
++     54,   0,   0,   5,  18,   0, 
++     16,   0,   1,   0,   0,   0, 
++     26,   0,  16,   0,   2,   0, 
++      0,   0,  54,   0,   0,   5, 
++     18,   0,  16,   0,   3,   0, 
++      0,   0,  42,   0,  16,   0, 
++      2,   0,   0,   0,  54,   0, 
++      0,   5,  18,   0,  16,   0, 
++      5,   0,   0,   0,  58,   0, 
++     16,   0,   2,   0,   0,   0, 
++     18,   0,   0,   1,  54,   0, 
++      0,   5,  18,   0,  16,   0, 
++      1,   0,   0,   0,  26,   0, 
++     16,   0,   2,   0,   0,   0, 
++     54,   0,   0,   5,  18,   0, 
++     16,   0,   3,   0,   0,   0, 
++     42,   0,  16,   0,   2,   0, 
++      0,   0,  54,   0,   0,   5, 
++     18,   0,  16,   0,   5,   0, 
++      0,   0,  58,   0,  16,   0, 
++      2,   0,   0,   0,  21,   0, 
++      0,   1,  85,   0,   0,  10, 
++    226,   0,  16,   0,   1,   0, 
++      0,   0,   6,   0,  16,   0, 
++      1,   0,   0,   0,   2,  64, 
++      0,   0,   0,   0,   0,   0, 
++      8,   0,   0,   0,  16,   0, 
++      0,   0,  24,   0,   0,   0, 
++      1,   0,   0,  10, 242,   0, 
++     16,   0,   1,   0,   0,   0, 
++     70,  14,  16,   0,   1,   0, 
++      0,   0,   2,  64,   0,   0, 
++    255,   0,   0,   0, 255,   0, 
++      0,   0, 255,   0,   0,   0, 
++    255,   0,   0,   0, 164,   0, 
++      0,   8, 242, 224,  33,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,  70,  14,  16,   0, 
++      4,   0,   0,   0,  70,  14, 
++     16,   0,   1,   0,   0,   0, 
++     30,   0,   0,  10, 242,   0, 
++     16,   0,   1,   0,   0,   0, 
++    198,  15,  16,   0,   0,   0, 
++      0,   0,   2,  64,   0,   0, 
++      5,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,  85,   0, 
++      0,  10, 226,   0,  16,   0, 
++      3,   0,   0,   0,   6,   0, 
++     16,   0,   3,   0,   0,   0, 
++      2,  64,   0,   0,   0,   0, 
++      0,   0,   8,   0,   0,   0, 
++     16,   0,   0,   0,  24,   0, 
++      0,   0,   1,   0,   0,  10, 
++    242,   0,  16,   0,   3,   0, 
++      0,   0,  70,  14,  16,   0, 
++      3,   0,   0,   0,   2,  64, 
++      0,   0, 255,   0,   0,   0, 
++    255,   0,   0,   0, 255,   0, 
++      0,   0, 255,   0,   0,   0, 
++    164,   0,   0,   8, 242, 224, 
++     33,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,  70,  14, 
++     16,   0,   1,   0,   0,   0, 
++     70,  14,  16,   0,   3,   0, 
++      0,   0,  30,   0,   0,  10, 
++    242,   0,  16,   0,   1,   0, 
++      0,   0, 198,  15,  16,   0, 
++      0,   0,   0,   0,   2,  64, 
++      0,   0,   6,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     85,   0,   0,  10, 226,   0, 
++     16,   0,   5,   0,   0,   0, 
++      6,   0,  16,   0,   5,   0, 
++      0,   0,   2,  64,   0,   0, 
++      0,   0,   0,   0,   8,   0, 
++      0,   0,  16,   0,   0,   0, 
++     24,   0,   0,   0,   1,   0, 
++      0,  10, 242,   0,  16,   0, 
++      3,   0,   0,   0,  70,  14, 
++     16,   0,   5,   0,   0,   0, 
++      2,  64,   0,   0, 255,   0, 
++      0,   0, 255,   0,   0,   0, 
++    255,   0,   0,   0, 255,   0, 
++      0,   0, 164,   0,   0,   8, 
++    242, 224,  33,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     70,  14,  16,   0,   1,   0, 
++      0,   0,  70,  14,  16,   0, 
++      3,   0,   0,   0,  30,   0, 
++      0,  10, 242,   0,  16,   0, 
++      1,   0,   0,   0,  70,  14, 
++     16,   0,   0,   0,   0,   0, 
++      2,  64,   0,   0,   7,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,  85,   0,   0,  10, 
++    226,   0,  16,   0,   2,   0, 
++      0,   0,   6,   0,  16,   0, 
++      2,   0,   0,   0,   2,  64, 
++      0,   0,   0,   0,   0,   0, 
++      8,   0,   0,   0,  16,   0, 
++      0,   0,  24,   0,   0,   0, 
++      1,   0,   0,  10, 242,   0, 
++     16,   0,   2,   0,   0,   0, 
++     70,  14,  16,   0,   2,   0, 
++      0,   0,   2,  64,   0,   0, 
++    255,   0,   0,   0, 255,   0, 
++      0,   0, 255,   0,   0,   0, 
++    255,   0,   0,   0, 164,   0, 
++      0,   8, 242, 224,  33,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,  70,  14,  16,   0, 
++      1,   0,   0,   0,  70,  14, 
++     16,   0,   2,   0,   0,   0, 
++     62,   0,   0,   1,  83,  84, 
++     65,  84, 148,   0,   0,   0, 
++    134,   0,   0,   0,   8,   0, 
++      0,   0,   0,   0,   0,   0, 
++      1,   0,   0,   0,   0,   0, 
++      0,   0,  36,   0,   0,   0, 
++     40,   0,   0,   0,   4,   0, 
++      0,   0,   5,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      2,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,  13,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      8,   0,   0,   0
++};
+diff --git a/src/graphics/shaders/texture_load_direct_scaled.cs.hlsl b/src/graphics/shaders/texture_load_direct_scaled.cs.hlsl
+new file mode 100644
+index 0000000..5563b61
+--- /dev/null
++++ b/src/graphics/shaders/texture_load_direct_scaled.cs.hlsl
+@@ -0,0 +1,98 @@
++// Build (Windows SDK fxc), with the .xesli includes from Xenia commit
++// 95a5c3ee250f80c3b9d139658649d9ffb6db3eec (src/xenia/gpu/shaders, ui/shaders/xesl.xesli):
++//   fxc /T cs_5_1 /E main /D SHADING_LANGUAGE_HLSL_XE=1 /D XE_DIRECT_FORMAT=<0|1|2> /O3
++//       /Vn texture_load_direct_<rgba8|depth_float|rgba16f>_scaled_cs
++//       /Fh bytecode/d3d12_5_1/texture_load_direct_<...>_scaled_cs.h
++//       texture_load_direct_scaled.cs.hlsl
++//
++// Resolution-scaled texture loads that write straight into the host texture through a typed UAV,
++// instead of into a buffer that is then copied into the texture (at 4x a full-screen 32bpp
++// texture is 49 MB, so the copy costs as much as the load). Same endian swap and conversions as
++// Xenia's texture_load_32bpb / 64bpb / depth_float scaled shaders (BSD license, Copyright 2022
++// Ben Vanik), built from their .xesli files; the scaled source addressing follows this SDK's
++// layout (XeDirectSourceAddress).
++//
++// XE_DIRECT_FORMAT:
++//   0 - 32bpb into an R8G8B8A8_UINT view (k_8_8_8_8, typeless resource), 8 blocks per thread.
++//   1 - k_24_8_FLOAT depth into R32_FLOAT, 8 blocks per thread.
++//   2 - 64bpb into R16G16B16A16_FLOAT (k_16_16_16_16_FLOAT), 4 blocks per thread.
++
++#define XE_TEXTURE_LOAD_RESOLUTION_SCALED
++#include "texture_load.xesli"
++#include "pixel_formats.xesli"
++
++Buffer<uint4> xe_texture_load_source : register(t0, space0);
++
++#if XE_DIRECT_FORMAT == 0
++RWTexture2D<uint4> xe_texture_load_dest : register(u0, space0);
++#define XE_DIRECT_BLOCKS_PER_THREAD_LOG2 3u
++#define XE_DIRECT_BYTES_PER_BLOCK_LOG2 2u
++#elif XE_DIRECT_FORMAT == 1
++RWTexture2D<float> xe_texture_load_dest : register(u0, space0);
++#define XE_DIRECT_BLOCKS_PER_THREAD_LOG2 3u
++#define XE_DIRECT_BYTES_PER_BLOCK_LOG2 2u
++#else
++RWTexture2D<float4> xe_texture_load_dest : register(u0, space0);
++#define XE_DIRECT_BLOCKS_PER_THREAD_LOG2 2u
++#define XE_DIRECT_BYTES_PER_BLOCK_LOG2 3u
++#endif
++
++// Source address of host (resolution-scaled) block position in the scaled resolve memory layout
++// of this SDK (Xenia before 2022-06): each 16-byte x 1-row group of guest blocks is stored as
++// scale_x * scale_y host groups of 16 bytes x 1 row, column-major. (Current Xenia uses larger
++// groups - XeniaTextureGetResolutionScaledAddressing - so it can not be used here.)
++uint XeDirectSourceAddress(XeTextureLoadInfo load_info, uint2 host_position, uint bpb_log2) {
++  uint group_blocks_log2 = 4u - bpb_log2;
++  uint2 scale = load_info.resolution_scale;
++  uint host_group_x = host_position.x >> group_blocks_log2;
++  uint guest_group_x = host_group_x / scale.x;
++  uint guest_y = host_position.y / scale.y;
++  uint2 host_group_in_guest_group =
++      uint2(host_group_x - guest_group_x * scale.x, host_position.y - guest_y * scale.y);
++  uint address = uint(XenosTextureTiledAddress2D(
++      int2(guest_group_x << group_blocks_log2, guest_y),
++      load_info.guest_pitch_aligned >> XENOS_TEXTURE_MACRO_TILE_WIDTH_LOG2, bpb_log2));
++  address = address * (scale.x * scale.y) +
++            ((host_group_in_guest_group.x * scale.y + host_group_in_guest_group.y) << 4u) +
++            ((host_position.x & ((1u << group_blocks_log2) - 1u)) << bpb_log2);
++  return address + load_info.guest_offset;
++}
++
++// Stores the 16 bytes loaded from one guest address (4 blocks of 32bpb, 2 blocks of 64bpb),
++// with the leftmost block at position.
++void XeDirectStore(uint2 position, uint4 blocks) {
++#if XE_DIRECT_FORMAT == 0
++  [unroll] for (uint i = 0u; i < 4u; ++i) {
++    xe_texture_load_dest[position + uint2(i, 0u)] =
++        (uint4(blocks[i], blocks[i], blocks[i], blocks[i]) >> uint4(0u, 8u, 16u, 24u)) & 0xFFu;
++  }
++#elif XE_DIRECT_FORMAT == 1
++  uint4 depth32 = XeFloat20e4To32(blocks >> 8u);
++  [unroll] for (uint i = 0u; i < 4u; ++i) {
++    xe_texture_load_dest[position + uint2(i, 0u)] = asfloat(depth32[i]);
++  }
++#else
++  xe_texture_load_dest[position] =
++      f16tof32(uint4(blocks.x, blocks.x >> 16u, blocks.y, blocks.y >> 16u));
++  xe_texture_load_dest[position + uint2(1u, 0u)] =
++      f16tof32(uint4(blocks.z, blocks.z >> 16u, blocks.w, blocks.w >> 16u));
++#endif
++}
++
++[numthreads(LOCAL_SIZE_X_XE, LOCAL_SIZE_Y_XE, LOCAL_SIZE_Z_XE)]
++void main(uint3 xe_thread_id : SV_DispatchThreadID) {
++  XeTextureLoadInfo load_info = XeTextureLoadGetInfo();
++  uint3 block_index = xe_thread_id << uint3(XE_DIRECT_BLOCKS_PER_THREAD_LOG2, 0u, 0u);
++  [branch] if (any(block_index.xy >= load_info.size_blocks.xy)) {
++    return;
++  }
++  // Two 16-byte groups: 2 x 4 blocks of 32bpb or 2 x 2 blocks of 64bpb.
++  uint group_blocks = 16u >> XE_DIRECT_BYTES_PER_BLOCK_LOG2;
++  [unroll] for (uint i = 0u; i < 2u; ++i) {
++    uint2 position = block_index.xy + uint2(group_blocks * i, 0u);
++    uint source_address =
++        XeDirectSourceAddress(load_info, position, XE_DIRECT_BYTES_PER_BLOCK_LOG2);
++    XeDirectStore(position, XeEndianSwap32(xe_texture_load_source[source_address >> 4u],
++                                           load_info.endian_32));
++  }
++}

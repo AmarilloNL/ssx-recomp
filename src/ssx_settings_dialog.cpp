@@ -340,7 +340,7 @@ void SsxSettingsDialog::DrawGraphicsTab() {
   Combo("##scale", "resolution_scale", kScales, std::size(kScales));
   if (std::atoi(rex::cvar::GetFlagByName("resolution_scale").c_str()) >= 3) {
     ImGui::PushStyleColor(ImGuiCol_Text, kWarn);
-    ImGui::TextWrapped("GPU-limited: even an RTX 4080 SUPER runs 4x at about 40-50 fps, with dips "
+    ImGui::TextWrapped("GPU-limited: even an RTX 4080 SUPER runs 4x at about 45-55 fps, with dips "
                        "and hitches in busy scenes. For smooth play use 2x or 3x.");
     ImGui::PopStyleColor();
   }

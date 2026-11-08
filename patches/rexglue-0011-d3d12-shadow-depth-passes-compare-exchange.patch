@@ -1,0 +1,253 @@
+diff --git a/include/rex/graphics/d3d12/pipeline_cache.h b/include/rex/graphics/d3d12/pipeline_cache.h
+index e396d83..51ee6e9 100644
+--- a/include/rex/graphics/d3d12/pipeline_cache.h
++++ b/include/rex/graphics/d3d12/pipeline_cache.h
+@@ -212,6 +212,8 @@ class PipelineCache {
+     uint32_t stencil_read_mask : 8;                   // 27
+     // ROV with resolution scaling: drawn at 1x to the unscaled EDRAM region.
+     uint32_t edram_unscaled : 1;  // 28
++    // With edram_unscaled and no pixel shader: compare-exchange depth-only shader.
++    uint32_t edram_depth_atomic : 1;  // 29
+ 
+     uint32_t stencil_write_mask : 8;                   // 8
+     xenos::StencilOp stencil_front_fail_op : 3;        // 11
+@@ -348,6 +350,7 @@ class PipelineCache {
+   // Xenos pixel shader provided.
+   std::vector<uint8_t> depth_only_pixel_shader_;
+   std::vector<uint8_t> depth_only_pixel_shader_edram_unscaled_;
++  std::vector<uint8_t> depth_only_pixel_shader_edram_depth_atomic_;
+   bool draw_edram_unscaled_ = false;
+ 
+   struct Pipeline {
+diff --git a/include/rex/graphics/format/dxbc.h b/include/rex/graphics/format/dxbc.h
+index a5eaa8f..194891d 100644
+--- a/include/rex/graphics/format/dxbc.h
++++ b/include/rex/graphics/format/dxbc.h
+@@ -1443,6 +1443,7 @@ enum class Opcode : uint32_t {
+   kStoreRaw = 166,
+   kAtomicAnd = 169,
+   kAtomicOr = 170,
++  kImmAtomicCmpExch = 185,
+   kEvalSampleIndex = 204,
+   kEvalCentroid = 205,
+ };
+@@ -2268,6 +2269,24 @@ class Assembler {
+                   const Src& value) {
+     EmitAtomicOp(Opcode::kAtomicOr, dest, address, address_components, value);
+   }
++  // dest (one temp component) = the value before the exchange; memory is a 0-component UAV.
++  void OpImmAtomicCmpExch(const Dest& dest, const Dest& memory, const Src& address,
++                          uint32_t address_components, const Src& compare, const Src& value) {
++    assert_zero(memory.GetMask());
++    uint32_t address_mask = (1 << address_components) - 1;
++    uint32_t operands_length = dest.GetLength() + memory.GetLength() +
++                               address.GetLength(address_mask) + compare.GetLength(0b0001) +
++                               value.GetLength(0b0001);
++    code_.reserve(code_.size() + 1 + operands_length);
++    code_.push_back(OpcodeToken(Opcode::kImmAtomicCmpExch, operands_length));
++    dest.Write(code_);
++    memory.Write(code_);
++    address.Write(code_, true, address_mask);
++    compare.Write(code_, true, 0b0001);
++    value.Write(code_, true, 0b0001);
++    ++stat_.instruction_count;
++    ++stat_.c_interlocked_instructions;
++  }
+   void OpEvalSampleIndex(const Dest& dest, const Src& value, const Src& sample_index) {
+     uint32_t dest_write_mask = dest.GetMask();
+     uint32_t operands_length =
+diff --git a/include/rex/graphics/pipeline/shader/dxbc_translator.h b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+index cabfa8f..d0f3690 100644
+--- a/include/rex/graphics/pipeline/shader/dxbc_translator.h
++++ b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+@@ -179,6 +179,10 @@ class DxbcShaderTranslator : public ShaderTranslator {
+       // ROV with resolution scaling - draw this pass at 1x into the unscaled
+       // EDRAM region placed after the scaled EDRAM in the same buffer.
+       uint32_t edram_unscaled : 1;
++      // Depth-only pixel shader for such a pass: depth test and write with a
++      // compare-exchange loop instead of rasterizer ordering (see
++      // PipelineCache::GetCurrentStateDescription for when this is exact).
++      uint32_t edram_depth_atomic : 1;
+     } pixel;
+ 
+     explicit Modification(uint64_t modification_value = 0) : value(modification_value) {
+@@ -516,7 +520,8 @@ class DxbcShaderTranslator : public ShaderTranslator {
+ 
+   // Creates a special pixel shader without color outputs - this resets the
+   // state of the translator.
+-  std::vector<uint8_t> CreateDepthOnlyPixelShader(bool edram_unscaled = false);
++  std::vector<uint8_t> CreateDepthOnlyPixelShader(bool edram_unscaled = false,
++                                                  bool edram_depth_atomic = false);
+ 
+   // Common functions useful not only for the translator, but also for render
+   // target reinterpretation.
+@@ -945,6 +950,8 @@ class DxbcShaderTranslator : public ShaderTranslator {
+   uint32_t edram_scale_x_ = 1;
+   uint32_t edram_scale_y_ = 1;
+   uint32_t edram_dword_offset_ = 0;
++  // Modification::pixel.edram_depth_atomic for the depth-only pixel shader.
++  bool edram_depth_atomic_ = false;
+ 
+   // Is currently writing the empty depth-only pixel shader, for
+   // CompleteTranslation.
+diff --git a/src/graphics/d3d12/pipeline_cache.cpp b/src/graphics/d3d12/pipeline_cache.cpp
+index 9a2b6c8..0a6fec5 100644
+--- a/src/graphics/d3d12/pipeline_cache.cpp
++++ b/src/graphics/d3d12/pipeline_cache.cpp
+@@ -106,6 +106,8 @@ PipelineCache::PipelineCache(D3D12CommandProcessor& command_processor,
+     if (render_target_cache_.IsDrawResolutionScaled()) {
+       depth_only_pixel_shader_edram_unscaled_ =
+           std::move(shader_translator_->CreateDepthOnlyPixelShader(true));
++      depth_only_pixel_shader_edram_depth_atomic_ =
++          std::move(shader_translator_->CreateDepthOnlyPixelShader(true, true));
+     }
+   }
+ }
+@@ -1259,6 +1261,18 @@ bool PipelineCache::GetCurrentStateDescription(
+   // Initialize all unused fields to zero for comparison/hashing.
+   std::memset(&runtime_description_out, 0, sizeof(runtime_description_out));
+   description_out.edram_unscaled = uint32_t(draw_edram_unscaled_);
++  // Depth-only unscaled passes (shadow maps) writing depth with a less / greater (or equal)
++  // test and no stencil end up with the min / max depth of all fragments in any order, so
++  // they skip the ROV ordering (about half of their cost) for a compare-exchange loop.
++  if (draw_edram_unscaled_ && !pixel_shader && normalized_depth_control.z_enable &&
++      normalized_depth_control.z_write_enable && !normalized_depth_control.stencil_enable) {
++    xenos::CompareFunction zfunc = normalized_depth_control.zfunc;
++    description_out.edram_depth_atomic =
++        uint32_t(zfunc == xenos::CompareFunction::kLess ||
++                 zfunc == xenos::CompareFunction::kLessEqual ||
++                 zfunc == xenos::CompareFunction::kGreater ||
++                 zfunc == xenos::CompareFunction::kGreaterEqual);
++  }
+ 
+   assert_true(DxbcShaderTranslator::Modification(vertex_shader->modification())
+                   .vertex.host_vertex_shader_type ==
+@@ -2842,9 +2856,10 @@ ID3D12PipelineState* PipelineCache::CreateD3D12Pipeline(
+     state_desc.PS.pShaderBytecode = runtime_description.pixel_shader->translated_binary().data();
+     state_desc.PS.BytecodeLength = runtime_description.pixel_shader->translated_binary().size();
+   } else if (edram_rov_used) {
+-    const std::vector<uint8_t>& depth_only_ps = description.edram_unscaled
+-                                                    ? depth_only_pixel_shader_edram_unscaled_
+-                                                    : depth_only_pixel_shader_;
++    const std::vector<uint8_t>& depth_only_ps =
++        description.edram_depth_atomic ? depth_only_pixel_shader_edram_depth_atomic_
++        : description.edram_unscaled   ? depth_only_pixel_shader_edram_unscaled_
++                                       : depth_only_pixel_shader_;
+     state_desc.PS.pShaderBytecode = depth_only_ps.data();
+     state_desc.PS.BytecodeLength = depth_only_ps.size();
+   } else {
+diff --git a/src/graphics/pipeline/shader/dxbc_translator.cpp b/src/graphics/pipeline/shader/dxbc_translator.cpp
+index 13b587c..f927aac 100644
+--- a/src/graphics/pipeline/shader/dxbc_translator.cpp
++++ b/src/graphics/pipeline/shader/dxbc_translator.cpp
+@@ -79,7 +79,8 @@ DxbcShaderTranslator::DxbcShaderTranslator(ui::GraphicsProvider::GpuVendorID ven
+ }
+ DxbcShaderTranslator::~DxbcShaderTranslator() = default;
+ 
+-std::vector<uint8_t> DxbcShaderTranslator::CreateDepthOnlyPixelShader(bool edram_unscaled) {
++std::vector<uint8_t> DxbcShaderTranslator::CreateDepthOnlyPixelShader(bool edram_unscaled,
++                                                                      bool edram_depth_atomic) {
+   is_depth_only_pixel_shader_ = true;
+   // TODO(Triang3l): Handle in a nicer way (is_depth_only_pixel_shader_ is a
+   // leftover from when a Shader object wasn't used during translation).
+@@ -87,6 +88,7 @@ std::vector<uint8_t> DxbcShaderTranslator::CreateDepthOnlyPixelShader(bool edram
+   shader.AnalyzeUcode(instruction_disassembly_buffer_);
+   Modification modification;
+   modification.pixel.edram_unscaled = uint32_t(edram_unscaled);
++  modification.pixel.edram_depth_atomic = uint32_t(edram_depth_atomic);
+   Shader::Translation& translation = *shader.GetOrCreateTranslation(modification.value);
+   TranslateAnalyzedShader(translation);
+   is_depth_only_pixel_shader_ = false;
+@@ -784,6 +786,8 @@ void DxbcShaderTranslator::StartTranslation() {
+     edram_scale_y_ = draw_resolution_scale_y_;
+     edram_dword_offset_ = 0;
+   }
++  edram_depth_atomic_ = is_pixel_shader() && is_depth_only_pixel_shader_ && edram_rov_used_ &&
++                        shader_modification.pixel.edram_depth_atomic;
+   uint32_t interpolator_register_mask = GetModificationInterpolatorMask();
+   uint32_t interpolator_register_count = rex::bit_count(interpolator_register_mask);
+   if (is_vertex_shader()) {
+@@ -3254,10 +3258,14 @@ void DxbcShaderTranslator::WriteShaderCode() {
+                                                       uint32_t(UAVRegister::kSharedMemory),
+                                                       uint32_t(UAVRegister::kSharedMemory)));
+     } else if (i == uav_index_edram_) {
+-      // EDRAM buffer R32_UINT rasterizer-ordered view.
+-      shader_feature_info_.feature_flags[0] |= dxbc::kShaderFeature0_ROVs;
++      // EDRAM buffer R32_UINT rasterizer-ordered view (a plain view for the
++      // compare-exchange depth-only shader).
++      if (!edram_depth_atomic_) {
++        shader_feature_info_.feature_flags[0] |= dxbc::kShaderFeature0_ROVs;
++      }
+       ao_.OpDclUnorderedAccessViewTyped(
+-          dxbc::ResourceDimension::kBuffer, dxbc::kUAVFlagRasterizerOrderedAccess,
++          dxbc::ResourceDimension::kBuffer,
++          edram_depth_atomic_ ? 0 : dxbc::kUAVFlagRasterizerOrderedAccess,
+           dxbc::ResourceReturnTypeX4Token(dxbc::ResourceReturnType::kUInt),
+           dxbc::Src::U(dxbc::Src::Dcl, uav_index_edram_, uint32_t(UAVRegister::kEdram),
+                        uint32_t(UAVRegister::kEdram)));
+diff --git a/src/graphics/pipeline/shader/dxbc_translator_om.cpp b/src/graphics/pipeline/shader/dxbc_translator_om.cpp
+index a2164d4..747ad8b 100644
+--- a/src/graphics/pipeline/shader/dxbc_translator_om.cpp
++++ b/src/graphics/pipeline/shader/dxbc_translator_om.cpp
+@@ -607,6 +607,52 @@ void DxbcShaderTranslator::ROV_DepthStencilTest() {
+                        sample_depth_stencil_src.swizzle_ & 3, sample_temp, 0);
+     }
+ 
++    if (edram_depth_atomic_) {
++      // Depth-only pass with a depth write, a less / greater (or equal) test and no
++      // stencil: the result is the min / max of all fragments in any order, so no
++      // rasterizer ordering is needed - compare-exchange until the stored value is
++      // not passed anymore or the exchange succeeds. Equal depth needs no write.
++      if (uav_index_edram_ == kBindingIndexUnallocated) {
++        uav_index_edram_ = uav_count_++;
++      }
++      dxbc::Src edram_address_src(dxbc::Src::R(system_temp_rov_params_, dxbc::Src::kYYYY));
++      // sample_temp.x = old depth/stencil
++      a_.OpLdUAVTyped(
++          sample_temp_x_dest, edram_address_src, 1,
++          dxbc::Src::U(uav_index_edram_, uint32_t(UAVRegister::kEdram), dxbc::Src::kXXXX));
++      a_.OpLoop();
++      {
++        // sample_temp.y = old depth
++        a_.OpUShR(sample_temp_y_dest, sample_temp_x_src, dxbc::Src::LU(8));
++        // sample_temp.z = new depth - old depth
++        a_.OpIAdd(sample_temp_z_dest, sample_depth_stencil_src, -sample_temp_y_src);
++        // sample_temp.w = the pass bit for less or greater
++        a_.OpILT(sample_temp_w_dest, sample_temp_z_src, dxbc::Src::LI(0));
++        a_.OpMovC(sample_temp_w_dest, sample_temp_w_src,
++                  dxbc::Src::LU(kSysFlag_ROVDepthPassIfLess),
++                  dxbc::Src::LU(kSysFlag_ROVDepthPassIfGreater));
++        // sample_temp.z = non-zero if the depth differs and the test passes
++        a_.OpMovC(sample_temp_z_dest, sample_temp_z_src, sample_temp_w_src, dxbc::Src::LU(0));
++        a_.OpAnd(sample_temp_z_dest, sample_temp_z_src, LoadFlagsSystemConstant());
++        a_.OpIf(false, sample_temp_z_src);
++        a_.OpBreak();
++        a_.OpEndIf();
++        // sample_temp.w = new depth with the old stencil
++        a_.OpBFI(sample_temp_w_dest, dxbc::Src::LU(24), dxbc::Src::LU(8), sample_depth_stencil_src,
++                 sample_temp_x_src);
++        // sample_temp.y = the stored value before the exchange
++        a_.OpImmAtomicCmpExch(sample_temp_y_dest,
++                              dxbc::Dest::U(uav_index_edram_, uint32_t(UAVRegister::kEdram), 0),
++                              edram_address_src, 1, sample_temp_x_src, sample_temp_w_src);
++        // Done unless another fragment wrote in between - then retry with its value.
++        a_.OpIEq(sample_temp_z_dest, sample_temp_y_src, sample_temp_x_src);
++        a_.OpIf(true, sample_temp_z_src);
++        a_.OpBreak();
++        a_.OpEndIf();
++        a_.OpMov(sample_temp_x_dest, sample_temp_y_src);
++      }
++      a_.OpEndLoop();
++    } else {
+     // Load the old depth/stencil value.
+     // sample_temp.x = old depth/stencil
+     if (uav_index_edram_ == kBindingIndexUnallocated) {
+@@ -1007,6 +1053,8 @@ void DxbcShaderTranslator::ROV_DepthStencilTest() {
+       a_.OpEndIf();
+     }
+ 
++    }  // edram_depth_atomic_
++
+     // Release sample_temp.
+     PopSystemTemp();
+ 

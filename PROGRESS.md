@@ -364,3 +364,25 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   same ride: ~90 fps, 280-410 of ~450 frames at 10-15 ms, max 19-24 ms. User: dips "way less".
   Open: the SSX title logo drawn over Psymon's portrait in rider select at 2x right after boot
   (stale upscaled resolve data; like the 2026-11-02 fix, but no race before it).
+- 2026-11-07: GPU profile of the Whitehorn race (temporary timestamp profiler per render target
+  layout / resolve / texture load; script kept outside the repo). GPU ms per frame: 2x 7.3, 3x 13.3,
+  4x 22.5. At 4x: main scene passes 7.5 (EDRAM pitch 1200, color 8888 + 7e3), loading the 9
+  full-screen resolves per frame as textures 3.3 (load shader 1.5 + buffer-to-texture copy 1.7;
+  all distinct: 6 k_8_8_8_8, 2 k_24_8_FLOAT depth, 1 k_16_16_16_16_FLOAT), resolves 2.2, shadows
+  1.8 at every scale (already 1x; ~0.8 of it is vertex work), glow/blur passes small (so drawing
+  them at a lower scale would gain little). The texture load and copy grow faster than the pixel
+  count from 3x to 4x (0.47 -> 1.7 ms copy): 4x full-screen targets (49-98 MB) no longer fit the
+  GPU's L2 cache.
+  - patches/rexglue-0012: resolution-scaled 2D textures without mips in those three formats are
+    loaded straight into the texture through a typed UAV (new compute shaders, source in
+    src/graphics/shaders/texture_load_direct_scaled.cs.hlsl), no copy buffer and copy. Note: this
+    SDK's scaled resolve layout is the pre-2022-06 one (16-byte x 1-row groups, column-major), not
+    current Xenia's XeniaTextureGetResolutionScaledAddressing (16x2 blocks for 32bpb); the first
+    version used upstream's and gave a blocky 1x-looking image. A/B, 4x, two interleaved rounds:
+    21.5 -> 19.3 ms GPU per frame, 45 -> 51 fps. 3x unchanged (fits in L2), 2x ~+2%.
+  - patches/rexglue-0011: depth-only 1x passes (shadow maps) with a depth write, a less/greater
+    (or equal) test and no stencil use a compare-exchange loop on a plain UAV instead of the ROV
+    (new imm_atomic_cmp_exch emitter): the result is the min/max of all fragments in any order.
+    Shadow pass 1.31 -> 1.09 ms; shadows unchanged.
+  Ruled out: duplicate texture loads (none), lower scale for glow/blur (small passes).
+  SDK package sdk-8.

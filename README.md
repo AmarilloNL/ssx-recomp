@@ -116,13 +116,13 @@ the file for you.
 > [!TIP]
 > **1× + FSR** runs at very high frame rates and looks sharp. **2×** is noticeably sharper (about
 > 60% of the 1× frame rate); **3×** and **4×** need a high-end GPU (an RTX 4080 SUPER runs 4× at
-> about 40–50 fps). If a setting ever stops the game from starting,
+> about 45–55 fps). If a setting ever stops the game from starting,
 > delete `ssx.toml` next to `ssx.exe`.
 
 > [!WARNING]
 > **3× and 4× are limited by the graphics card, not by the port.**
-> - **4×:** even an RTX 4080 SUPER runs it at about 40–50 fps, dropping to 35–40 fps in busy
->   scenes, with hitches.
+> - **4×:** even an RTX 4080 SUPER runs it at about 45–55 fps, dropping to about 40 fps in
+>   busy scenes, with hitches.
 > - **3×:** an RTX 4080 SUPER holds a 60 fps cap almost everywhere, but heavy spots (for example
 >   riding into the cave on The Dagger) can dip to about 55 fps for a few seconds.
 >
@@ -143,11 +143,11 @@ the file for you.
 - **Measured** on an RTX 4080 SUPER while playing: the GPU at 99% the whole time, at full clock
   speed and well within its power and heat limits. The CPU is at about 20%. The GPU is simply
   out of headroom.
-- **For 60 fps** a frame has to take 16.7 ms instead of the 21–28 ms measured, so the GPU would
-  have to do about a third less work. Shadows are already drawn at 1× when scaling, which was
-  worth about 15%. The rest would have to come from drawing more of the frame at a lower
-  resolution (for example glow and blur effects), which makes those parts softer. That isn't
-  available yet and may not be possible without visible differences.
+- **For 60 fps** a frame has to take 16.7 ms instead of the 19–25 ms measured, so the GPU would
+  have to do about a quarter less work. Already done: shadows are drawn at 1× when scaling
+  (about 15%), and the full-screen images the game reads back as textures (9 per frame) are
+  loaded without an extra copy (about 12% at 4×). Drawing glow and blur at a lower resolution
+  would gain little: they are small passes. Most of the time goes into the main scene itself.
 
 </details>
 
@@ -221,6 +221,7 @@ The game is playable and is being tested by playing through the whole World Tour
 - ✅ Stutter with a 60 fps cap at 3× (frames came out in pairs, which looked like 30 fps), and
   long slowdowns after a short spike
 - ✅ Uneven frame times at 2× with an uncapped frame rate (frames jumped between 3 and 40 ms)
+- ✅ 4× about 12% faster (45 → 51 fps in the same race)
 
 **👀 Known issues**
 - A peak label on the world map was once seen drawn as a solid box (Africa). Not reproduced
