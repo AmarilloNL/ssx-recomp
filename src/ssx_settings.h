@@ -9,8 +9,8 @@ REXCVAR_DECLARE(int32_t, ssx_framerate);
 REXCVAR_DECLARE(std::string, ssx_render_resolution);
 REXCVAR_DECLARE(int32_t, ssx_volume);
 
-// Frame rate the game should run at (ssx_framerate, with 0 resolved to the
-// main display's refresh rate).
+// Frame rate the game should run at: ssx_framerate (0 = the main display's refresh rate), or
+// at 3x / 4x resolution scale ssx_framerate_3x / ssx_framerate_4x.
 int32_t SsxTargetFps();
 
 // Adaptive frame pacing above 60 fps when the GPU can't keep up; call once per

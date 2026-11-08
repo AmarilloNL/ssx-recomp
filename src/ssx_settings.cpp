@@ -27,6 +27,12 @@
 REXCVAR_DEFINE_INT32(ssx_framerate, 60, "SSX",
                      "Frame rate: 30 (original) to 360, or 0 = match the main display")
     .range(0, 360);
+// 3x and 4x have their own, lower choices: no GPU holds more there everywhere, and a frame
+// rate that keeps jumping feels like stutter (user tests at 4x: 40 smooth, 45 stutters).
+REXCVAR_DEFINE_INT32(ssx_framerate_3x, 60, "SSX", "Frame rate at 3x resolution scale: 30 to 60")
+    .range(30, 60);
+REXCVAR_DEFINE_INT32(ssx_framerate_4x, 40, "SSX", "Frame rate at 4x resolution scale: 30 to 40")
+    .range(30, 40);
 REXCVAR_DEFINE_STRING(ssx_render_resolution, "high", "SSX",
                       "3D render size: original (1120x584) or high (1200x640) (restart)")
     .allowed({"original", "high", "720p"})  // 720p: older configs, now means high
@@ -40,6 +46,11 @@ void ApplyVolume(int32_t volume) { rex::audio::SetOutputGain(volume / 100.0f); }
 }  // namespace
 
 int32_t SsxTargetFps() {
+  // The scale needs a restart: read it once.
+  static const int32_t scale =
+      rex::string::from_string<int32_t>(rex::cvar::GetFlagByName("resolution_scale"), 1);
+  if (scale == 3) return std::clamp(REXCVAR_GET(ssx_framerate_3x), 30, 60);
+  if (scale >= 4) return std::clamp(REXCVAR_GET(ssx_framerate_4x), 30, 40);
   int32_t fps = REXCVAR_GET(ssx_framerate);
   if (fps == 0) {  // match the main display
     DEVMODEW mode = {};

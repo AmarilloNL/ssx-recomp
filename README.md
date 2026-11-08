@@ -44,12 +44,12 @@ code runs natively, and its Xbox 360 graphics are translated to Direct3D 12.
 
 | | |
 |---|---|
-| ⚡ **Up to 300 fps** | or match your monitor, at real-time game speed (the original runs at 30) |
+| ⚡ **Up to 300 fps** | or match your monitor, at real-time game speed (the original runs at 30; 3× and 4× are [locked lower](#frame-rate-lock)) |
 | 🖥️ **Sharper image** | 1200×640 rendering (the 360 renders 1120×584), optional 2×, 3× or 4× scale (up to 4800×2560) |
 | 🔍 **AMD FSR 1** | upscaling by default, plus CAS sharpening, FXAA and anisotropic filtering |
 | ⚙️ **Settings menu** | in game: **F1**, or **Back + Start** on a controller |
 | ⌨️ **Keyboard & controller** | key rebinding, vibration, deadzone |
-| 🪪 **Your name & picture** | instead of "User" and a white square (settings → **Profile**) |
+| 🪪 **Your name & picture** | instead of "User" and an empty square (settings → **Profile**) |
 | 💿 **Runs from your ISO** | saves stay in `Documents\ssx` |
 | 📦 **DLC support** | Mt. Eddie & Classic Characters, from your own console ([how](#adding-dlc)) |
 
@@ -116,24 +116,35 @@ the file for you.
 
 > [!TIP]
 > **1× + FSR** runs at very high frame rates and looks sharp. **2×** is noticeably sharper (about
-> 60% of the 1× frame rate). We recommend **2× at most**: 3× and 4× are expected to run at low
-> frame rates (see below). If a setting ever stops the game from starting,
-> delete `ssx.toml` next to `ssx.exe`.
+> 60% of the 1× frame rate). We recommend **2× at most**: 3× and 4× have a locked frame rate
+> (see below). If a setting ever stops the game from starting, delete `ssx.toml` next to
+> `ssx.exe`.
+
+<a id="frame-rate-lock"></a>
 
 > [!WARNING]
 > **3× and 4× are expected to have low performance; we recommend 2× at most.** They draw
 > about 4K (3×) and beyond 4K (4×), and every pixel goes through the emulation of the Xbox 360's
 > graphics chip, so they are limited by the graphics card. They are still being worked on every
 > day and get faster with updates. The settings menu warns you when you pick them.
-> - **4×:** even an RTX 4080 SUPER runs it at about 45–55 fps, dropping to about 40 fps in
->   busy scenes, with hitches.
-> - **3×:** an RTX 4080 SUPER holds a 60 fps cap almost everywhere, but heavy spots (for example
->   riding into the cave on The Dagger) can dip to about 55 fps for a few seconds.
 >
-> When the GPU can't keep up, the game slows its pace a little so frames still come out evenly
-> instead of stuttering, and returns to full speed as soon as the scene gets lighter. You may see
-> the fps counter drop for a moment; that's expected. For a locked 60 fps use **2×**; on a 1440p
-> screen 3× looks almost the same as 4×.
+> **Their frame rate is locked:**
+>
+> | Scale | Frame rate choices | Default |
+> |---|---|---|
+> | 1×, 2× | 30, 60, 120, 144, 165, 240, 300 or match your monitor | 60 |
+> | 3× | 30, 40, 50, 55, 60 | 60 |
+> | 4× | 30, 35, 40 | 40 |
+>
+> Higher rates keep the graphics card at its limit all the time: even an RTX 4080 SUPER runs
+> 4× at only about 45–55 fps. The frame rate then keeps jumping, which feels like stutter, and
+> on some PCs the game can become unstable (graphics driver hangs or crashes). Tested on an
+> RTX 4080 SUPER: 4× is smooth at 40 but stutters again at 45; 3× is smooth at every choice,
+> with a short, small dip at 60 in the heaviest spots (riding into the cave on The Dagger).
+>
+> When the GPU can't keep up, the game slows its pace a little so frames still come out evenly,
+> and returns to full speed as soon as the scene gets lighter. On a 1440p screen 3× looks almost
+> the same as 4×.
 
 <details>
 <summary><b>Why is 4× so heavy, and what would it take to reach 60 fps?</b></summary>
@@ -226,6 +237,9 @@ The game is playable and is being tested by playing through the whole World Tour
   long slowdowns after a short spike
 - ✅ Uneven frame times at 2× with an uncapped frame rate (frames jumped between 3 and 40 ms)
 - ✅ 4× about 12% faster (45 → 51 fps in the same race)
+- ✅ Stutter at 3× and 4×: their frame rate is now locked to what a fast GPU holds there
+  (3×: up to 60 fps, 4×: up to 40 fps)
+- ✅ Your own name and gamer picture instead of "User" and an empty square
 
 **👀 Known issues**
 - A peak label on the world map was once seen drawn as a solid box (Africa). Not reproduced

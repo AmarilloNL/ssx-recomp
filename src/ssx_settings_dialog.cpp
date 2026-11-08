@@ -46,13 +46,17 @@ const ImVec4 kText(0.90f, 0.95f, 0.98f, 1.0f);
 const ImVec4 kTextDim(0.55f, 0.65f, 0.72f, 1.0f);
 const ImVec4 kWarn(1.0f, 0.78f, 0.30f, 1.0f);
 
-const Choice kFramerates[] = {{"30  (original)", "30"}, {"60", "60"},   {"120", "120"},
-                              {"144", "144"},           {"165", "165"}, {"240", "240"},
-                              {"300", "300"},           {"Match main display", "0"}};
-const Choice kScales[] = {{"1x   (fast)", "1"},
-                          {"2x   (sharp, heavier)", "2"},
-                          {"3x   (about 4K, very heavy)", "3"},
-                          {"4x   (beyond 4K, extreme)", "4"}};
+const Choice kFramerates[] = {{"30 fps  (original)", "30"}, {"60 fps", "60"},   {"120 fps", "120"},
+                              {"144 fps", "144"},           {"165 fps", "165"}, {"240 fps", "240"},
+                              {"300 fps", "300"},           {"Match main display", "0"}};
+// 3x and 4x: only rates a fast GPU holds there (see DrawScaleWarning).
+const Choice kFramerates3x[] = {{"30 fps  (original)", "30"}, {"40 fps", "40"}, {"50 fps", "50"},
+                                {"55 fps", "55"},             {"60 fps", "60"}};
+const Choice kFramerates4x[] = {{"30 fps  (original)", "30"}, {"35 fps", "35"}, {"40 fps", "40"}};
+const Choice kScales[] = {{"1x  (fastest)", "1"},
+                          {"2x  (sharp, recommended)", "2"},
+                          {"3x  (about 4K, 60 fps at most)", "3"},
+                          {"4x  (beyond 4K, 40 fps at most)", "4"}};
 const Choice kUpscaling[] = {{"Bilinear  (soft)", "bilinear"},
                              {"AMD CAS  (sharpen)", "cas"},
                              {"AMD FSR 1  (upscale + sharpen)", "fsr"}};
@@ -349,20 +353,30 @@ void SsxSettingsDialog::DrawBinds() {
 
 void SsxSettingsDialog::DrawDisplayTab() {
   if (!BeginRows("##display")) return;
-  Row("Fullscreen", nullptr);
+  Row("Fullscreen", "Off: play in a window.");
   Checkbox("##fullscreen", "fullscreen");
-  Row("Frame rate", "Gameplay keeps real-time speed at any rate.");
-  Combo("##framerate", "ssx_framerate", kFramerates, std::size(kFramerates));
+  // 3x and 4x have their own choices (and setting), see DrawScaleWarning.
+  int scale = std::atoi(rex::cvar::GetFlagByName("resolution_scale").c_str());
+  if (scale == 3) {
+    Row("Frame rate", "Locked to 30-60 fps at 3x resolution scale (Graphics tab).");
+    Combo("##framerate", "ssx_framerate_3x", kFramerates3x, std::size(kFramerates3x));
+  } else if (scale >= 4) {
+    Row("Frame rate", "Locked to 30-40 fps at 4x resolution scale (Graphics tab).");
+    Combo("##framerate", "ssx_framerate_4x", kFramerates4x, std::size(kFramerates4x));
+  } else {
+    Row("Frame rate", "Gameplay keeps real-time speed at any rate.");
+    Combo("##framerate", "ssx_framerate", kFramerates, std::size(kFramerates));
+  }
   Row("Keep 16:9 aspect ratio", "Black bars instead of stretching on other window shapes.");
   Checkbox("##letterbox", "present_letterbox");
-  Row("Show FPS counter", nullptr);
+  Row("Show FPS counter", "In the top-left corner.");
   Checkbox("##fps", "ssx_show_fps");
   ImGui::EndTable();
 }
 
 void SsxSettingsDialog::DrawGraphicsTab() {
   if (!BeginRows("##graphics")) return;
-  Row("Resolution scale", "Nx draws N x N times as many pixels: sharper, but much heavier on the GPU.");
+  Row("Resolution scale", "N x N times as many pixels: sharper, but heavier on the GPU.");
   bool heavy = std::atoi(rex::cvar::GetFlagByName("resolution_scale").c_str()) >= 3;
   if (Combo("##scale", "resolution_scale", kScales, std::size(kScales)) && !heavy &&
       std::atoi(rex::cvar::GetFlagByName("resolution_scale").c_str()) >= 3) {
@@ -370,8 +384,7 @@ void SsxSettingsDialog::DrawGraphicsTab() {
   }
   if (heavy) {
     ImGui::PushStyleColor(ImGuiCol_Text, kWarn);
-    ImGui::TextWrapped("Expect low frame rates, dips and hitches. We recommend 2x at most; 3x "
-                       "and 4x are still being worked on.");
+    ImGui::TextWrapped("Frame rate locked. We recommend 2x.");
     ImGui::PopStyleColor();
   }
   DrawScaleWarning();
@@ -384,7 +397,7 @@ void SsxSettingsDialog::DrawGraphicsTab() {
     const char* cvar = effect == "fsr" ? "present_fsr_sharpness_reduction" : "present_cas_additional_sharpness";
     float raw = std::strtof(rex::cvar::GetFlagByName(cvar).c_str(), nullptr);
     int sharpness = effect == "fsr" ? int(std::lround((1.0f - raw / 2.0f) * 100.0f)) : int(std::lround(raw * 100.0f));
-    Row("Sharpness", nullptr);
+    Row("Sharpness", "How much the image is sharpened.");
     if (ImGui::SliderInt("##sharpness", &sharpness, 0, 100, "%d%%")) {
       float value = effect == "fsr" ? (1.0f - sharpness / 100.0f) * 2.0f : sharpness / 100.0f;
       Set(cvar, std::to_string(value));
@@ -412,14 +425,20 @@ void SsxSettingsDialog::DrawScaleWarning() {
     return;
   }
   ImGui::SetWindowFontScale(font_scale_);
-  ImGui::TextColored(kWarn, "3x and 4x: expect low frame rates");
+  ImGui::TextColored(kWarn, "3x and 4x: frame rate locked");
   ImGui::Spacing();
   ImGui::TextWrapped(
       "3x draws 3600 x 1920 pixels (about 4K) and 4x 4800 x 2560 (beyond 4K). The graphics run "
       "through an emulation of the Xbox 360's graphics chip, including its special video memory, "
       "which costs extra work for every pixel. So even the fastest graphics cards can't hold a "
-      "steady 60 fps there: an RTX 4080 SUPER runs 3x at 75-85 fps with dips in heavy spots, and "
-      "4x at only 45-55 fps.");
+      "steady 60 fps there: an RTX 4080 SUPER runs 4x at only 45-55 fps, and 3x dips in heavy "
+      "spots.");
+  ImGui::Spacing();
+  ImGui::TextWrapped(
+      "At higher frame rates the graphics card runs at its limit all the time: the frame rate keeps "
+      "jumping, which feels like stutter, and on some PCs the game can become unstable "
+      "(graphics driver hangs or crashes). So the frame rate is locked: 3x offers 30 to 60 fps "
+      "and 4x 30 to 40 fps (Display tab).");
   ImGui::Spacing();
   ImGui::TextWrapped(
       "We recommend 2x at most: it's smooth, and on a 1080p or 1440p screen it looks almost the "
@@ -460,7 +479,7 @@ void SsxSettingsDialog::DrawProfileTab() {
 
 void SsxSettingsDialog::DrawAudioTab() {
   if (!BeginRows("##audio")) return;
-  Row("Master volume", nullptr);
+  Row("Master volume", "All game sound and music.");
   int volume = REXCVAR_GET(ssx_volume);
   if (ImGui::SliderInt("##volume", &volume, 0, 100, "%d%%")) {
     Set("ssx_volume", std::to_string(volume));
@@ -472,7 +491,7 @@ void SsxSettingsDialog::DrawControlsTab() {
   if (BeginRows("##controls")) {
     Row("Keyboard controls", "Play without a controller.");
     Checkbox("##mnk", "mnk_mode");
-    Row("Controller vibration", nullptr);
+    Row("Controller vibration", "Rumble in the controller.");
     Checkbox("##vibration", "vibration");
     Row("Steering deadzone", "Ignore small stick movements.");
     float deadzone =
@@ -486,8 +505,9 @@ void SsxSettingsDialog::DrawControlsTab() {
   ImGui::PushStyleColor(ImGuiCol_Text, kAccent);
   ImGui::SeparatorText("KEYBOARD BINDINGS");
   ImGui::PopStyleColor();
-  // Long list: scroll inside the tab so the window keeps its size.
-  ImGui::BeginChild("##bindscroll", ImVec2(0, ImGui::GetTextLineHeightWithSpacing() * 11.0f), false);
+  // Long list: scrolls in the rest of the tab.
+  ImGui::BeginChild("##bindscroll", ImVec2(0.0f, 0.0f), false);
+  ImGui::SetWindowFontScale(font_scale_);  // child windows don't inherit it
   DrawBinds();
   ImGui::EndChild();
 }
@@ -562,33 +582,30 @@ void SsxSettingsDialog::OnDraw(ImGuiIO& io) {
   ImGui::Spacing();
 
   if (ImGui::BeginTabBar("##tabs")) {
-    if (ImGui::BeginTabItem("  Display  ", nullptr, TabFlags("Display"))) {
-      current_tab_ = 0;
-      DrawDisplayTab();
-      ImGui::EndTabItem();
-    }
-    if (ImGui::BeginTabItem("  Graphics  ", nullptr, TabFlags("Graphics"))) {
-      current_tab_ = 1;
-      DrawGraphicsTab();
-      ImGui::EndTabItem();
-    }
-    if (ImGui::BeginTabItem("  Audio  ", nullptr, TabFlags("Audio"))) {
-      current_tab_ = 2;
-      DrawAudioTab();
-      ImGui::EndTabItem();
-    }
-    if (ImGui::BeginTabItem("  Controls  ", nullptr, TabFlags("Controls"))) {
-      current_tab_ = 3;
-      DrawControlsTab();
-      ImGui::EndTabItem();
-    }
-    if (ImGui::BeginTabItem("  Profile  ", nullptr, TabFlags("Profile"))) {
-      current_tab_ = 4;
-      DrawProfileTab();
-      ImGui::EndTabItem();
+    for (int i = 0; i < int(std::size(kTabs)); ++i) {
+      std::string label = std::string("  ") + kTabs[i] + "  ";
+      if (ImGui::BeginTabItem(label.c_str(), nullptr, TabFlags(kTabs[i]))) {
+        current_tab_ = i;
+        ImGui::EndTabItem();
+      }
     }
     ImGui::EndTabBar();
   }
+  // Every tab gets the same height (the tallest: Graphics, 6 rows and a note), so the window
+  // doesn't change size when switching tabs.
+  const ImGuiStyle& style = ImGui::GetStyle();
+  float row = ImGui::GetFrameHeight() + ImGui::GetTextLineHeight() * 0.82f + style.CellPadding.y * 2.0f +
+              style.ItemSpacing.y;
+  ImGui::BeginChild("##tab", ImVec2(0.0f, row * 6.0f + ImGui::GetTextLineHeightWithSpacing()));
+  ImGui::SetWindowFontScale(font_scale_);
+  switch (current_tab_) {
+    case 0: DrawDisplayTab(); break;
+    case 1: DrawGraphicsTab(); break;
+    case 2: DrawAudioTab(); break;
+    case 3: DrawControlsTab(); break;
+    default: DrawProfileTab(); break;
+  }
+  ImGui::EndChild();
 
   // Footer.
   ImGui::Spacing();
@@ -601,6 +618,7 @@ void SsxSettingsDialog::OnDraw(ImGuiIO& io) {
                     ImGui::GetStyle().FramePadding.x * 2.0f);
     if (ImGui::Button("Restart now")) restart_();
   } else {
+    ImGui::AlignTextToFramePadding();  // same height as the restart line
     ImGui::TextDisabled("Changes are saved automatically.");
   }
 

@@ -395,3 +395,17 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   (checked with a four-colour test image: orientation and channels right). Both need a restart.
   The settings menu now also shows a pop-up when 3x or 4x is picked (expect low frame rates,
   2x at most recommended, "Use 2x" / "Keep it").
+- 2026-11-08: frame rate capped at 40 fps at resolution scale 3x and 4x (kHeavyScaleFps in
+  SsxTargetFps; the scale is read once, it needs a restart). User at 4x: 40 "plays great, a lot
+  better than 30 and no stutter"; 45 brought the 4x dips and stutter back (4x needs 19-25 ms per
+  frame, 45 fps allows 22). Presentation doesn't wait for vsync, so 40 comes out evenly on any
+  refresh rate. Menu: note under Frame rate, the 3x/4x pop-up explains the cap.
+- 2026-11-08: frame rate locked per resolution scale instead of one cap: 3x offers 30/40/50/55/60
+  (ssx_framerate_3x, default 60), 4x 30/35/40 (ssx_framerate_4x, default 40); 1x/2x keep
+  ssx_framerate. User tests at 3x: 45, 50, 55 smooth, 60 "a very little dip" (The Dagger cave),
+  accepted. Settings menu tidied: every tab the same height (no jumping window), every row has a
+  one-line help text, "fps" on every frame rate choice, footer the same height with or without
+  the restart button, and the key bindings list now scales with the menu (it kept the 1440p font
+  size on smaller screens, cutting off the Reset buttons). Checked the SDK package sdk-8 end to
+  end: the ssx-player preset builds against it (all 371 steps), 4x Whitehorn race locked at 40 fps
+  (one dip to 36), image and gamer picture correct.
