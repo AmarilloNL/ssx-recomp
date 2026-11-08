@@ -7,12 +7,13 @@
 #include "ssx_settings_dialog.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <string>
 
-#define NOMINMAX
 #include <windows.h>
+#include <commdlg.h>
 
 #include <imgui.h>
 
@@ -25,6 +26,8 @@
 #include "ssx_frame_stats.h"
 #include "ssx_input_lock.h"
 #include "ssx_settings.h"
+
+#pragma comment(lib, "comdlg32.lib")
 
 REXCVAR_DEFINE_BOOL(ssx_show_fps, false, "SSX", "Show the frame rate in the top-left corner");
 
@@ -82,7 +85,7 @@ const Bind kBinds[] = {
     {"Start", "keybind_start"},              {"Back", "keybind_back"},
 };
 
-const char* const kTabs[] = {"Display", "Graphics", "Audio", "Controls"};
+const char* const kTabs[] = {"Display", "Graphics", "Audio", "Controls", "Profile"};
 
 // X_INPUT_GAMEPAD button bits -> ImGui gamepad keys (ImGui's nav: A activates, B cancels).
 const struct {
@@ -98,6 +101,29 @@ constexpr uint16_t kPadStart = 0x0010, kPadBack = 0x0020, kPadLb = 0x0100, kPadR
                    kPadB = 0x2000;
 
 bool IsModifier(int vk) { return (vk >= VK_SHIFT && vk <= VK_MENU) || (vk >= VK_LSHIFT && vk <= VK_RMENU); }
+
+// Xbox gamertag characters: letters, digits and spaces.
+int NameCharFilter(ImGuiInputTextCallbackData* data) {
+  ImWchar c = data->EventChar;
+  return c < 128 && (std::isalnum(c) || c == ' ') ? 0 : 1;
+}
+
+// Windows' file picker; the chosen image as UTF-8, or empty if cancelled.
+std::string ChoosePicture() {
+  wchar_t file[MAX_PATH] = L"";
+  OPENFILENAMEW ofn = {};
+  ofn.lStructSize = sizeof(ofn);
+  ofn.hwndOwner = GetForegroundWindow();
+  ofn.lpstrFilter = L"Images (PNG, JPG, BMP, GIF)\0*.png;*.jpg;*.jpeg;*.bmp;*.gif\0";
+  ofn.lpstrFile = file;
+  ofn.nMaxFile = MAX_PATH;
+  ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
+  if (!GetOpenFileNameW(&ofn)) return {};
+  std::string utf8(WideCharToMultiByte(CP_UTF8, 0, file, -1, nullptr, 0, nullptr, nullptr), '\0');
+  WideCharToMultiByte(CP_UTF8, 0, file, -1, utf8.data(), int(utf8.size()), nullptr, nullptr);
+  utf8.pop_back();  // terminator
+  return utf8;
+}
 
 float UiScale(const ImGuiIO& io) { return std::clamp(io.DisplaySize.y / kFontDesignHeight, 0.5f, 2.0f); }
 
@@ -337,13 +363,18 @@ void SsxSettingsDialog::DrawDisplayTab() {
 void SsxSettingsDialog::DrawGraphicsTab() {
   if (!BeginRows("##graphics")) return;
   Row("Resolution scale", "Nx draws N x N times as many pixels: sharper, but much heavier on the GPU.");
-  Combo("##scale", "resolution_scale", kScales, std::size(kScales));
-  if (std::atoi(rex::cvar::GetFlagByName("resolution_scale").c_str()) >= 3) {
+  bool heavy = std::atoi(rex::cvar::GetFlagByName("resolution_scale").c_str()) >= 3;
+  if (Combo("##scale", "resolution_scale", kScales, std::size(kScales)) && !heavy &&
+      std::atoi(rex::cvar::GetFlagByName("resolution_scale").c_str()) >= 3) {
+    ImGui::OpenPopup("##scale_warning");
+  }
+  if (heavy) {
     ImGui::PushStyleColor(ImGuiCol_Text, kWarn);
-    ImGui::TextWrapped("GPU-limited: even an RTX 4080 SUPER runs 4x at about 45-55 fps, with dips "
-                       "and hitches in busy scenes. For smooth play use 2x or 3x.");
+    ImGui::TextWrapped("Expect low frame rates, dips and hitches. We recommend 2x at most; 3x "
+                       "and 4x are still being worked on.");
     ImGui::PopStyleColor();
   }
+  DrawScaleWarning();
 
   Row("Upscaling", "How the image is scaled to your screen. FSR is sharpest at 1x.");
   Combo("##upscaling", "present_effect", kUpscaling, std::size(kUpscaling));
@@ -366,6 +397,64 @@ void SsxSettingsDialog::DrawGraphicsTab() {
   Combo("##aniso", "anisotropic_override", kAniso, std::size(kAniso));
   Row("3D render size", "High is the sharpest size the game's renderer supports without glitches.");
   Combo("##render", "ssx_render_resolution", kRenderSizes, std::size(kRenderSizes));
+  ImGui::EndTable();
+}
+
+// Shown when 3x or 4x is picked.
+void SsxSettingsDialog::DrawScaleWarning() {
+  const ImGuiIO& io = ImGui::GetIO();
+  ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always,
+                          ImVec2(0.5f, 0.5f));
+  ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 34.0f, 0.0f));
+  if (!ImGui::BeginPopupModal("##scale_warning", nullptr,
+                              ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                                  ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize)) {
+    return;
+  }
+  ImGui::SetWindowFontScale(font_scale_);
+  ImGui::TextColored(kWarn, "3x and 4x: expect low frame rates");
+  ImGui::Spacing();
+  ImGui::TextWrapped(
+      "3x draws 3600 x 1920 pixels (about 4K) and 4x 4800 x 2560 (beyond 4K). The graphics run "
+      "through an emulation of the Xbox 360's graphics chip, including its special video memory, "
+      "which costs extra work for every pixel. So even the fastest graphics cards can't hold a "
+      "steady 60 fps there: an RTX 4080 SUPER runs 3x at 75-85 fps with dips in heavy spots, and "
+      "4x at only 45-55 fps.");
+  ImGui::Spacing();
+  ImGui::TextWrapped(
+      "We recommend 2x at most: it's smooth, and on a 1080p or 1440p screen it looks almost the "
+      "same. 3x and 4x are still being worked on every day and get faster with updates.");
+  ImGui::Spacing();
+  if (ImGui::Button("Use 2x  (recommended)")) {
+    Set("resolution_scale", "2");
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Keep it")) ImGui::CloseCurrentPopup();
+  ImGui::EndPopup();
+}
+
+void SsxSettingsDialog::DrawProfileTab() {
+  if (!BeginRows("##profile")) return;
+  Row("Player name", "Shown in the menus instead of User. Letters, digits and spaces.");
+  char name[16] = {};
+  std::string current = rex::cvar::GetFlagByName("ssx_player_name");
+  current.copy(name, sizeof(name) - 1);
+  if (ImGui::InputTextWithHint("##name", "User", name, sizeof(name),
+                               ImGuiInputTextFlags_CallbackCharFilter, NameCharFilter)) {
+    Set("ssx_player_name", name);
+  }
+  Row("Gamer picture", "The square next to your name, shown at about 64 x 64 pixels: a simple, "
+      "centred image looks best. Cropped to a square.");
+  std::string picture = rex::cvar::GetFlagByName("ssx_player_picture");
+  if (ImGui::Button("Choose...")) {
+    if (std::string chosen = ChoosePicture(); !chosen.empty()) Set("ssx_player_picture", chosen);
+  }
+  if (!picture.empty()) {
+    ImGui::SameLine();
+    if (ImGui::Button("Remove")) Set("ssx_player_picture", "");
+    ImGui::TextDisabled("%s", std::filesystem::path(picture).filename().string().c_str());
+  }
   ImGui::EndTable();
 }
 
@@ -491,6 +580,11 @@ void SsxSettingsDialog::OnDraw(ImGuiIO& io) {
     if (ImGui::BeginTabItem("  Controls  ", nullptr, TabFlags("Controls"))) {
       current_tab_ = 3;
       DrawControlsTab();
+      ImGui::EndTabItem();
+    }
+    if (ImGui::BeginTabItem("  Profile  ", nullptr, TabFlags("Profile"))) {
+      current_tab_ = 4;
+      DrawProfileTab();
       ImGui::EndTabItem();
     }
     ImGui::EndTabBar();

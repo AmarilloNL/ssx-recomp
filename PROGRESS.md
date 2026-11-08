@@ -386,3 +386,12 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
     Shadow pass 1.31 -> 1.09 ms; shadows unchanged.
   Ruled out: duplicate texture loads (none), lower scale for glow/blur (small passes).
   SDK package sdk-8.
+- 2026-11-08: player name and gamer picture (src/ssx_profile.cpp, settings tab Profile). The
+  runtime's profile is "User" and XamReadTileToTexture fills white (or, for tile id 0 = the
+  user's own picture, which SSX asks for through XUserReadGamerPicture, returns an error: empty
+  square). Overrides: XamUserGetName and XamUserGetSigninInfo (name at +24) write
+  ssx_player_name; XamReadTileToTexture decodes ssx_player_picture with WIC (centre-cropped
+  square, scaled to the requested size) into the game's linear 32bpp buffer as big-endian ARGB
+  (checked with a four-colour test image: orientation and channels right). Both need a restart.
+  The settings menu now also shows a pop-up when 3x or 4x is picked (expect low frame rates,
+  2x at most recommended, "Use 2x" / "Keep it").

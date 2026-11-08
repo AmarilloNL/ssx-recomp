@@ -21,6 +21,7 @@ set(SSX_SOURCES
     src/ssx_settings.cpp
     src/ssx_settings_dialog.cpp
     src/ssx_restart.cpp
+    src/ssx_profile.cpp
 )
 
 if(WIN32)

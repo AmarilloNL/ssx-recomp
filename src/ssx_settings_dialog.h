@@ -49,6 +49,8 @@ class SsxSettingsDialog : public rex::ui::ImGuiDialog {
   void DrawGraphicsTab();
   void DrawAudioTab();
   void DrawControlsTab();
+  void DrawProfileTab();
+  void DrawScaleWarning();
 
   rex::input::InputSystem* input_;
   std::filesystem::path config_path_;

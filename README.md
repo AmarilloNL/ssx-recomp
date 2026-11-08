@@ -49,6 +49,7 @@ code runs natively, and its Xbox 360 graphics are translated to Direct3D 12.
 | 🔍 **AMD FSR 1** | upscaling by default, plus CAS sharpening, FXAA and anisotropic filtering |
 | ⚙️ **Settings menu** | in game: **F1**, or **Back + Start** on a controller |
 | ⌨️ **Keyboard & controller** | key rebinding, vibration, deadzone |
+| 🪪 **Your name & picture** | instead of "User" and a white square (settings → **Profile**) |
 | 💿 **Runs from your ISO** | saves stay in `Documents\ssx` |
 | 📦 **DLC support** | Mt. Eddie & Classic Characters, from your own console ([how](#adding-dlc)) |
 
@@ -115,12 +116,15 @@ the file for you.
 
 > [!TIP]
 > **1× + FSR** runs at very high frame rates and looks sharp. **2×** is noticeably sharper (about
-> 60% of the 1× frame rate); **3×** and **4×** need a high-end GPU (an RTX 4080 SUPER runs 4× at
-> about 45–55 fps). If a setting ever stops the game from starting,
+> 60% of the 1× frame rate). We recommend **2× at most**: 3× and 4× are expected to run at low
+> frame rates (see below). If a setting ever stops the game from starting,
 > delete `ssx.toml` next to `ssx.exe`.
 
 > [!WARNING]
-> **3× and 4× are limited by the graphics card, not by the port.**
+> **3× and 4× are expected to have low performance; we recommend 2× at most.** They draw
+> about 4K (3×) and beyond 4K (4×), and every pixel goes through the emulation of the Xbox 360's
+> graphics chip, so they are limited by the graphics card. They are still being worked on every
+> day and get faster with updates. The settings menu warns you when you pick them.
 > - **4×:** even an RTX 4080 SUPER runs it at about 45–55 fps, dropping to about 40 fps in
 >   busy scenes, with hitches.
 > - **3×:** an RTX 4080 SUPER holds a 60 fps cap almost everywhere, but heavy spots (for example
