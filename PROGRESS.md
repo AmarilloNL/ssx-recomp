@@ -416,6 +416,15 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   there is none, and package.ps1 -Clang passes that exact path to CMake. Tested with a MinGW
   clang (hard link + clang.cfg --target) first on PATH: skipped; the compile commands of an
   existing build stay the same (no rebuild).
+- 2026-11-08 (branch highscale-perf): 4x GPU profile (Whitehorn race, RTX 4080 SUPER, idle PC):
+  ~18.4-19.2 ms per frame. Without rasterizer ordering it would be ~14.8-15.6 ms, but the HUD and
+  the rider get garbled, so the ordering stays; its 3-4 ms are spread over ~15 passes that need
+  it. Late depth testing (shorter ordered section) is slower: 21.4 ms (shades hidden pixels).
+  Resolves (7 full-screen per frame) and texture loads (6) already run at 600-760 GB/s, so only
+  skipping them can help. Patch 0013: every depth-only pass (also scaled, and with a pixel shader
+  that only kills / alpha-tests, like tree shadows) with a less / greater test, depth write and
+  no stencil uses the compare-exchange depth instead of the ordering: alpha-tested shadow
+  casters 0.49 -> 0.22 ms, 4x 18.43 -> 18.13 ms. Shadows look the same.
 - 2026-11-09: issue #3, second report: the builder took Visual Studio 2017 (MSVC 14.14, Windows SDK
   10.0.16299) because it accepted any Visual Studio with C++ tools; its library lacks C++20 headers
   (<bit>, <span>), so every source failed to compile. build-ssx.ps1 now only accepts Visual Studio
