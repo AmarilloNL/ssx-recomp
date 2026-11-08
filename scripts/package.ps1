@@ -2,7 +2,9 @@
 # No game data is included: on first launch the game asks for the user's own disc/ISO.
 # -Preset ssx-player builds against the prebuilt SDK package in tools\rexglue-sdk-ssx (what
 # build-ssx.ps1 uses); ssx-release builds the SDK from tools\rexglue-src (development).
-param([string]$Preset = 'ssx-release')
+# -Clang: the clang.exe to build with instead of the first one on PATH (build-ssx.ps1 passes one
+# it checked targets MSVC, issue #3).
+param([string]$Preset = 'ssx-release', [string]$Clang)
 $root = Resolve-Path "$PSScriptRoot\.."
 # Portable tools first: build-ssx.ps1 only downloads them when the PC's own copy is missing or too old.
 $env:PATH = "$root\tools\portable\cmake\bin;$root\tools\portable\ninja;" +
@@ -14,18 +16,24 @@ function Invoke-CMake {
     & cmake @args 2>&1 | ForEach-Object { if ($_ -is [Management.Automation.ErrorRecord]) { "$($_.TargetObject)" } else { "$_" } }
 }
 
+$compilers = @()
+if ($Clang) {
+    $compilers = "-DCMAKE_C_COMPILER=$($Clang.Replace('\', '/'))",
+                 "-DCMAKE_CXX_COMPILER=$((Join-Path (Split-Path $Clang) 'clang++.exe').Replace('\', '/'))"
+}
+
 $build = "$root\out\build\$Preset"
 Push-Location $root
 # The recompiled sources are only added to the build if codegen output exists at configure
 # time, so on a fresh tree: configure, run codegen, then configure again to pick them up.
 if (-not (Test-Path "$root\generated\default\sources.cmake")) {
-    Invoke-CMake --preset $Preset
+    Invoke-CMake --preset $Preset @compilers
     if ($LASTEXITCODE) { Pop-Location; throw "configure failed" }
     Write-Host "==> Recompiling the Xbox 360 code"
     Invoke-CMake --build $build --target ssx_codegen
     if ($LASTEXITCODE) { Pop-Location; throw "codegen failed" }
 }
-Invoke-CMake --preset $Preset
+Invoke-CMake --preset $Preset @compilers
 Pop-Location
 if ($LASTEXITCODE) { throw "configure failed" }
 # FSR needs AMD's FidelityFX runtime, which ships prebuilt and signed: from the fetched

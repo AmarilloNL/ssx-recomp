@@ -409,3 +409,10 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   size on smaller screens, cutting off the Reset buttons). Checked the SDK package sdk-8 end to
   end: the ssx-player preset builds against it (all 371 steps), 4x Whitehorn race locked at 40 fps
   (one dip to 36), image and gamer picture correct.
+- 2026-11-08: issue #3: the builder used the first clang on PATH, which on the reporter's PC was
+  another tool's clang 22 for MinGW (libc++, GNU ABI): chrono.h failed to compile and, patched,
+  ssx.exe couldn't link against the MSVC-ABI SDK package. build-ssx.ps1 now takes the first clang
+  20+ whose target is *-windows-msvc (Program Files\LLVM first, then PATH), installs LLVM if
+  there is none, and package.ps1 -Clang passes that exact path to CMake. Tested with a MinGW
+  clang (hard link + clang.cfg --target) first on PATH: skipped; the compile commands of an
+  existing build stay the same (no rebuild).

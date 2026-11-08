@@ -185,14 +185,35 @@ if ((Get-CMakeVersion) -lt [version]'3.25') {
 Install-Tool 'ninja' 'Ninja-build.Ninja' {
     Expand-Portable (Get-Download (Get-ReleaseAsset 'ninja-build/ninja' '^ninja-win\.zip$')) 'ninja'
 }
-Install-Tool 'clang' 'LLVM.LLVM' {
-    Write-Host "  Windows will ask for administrator permission; please allow it." -ForegroundColor Yellow
-    $installer = Get-Download (Get-ReleaseAsset 'llvm/llvm-project' '^LLVM-[\d.]+-win64\.(msi|exe)$')
-    if ($installer -like '*.msi') { Start-Process msiexec -ArgumentList "/i `"$installer`" /qn /norestart" -Verb RunAs -Wait }
-    else { Start-Process $installer -ArgumentList '/S' -Verb RunAs -Wait }
+# The prebuilt SDK is compiled for the MSVC ABI, so the game must be too. Other tools can put
+# a clang made for MinGW on PATH; it uses another C++ library and can't link against the SDK
+# (issue #3). So use the first clang 20 or newer that targets MSVC, and install LLVM if none.
+function Find-Clang {
+    $found = @("$env:ProgramFiles\LLVM\bin\clang.exe") + @(Get-Command clang.exe -All -ErrorAction SilentlyContinue).Source
+    foreach ($clang in $found | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique) {
+        $info = (& $clang --version 2>$null) -join "`n"
+        if ($info -match 'version (\d+)' -and [int]$Matches[1] -ge 20 -and $info -match 'Target: \S+-windows-msvc') { return $clang }
+        Write-Host "  not using $clang (version 20 or newer for MSVC is needed): $(($info -split "`n")[0..1] -join ', ')"
+    }
 }
-$clangMajor = [int]((clang --version | Select-Object -First 1) -replace '^.*version (\d+).*$', '$1')
-if ($clangMajor -lt 20) { Fail "clang $clangMajor is too old; version 20 or newer is needed (update LLVM)." }
+$clang = Find-Clang
+if (-not $clang -and $hasWinget) {
+    Write-Host "  installing LLVM.LLVM with winget..."
+    winget install --id LLVM.LLVM -e --silent --accept-source-agreements --accept-package-agreements
+    $clang = Find-Clang
+}
+if (-not $clang) {
+    Write-Host "  installing LLVM from its official download..."
+    Write-Host "  Windows will ask for administrator permission; please allow it." -ForegroundColor Yellow
+    try {
+        $installer = Get-Download (Get-ReleaseAsset 'llvm/llvm-project' '^LLVM-[\d.]+-win64\.(msi|exe)$')
+        if ($installer -like '*.msi') { Start-Process msiexec -ArgumentList "/i `"$installer`" /qn /norestart" -Verb RunAs -Wait }
+        else { Start-Process $installer -ArgumentList '/S' -Verb RunAs -Wait }
+    } catch { Write-Host "  $_" }
+    $clang = Find-Clang
+}
+if (-not $clang) { Fail "No suitable clang found: LLVM 20 or newer for Windows (x86_64-pc-windows-msvc) is needed." }
+Write-Host "  clang: $clang"
 
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 function Test-Msvc { (Test-Path $vswhere) -and (& $vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath) }
@@ -252,7 +273,7 @@ if (Test-Path "$root\tools\rexglue-src\.ssx-ready") {
 
 # ---------------------------------------------------------------- 4. recompile + build
 Step "Recompiling SSX and building the PC version (this takes a while)"
-& "$root\scripts\package.ps1" -Preset ssx-player
+& "$root\scripts\package.ps1" -Preset ssx-player -Clang $clang
 if (-not (Test-Path "$root\dist\SSX\ssx.exe")) { Fail "The build failed." }
 
 # Point the game at the ISO so the first start needs no questions.
