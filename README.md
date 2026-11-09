@@ -62,7 +62,8 @@ code runs natively, and its Xbox 360 graphics are translated to Direct3D 12.
 2. ⬇️ Download **`SSX-Installer.exe`** from the [latest release](../../releases/latest).
 3. ▶️ Run it. SmartScreen may warn because the installer isn't code-signed: click
    **More info → Run anyway**. Its source is [`installer/SSXInstaller.cs`](installer/SSXInstaller.cs).
-4. ✅ Click **Next**, select your ISO, tick the ownership box, and click **Install**.
+4. ✅ Click **Next**, select your ISO, optionally click **Add DLC...** for DLC from your own
+   console ([which packs](#adding-dlc)), tick the ownership box, and click **Install**.
 5. 🏂 When it says **DONE**, click **Play SSX** or use the desktop shortcut.
 
 > [!NOTE]
@@ -237,6 +238,8 @@ The game is playable and is being tested by playing through the whole World Tour
 - 🏔️ **Playing through every region** to find and fix bugs, especially the Deadly Descent
   mechanics (cold, darkness, oxygen and so on), which depend on details of the original hardware.
 - 💻 **Installer reliability** on more PCs, based on the reports in the issues.
+- 📈 **Title update support** (next): the game's last update from your own console, which among
+  other things adds gear up to level 15.
 
 **✅ Fixed so far**
 - ✅ Antarctica's thermal protection (the rider froze in the sun)
@@ -253,11 +256,12 @@ The game is playable and is being tested by playing through the whole World Tour
 - ✅ Washed-out, overexposed image at 2× and 3× (worst at 3×, for example on the Alaska map and
   in bright races): the game's automatic exposure measured the screen's brightness wrong when
   scaled
+- ✅ All five DLC packs work, and the installer can add them for you (**Add DLC...**)
 
 **👀 Known issues**
 - A peak label on the world map was once seen drawn as a solid box (Africa). Not reproduced
   yet; screenshots are welcome.
-- Only SSX (USA) is supported.
+- Only SSX (USA) is supported, and title updates can't be used yet (planned, see above).
 - Render sizes above 1200×640 aren't available: they break the game's own render buffers. Use the
   resolution scale instead.
 - Online features (RiderNet, global events) don't work, because EA's servers are gone.
