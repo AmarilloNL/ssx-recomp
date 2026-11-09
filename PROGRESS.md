@@ -416,3 +416,9 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   there is none, and package.ps1 -Clang passes that exact path to CMake. Tested with a MinGW
   clang (hard link + clang.cfg --target) first on PATH: skipped; the compile commands of an
   existing build stay the same (no rebuild).
+- 2026-11-09: issue #3, second report: the builder took Visual Studio 2017 (MSVC 14.14, Windows SDK
+  10.0.16299) because it accepted any Visual Studio with C++ tools; its library lacks C++20 headers
+  (<bit>, <span>), so every source failed to compile. build-ssx.ps1 now only accepts Visual Studio
+  2022 (17.0) or newer (vswhere -version 17.0) and otherwise installs the 2022 Build Tools next to
+  the old one. Checked on this PC: VS 2022 found as before, a newer-than-installed minimum finds
+  nothing (the install path).

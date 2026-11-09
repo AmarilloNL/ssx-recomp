@@ -216,8 +216,14 @@ if (-not $clang) { Fail "No suitable clang found: LLVM 20 or newer for Windows (
 Write-Host "  clang: $clang"
 
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-function Test-Msvc { (Test-Path $vswhere) -and (& $vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath) }
+# Visual Studio 2022 (17.0) or newer: older ones (2017, 2019) lack the C++20 headers the SDK
+# uses, like <bit> and <span> (issue #3). They can stay installed next to it.
+$vsFilter = '-products', '*', '-version', '17.0', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64'
+function Test-Msvc { (Test-Path $vswhere) -and (& $vswhere @vsFilter -property installationPath) }
 if (-not (Test-Msvc)) {
+    if ((Test-Path $vswhere) -and (& $vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)) {
+        Write-Host "  The Visual Studio found is older than 2022, too old for this build."
+    }
     Write-Host "  installing Visual Studio 2022 Build Tools (C++ libraries + Windows SDK)."
     Write-Host "  Windows will ask for administrator permission; please allow it." -ForegroundColor Yellow
     $vsArgs = '--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools ' +
@@ -234,7 +240,7 @@ if (-not (Test-Msvc)) {
 # Use the C++ headers and libraries of that installation. Left alone, clang picks a Visual
 # Studio installation by itself (the newest), which may lack them: "could not open
 # 'msvcrtd.lib'" (issue #2). INCLUDE, LIB and VCToolsInstallDir take precedence for clang/lld.
-$vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+$vsPath = & $vswhere -latest @vsFilter -property installationPath
 $vcvars = "$vsPath\VC\Auxiliary\Build\vcvars64.bat"
 if (-not (Test-Path $vcvars)) {
     Fail "The Visual Studio C++ build tools in $vsPath are incomplete ($vcvars is missing). Open the Visual Studio Installer and choose Repair."
