@@ -49,14 +49,12 @@ const ImVec4 kWarn(1.0f, 0.78f, 0.30f, 1.0f);
 const Choice kFramerates[] = {{"30 fps  (original)", "30"}, {"60 fps", "60"},   {"120 fps", "120"},
                               {"144 fps", "144"},           {"165 fps", "165"}, {"240 fps", "240"},
                               {"300 fps", "300"},           {"Match main display", "0"}};
-// 3x and 4x: only rates a fast GPU holds there (see DrawScaleWarning).
+// 3x: only rates a fast GPU holds there (see DrawScaleWarning).
 const Choice kFramerates3x[] = {{"30 fps  (original)", "30"}, {"40 fps", "40"}, {"50 fps", "50"},
                                 {"55 fps", "55"},             {"60 fps", "60"}};
-const Choice kFramerates4x[] = {{"30 fps  (original)", "30"}, {"35 fps", "35"}, {"40 fps", "40"}};
 const Choice kScales[] = {{"1x  (fastest)", "1"},
                           {"2x  (sharp, recommended)", "2"},
-                          {"3x  (about 4K, 60 fps at most)", "3"},
-                          {"4x  (beyond 4K, 40 fps at most)", "4"}};
+                          {"3x  (about 4K, 60 fps at most)", "3"}};
 const Choice kUpscaling[] = {{"Bilinear  (soft)", "bilinear"},
                              {"AMD CAS  (sharpen)", "cas"},
                              {"AMD FSR 1  (upscale + sharpen)", "fsr"}};
@@ -355,14 +353,11 @@ void SsxSettingsDialog::DrawDisplayTab() {
   if (!BeginRows("##display")) return;
   Row("Fullscreen", "Off: play in a window.");
   Checkbox("##fullscreen", "fullscreen");
-  // 3x and 4x have their own choices (and setting), see DrawScaleWarning.
+  // 3x has its own choices (and setting), see DrawScaleWarning.
   int scale = std::atoi(rex::cvar::GetFlagByName("resolution_scale").c_str());
-  if (scale == 3) {
+  if (scale >= 3) {
     Row("Frame rate", "Locked to 30-60 fps at 3x resolution scale (Graphics tab).");
     Combo("##framerate", "ssx_framerate_3x", kFramerates3x, std::size(kFramerates3x));
-  } else if (scale >= 4) {
-    Row("Frame rate", "Locked to 30-40 fps at 4x resolution scale (Graphics tab).");
-    Combo("##framerate", "ssx_framerate_4x", kFramerates4x, std::size(kFramerates4x));
   } else {
     Row("Frame rate", "Gameplay keeps real-time speed at any rate.");
     Combo("##framerate", "ssx_framerate", kFramerates, std::size(kFramerates));
@@ -413,7 +408,7 @@ void SsxSettingsDialog::DrawGraphicsTab() {
   ImGui::EndTable();
 }
 
-// Shown when 3x or 4x is picked.
+// Shown when 3x is picked.
 void SsxSettingsDialog::DrawScaleWarning() {
   const ImGuiIO& io = ImGui::GetIO();
   ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always,
@@ -425,24 +420,22 @@ void SsxSettingsDialog::DrawScaleWarning() {
     return;
   }
   ImGui::SetWindowFontScale(font_scale_);
-  ImGui::TextColored(kWarn, "3x and 4x: frame rate locked");
+  ImGui::TextColored(kWarn, "3x: frame rate locked to 60 fps at most");
   ImGui::Spacing();
   ImGui::TextWrapped(
-      "3x draws 3600 x 1920 pixels (about 4K) and 4x 4800 x 2560 (beyond 4K). The graphics run "
-      "through an emulation of the Xbox 360's graphics chip, including its special video memory, "
-      "which costs extra work for every pixel. So even the fastest graphics cards can't hold a "
-      "steady 60 fps there: an RTX 4080 SUPER runs 4x at only 45-55 fps, and 3x dips in heavy "
-      "spots.");
+      "3x draws 3600 x 1920 pixels (about 4K). The graphics run through an emulation of the "
+      "Xbox 360's graphics chip, including its special video memory, which costs extra work for "
+      "every pixel. So even the fastest graphics cards can't go much above 60 fps there: an "
+      "RTX 4080 SUPER holds 60 with small dips in heavy spots.");
   ImGui::Spacing();
   ImGui::TextWrapped(
       "At higher frame rates the graphics card runs at its limit all the time: the frame rate keeps "
       "jumping, which feels like stutter, and on some PCs the game can become unstable "
-      "(graphics driver hangs or crashes). So the frame rate is locked: 3x offers 30 to 60 fps "
-      "and 4x 30 to 40 fps (Display tab).");
+      "(graphics driver hangs or crashes). So the frame rate is locked to 30 to 60 fps "
+      "(Display tab).");
   ImGui::Spacing();
   ImGui::TextWrapped(
-      "We recommend 2x at most: it's smooth, and on a 1080p or 1440p screen it looks almost the "
-      "same. 3x and 4x are still being worked on every day and get faster with updates.");
+      "We recommend 2x: it's smooth, and on a 1080p or 1440p screen it looks almost the same.");
   ImGui::Spacing();
   if (ImGui::Button("Use 2x  (recommended)")) {
     Set("resolution_scale", "2");
