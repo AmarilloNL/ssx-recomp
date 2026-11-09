@@ -52,7 +52,7 @@ code runs natively, and its Xbox 360 graphics are translated to Direct3D 12.
 | ⌨️ **Keyboard & controller** | key rebinding, vibration, deadzone |
 | 🪪 **Your name & picture** | instead of "User" and an empty square (settings → **Profile**) |
 | 💿 **Runs from your ISO** | saves stay in `Documents\ssx` |
-| 📦 **DLC support** | Mt. Eddie & Classic Characters, from your own console ([how](#adding-dlc)) |
+| 📦 **DLC support** | Mt. Eddie, Japan and the other packs, from your own console ([how](#adding-dlc)) |
 
 <a id="installing"></a>
 
@@ -174,10 +174,19 @@ packages from your own Xbox 360, bought on your own Xbox Live account.
 
 | Package | Size | Contents |
 |---|---|---|
-| 🏔️ Mt. Eddie & Classic Characters Pack | ~250 MB | the Mt. Eddie region and classic riders |
-| 🎁 Pre-order bonus pack | ~9 MB | extra gear (if you had it) |
+| 🏔️ SSX Mount Eddie | ~250 MB | the Mt. Eddie region and the classic riders |
+| 🎁 SSX Presell Pack | ~9 MB | the pre-order bonuses: Japan (Mount Fuji), Eddie as a rider, Mac's Ultimate Board |
+| 🗾 SSX Japan Range | ~9 MB | pre-order bonus: Japan (Mount Fuji) |
+| 🧔 SSX Eddie Pack | <1 MB | pre-order bonus: Eddie as a playable rider |
+| 🏂 SSX Mac Board Pack | <1 MB | pre-order bonus: Mac's Ultimate Board |
 
-**Quick version:** copy the long-named package files into `Documents\ssx\dlc` and start the game.
+All five work. Japan Range, Eddie Pack and Mac Board Pack are the original pre-order versions:
+with Mount Eddie and the Presell Pack installed, Japan, Eddie and Mac's Ultimate Board are
+already there, so they add nothing new (installing them anyway does no harm).
+
+**Quick version:** in the installer, click **Add DLC...** on the *Your game* page and select the
+package files; they're copied to `Documents\ssx\dlc`. Or copy them there yourself. The game
+installs them the next time it starts.
 
 <details>
 <summary><b>Full guide: finding, copying and checking the DLC files</b></summary>
@@ -197,7 +206,9 @@ storage uses its own file system, so use an Xbox 360 file tool (for example *FAT
 *Velocity* or *Horizon*) to open it and copy the package files out of the `4541096D\00000002`
 folder. Copy the package files themselves, not the folder.
 
-**Installing them.**
+**Installing them.** The easiest way is the installer: run `SSX-Installer.exe`, click
+**Add DLC...** on the *Your game* page and select the package files. It shows each package's name
+(or why a file isn't an SSX DLC package) and copies them when you click **Install**. By hand:
 
 1. Close the game.
 2. Open the folder `Documents\ssx\dlc`. The game creates it the first time it starts, or you can
@@ -208,7 +219,8 @@ folder. Copy the package files themselves, not the folder.
    `Documents\ssx\0000000000000000\4541096D\00000002\`. This happens once per package, and the
    files in `dlc` can be deleted afterwards.
 
-**Checking it worked.** Mt. Eddie appears on the world map and the classic riders are selectable.
+**Checking it worked.** Mt. Eddie and Japan appear on the world map, and the classic riders and
+Eddie are selectable.
 The game's log (`logs` folder next to `ssx.exe`) shows a line like `DLC: installed 8A7D066F...`
 for each package. If it says `failed to install`, the file isn't an Xbox 360 content package:
 check that you copied the long-named package file, not a folder or an archive.

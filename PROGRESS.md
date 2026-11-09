@@ -451,3 +451,16 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   texture's unorm/float format: average along 1-texel axes, nearest stretch otherwise) and that is
   copied instead. Verified: the Alaska map at 1x/2x/3x/4x looks like 1x, Whitehorn at 3x no
   longer blown out, D3D12 debug layer clean. SDK package sdk-9 (0001-0014).
+- 2026-11-09 (branch dlc): the user's other DLC packages, all pre-order bonuses: SSX Japan Range
+  (dlc_presell_japan.big, 9 MB, Mount Fuji), SSX Eddie Pack (dlc_presell_eddie, 176 bytes: Eddie
+  playable) and SSX Mac Board Pack (dlc_presell_mac, 192 bytes: Mac's Ultimate Board). The later
+  free SSX Presell Pack (dlc_free_presells_fuji) already gives all three: with Mount Eddie + Presell
+  installed, Japan (Mount Fuji), Eddie and Mac's Ultimate Board were there before (roster, board
+  and globe compared with and without), and all three packages install through the existing
+  <user data>/dlc path with no errors (the game probes optional per-pack files on the disc, e.g.
+  unlockables_dlc_presell_japan.txt, missing on the 360 too). No code change needed. The
+  installer gets an optional "Add DLC..." row on its "Your game" page: it checks each file is an
+  STFS package for 4541096D with content type 2 (title updates 000B0000 are refused as not
+  supported yet), shows the packages' own names, and copies them to Documents\ssx\dlc (the same
+  FOLDERID_Documents the game uses) when the install starts, skipping files already there with
+  the same size. Window 40 px taller for the extra row.

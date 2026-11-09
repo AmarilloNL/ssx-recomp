@@ -8,6 +8,7 @@
 //   installer\build-installer.ps1
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -496,6 +497,10 @@ class InstallerForm : Form {
   readonly Field folderField = new Field();
   Label isoHint, folderHint;
   readonly Check ownCheck = new Check("I own SSX for Xbox 360 and made this ISO from my own disc.");
+  // DLC packages from the player's own console, copied to Documents\ssx\dlc when the install
+  // starts; the game installs them from there on its next start.
+  readonly List<string> dlcFiles = new List<string>();
+  Label dlcHint;
 
   Label installTitle, installStatus, percentLabel, elapsedLabel;
   LinkLabel detailsLink;
@@ -519,7 +524,7 @@ class InstallerForm : Form {
   public InstallerForm() {
     Text = "SSX PC Port Setup";
     AutoScaleMode = AutoScaleMode.None;
-    ClientSize = new Size(Th.D(900), Th.D(600));
+    ClientSize = new Size(Th.D(900), Th.D(640));
     FormBorderStyle = FormBorderStyle.FixedSingle;
     MaximizeBox = false;
     StartPosition = FormStartPosition.CenterScreen;
@@ -590,11 +595,23 @@ class InstallerForm : Form {
     p.Controls.Add(Th.Label("Pick the ISO you made from your own SSX disc, and where SSX should be installed.",
                             Th.F(10.5f, FontStyle.Regular), Th.Dim, x, Th.D(70), w, Th.D(24)));
 
-    isoHint = AddPathRow(p, "SSX disc image (.iso)", isoField, Th.D(108), BrowseIso);
-    folderHint = AddPathRow(p, "Install location", folderField, Th.D(204), BrowseFolder);
+    isoHint = AddPathRow(p, "SSX disc image (.iso)", isoField, Th.D(104), BrowseIso);
+    folderHint = AddPathRow(p, "Install location", folderField, Th.D(198), BrowseFolder);
     folderField.Box.Text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "SSX-PC");
 
-    ownCheck.Bounds = new Rectangle(x, Th.D(304), w, Th.D(40));
+    int dlcY = Th.D(292), addW = Th.D(112);
+    p.Controls.Add(Th.Label("DLC from your own console (optional)", Th.Semi(10f), Th.Text, x, dlcY + Th.D(8),
+                            w - addW - Th.D(10), Th.D(24)));
+    var addDlc = new FlatButton("Add DLC...", false) { Bounds = new Rectangle(x + w - addW, dlcY, addW, Th.D(36)) };
+    addDlc.Click += BrowseDlc;
+    p.Controls.Add(addDlc);
+    // Two lines: five package names don't fit on one.
+    dlcHint = Th.Label("", Th.F(9.5f, FontStyle.Regular), Th.Faint, x + Th.D(2), dlcY + Th.D(40), w, Th.D(40));
+    dlcHint.AutoEllipsis = true;
+    p.Controls.Add(dlcHint);
+    SetHint(dlcHint, "Mt. Eddie, the Presell Pack and the other packs, copied off your Xbox 360.", Th.Faint);
+
+    ownCheck.Bounds = new Rectangle(x, Th.D(380), w, Th.D(40));
     ownCheck.CheckedChanged += delegate { UpdateFooter(); };
     p.Controls.Add(ownCheck);
     UpdateHints();
@@ -657,7 +674,7 @@ class InstallerForm : Form {
     var tips = new Card {
       Title = "Good to know",
       Body = "F1 (or Back + Start) opens the settings: frame rate, resolution, FSR, controls.\r\n" +
-             "Saves are kept in Documents\\ssx. DLC from your own console goes in Documents\\ssx\\dlc.\r\n" +
+             "Saves are kept in Documents\\ssx. DLC you added is installed when the game starts.\r\n" +
              "Run this setup again any time to update SSX to the latest version.",
       Tone = Th.Accent };
     tips.Bounds = new Rectangle(x, Th.D(112), w, tips.FitHeight(w));
@@ -785,6 +802,58 @@ class InstallerForm : Form {
     }
   }
 
+  void BrowseDlc(object sender, EventArgs e) {
+    using (var dialog = new OpenFileDialog { Title = "Select SSX DLC packages from your own Xbox 360",
+                                             Filter = "Xbox 360 content packages (*.*)|*.*", Multiselect = true }) {
+      if (dialog.ShowDialog(this) != DialogResult.OK) return;
+      dlcFiles.Clear();
+      var names = new List<string>();
+      string rejected = null;
+      foreach (string file in dialog.FileNames) {
+        string problem, name = ReadDlcName(file, out problem);
+        if (name != null) {
+          dlcFiles.Add(file);
+          names.Add(name.Replace("SSX™ ", ""));
+        } else if (rejected == null) {
+          rejected = Path.GetFileName(file) + " is " + problem;
+        }
+      }
+      if (rejected != null) {
+        SetHint(dlcHint, (names.Count > 0 ? names.Count + " added. Skipped: " : "Skipped: ") + rejected + ".", Th.Warn);
+      } else {
+        SetHint(dlcHint, string.Join(", ", names.ToArray()) + ": copied to Documents\\ssx\\dlc when you install.",
+                Th.Good);
+      }
+    }
+  }
+
+  // The name of an SSX DLC package (an Xbox 360 STFS package for title 4541096D with
+  // marketplace content), or null and the reason it isn't one.
+  static string ReadDlcName(string path, out string problem) {
+    problem = "not an Xbox 360 content package";
+    var h = new byte[0x491];  // up to the end of the first display name
+    try {
+      using (var f = File.OpenRead(path)) {
+        int n = 0, r;
+        while (n < h.Length && (r = f.Read(h, n, h.Length - n)) > 0) n += r;
+        if (n < h.Length) return null;
+      }
+    } catch (Exception ex) {
+      problem = "not readable (" + ex.Message + ")";
+      return null;
+    }
+    string magic = Encoding.ASCII.GetString(h, 0, 4);
+    if (magic != "LIVE" && magic != "PIRS" && magic != "CON ") return null;
+    uint type = BE32(h, 0x344), title = BE32(h, 0x360);
+    if (title != 0x4541096D) { problem = "not for SSX"; return null; }
+    if (type == 0x000B0000) { problem = "a title update (not supported yet)"; return null; }
+    if (type != 0x00000002) { problem = "not DLC"; return null; }
+    string name = Encoding.BigEndianUnicode.GetString(h, 0x411, 0x80).Split('\0')[0].Trim();
+    return name.Length > 0 ? name : Path.GetFileName(path);
+  }
+
+  static uint BE32(byte[] b, int o) { return (uint)(b[o] << 24 | b[o + 1] << 16 | b[o + 2] << 8 | b[o + 3]); }
+
   void BrowseFolder(object sender, EventArgs e) {
     using (var dialog = new FolderBrowserDialog { Description = "Where should SSX be installed?" }) {
       if (dialog.ShowDialog(this) == DialogResult.OK) folderField.Box.Text = Path.Combine(dialog.SelectedPath, "SSX-PC");
@@ -795,6 +864,7 @@ class InstallerForm : Form {
 
   void StartBuild() {
     string iso = isoField.Box.Text.Trim(), folder = folderField.Box.Text.Trim();
+    string[] dlc = dlcFiles.ToArray();
     lock (sync) { stage = 0; stageFrac = 0; pendingLog.Length = 0; }
     running = true;
     failed = cancelled = false;
@@ -808,9 +878,29 @@ class InstallerForm : Form {
     clock = Stopwatch.StartNew();
     ShowPage(2);
     timer.Start();
-    var worker = new Thread(delegate() { RunBuild(iso, folder); });
+    var worker = new Thread(delegate() { CopyDlc(dlc); RunBuild(iso, folder); });
     worker.IsBackground = true;
     worker.Start();
+  }
+
+  // Copies the chosen DLC packages to Documents\ssx\dlc (the same Documents folder the game uses),
+  // where the game installs them on its next start. A failed copy doesn't stop the install.
+  void CopyDlc(string[] files) {
+    if (files.Length == 0) return;
+    string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "ssx", "dlc");
+    foreach (string file in files) {
+      try {
+        Directory.CreateDirectory(dir);
+        string dest = Path.Combine(dir, Path.GetFileName(file));
+        if (!string.Equals(Path.GetFullPath(file), Path.GetFullPath(dest), StringComparison.OrdinalIgnoreCase) &&
+            (!File.Exists(dest) || new FileInfo(dest).Length != new FileInfo(file).Length)) {
+          File.Copy(file, dest, true);
+        }
+        OnLine("DLC: " + Path.GetFileName(file) + " is in " + dir);
+      } catch (Exception ex) {
+        OnLine("DLC: could not copy " + file + ": " + ex.Message);
+      }
+    }
   }
 
   void RunBuild(string iso, string folder) {
