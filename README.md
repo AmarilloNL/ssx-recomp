@@ -45,8 +45,8 @@ code runs natively, and its Xbox 360 graphics are translated to Direct3D 12.
 
 | | |
 |---|---|
-| ⚡ **Up to 300 fps** | or match your monitor, at real-time game speed (the original runs at 30; 3× and 4× are [locked lower](#frame-rate-lock)) |
-| 🖥️ **Sharper image** | 1200×640 rendering (the 360 renders 1120×584), optional 2×, 3× or 4× scale (up to 4800×2560) |
+| ⚡ **Up to 300 fps** | or match your monitor, at real-time game speed (the original runs at 30; 3× is [locked to 60](#frame-rate-lock)) |
+| 🖥️ **Sharper image** | 1200×640 rendering (the 360 renders 1120×584), optional 2× or 3× scale (up to 3600×1920) |
 | 🔍 **AMD FSR 1** | upscaling by default, plus CAS sharpening, FXAA and anisotropic filtering |
 | ⚙️ **Settings menu** | in game: **F1**, or **Back + Start** on a controller |
 | ⌨️ **Keyboard & controller** | key rebinding, vibration, deadzone |
@@ -117,53 +117,51 @@ the file for you.
 
 > [!TIP]
 > **1× + FSR** runs at very high frame rates and looks sharp. **2×** is noticeably sharper (about
-> 60% of the 1× frame rate). We recommend **2× at most**: 3× and 4× have a locked frame rate
-> (see below). If a setting ever stops the game from starting, delete `ssx.toml` next to
+> 60% of the 1× frame rate). We recommend **2×**: 3× has a locked frame rate (see below). If a setting ever stops the game from starting, delete `ssx.toml` next to
 > `ssx.exe`.
 
 <a id="frame-rate-lock"></a>
 
 > [!WARNING]
-> **3× and 4× are expected to have low performance; we recommend 2× at most.** They draw
-> about 4K (3×) and beyond 4K (4×), and every pixel goes through the emulation of the Xbox 360's
-> graphics chip, so they are limited by the graphics card. They are still being worked on every
-> day and get faster with updates. The settings menu warns you when you pick them.
+> **3× is limited by the graphics card; we recommend 2×.** It draws about 4K (3600×1920), and
+> every pixel goes through the emulation of the Xbox 360's graphics chip. The settings menu warns
+> you when you pick it.
 >
-> **Their frame rate is locked:**
+> **Its frame rate is locked:**
 >
 > | Scale | Frame rate choices | Default |
 > |---|---|---|
 > | 1×, 2× | 30, 60, 120, 144, 165, 240, 300 or match your monitor | 60 |
 > | 3× | 30, 40, 50, 55, 60 | 60 |
-> | 4× | 30, 35, 40 | 40 |
 >
-> Higher rates keep the graphics card at its limit all the time: even an RTX 4080 SUPER runs
-> 4× at only about 45–55 fps. The frame rate then keeps jumping, which feels like stutter, and
-> on some PCs the game can become unstable (graphics driver hangs or crashes). Tested on an
-> RTX 4080 SUPER: 4× is smooth at 40 but stutters again at 45; 3× is smooth at every choice,
-> with a short, small dip at 60 in the heaviest spots (riding into the cave on The Dagger).
+> Higher rates keep the graphics card at its limit all the time. The frame rate then keeps
+> jumping, which feels like stutter, and on some PCs the game can become unstable (graphics
+> driver hangs or crashes). Tested on an RTX 4080 SUPER: 3× is smooth at every choice, with a
+> short, small dip at 60 in the heaviest spots (riding into the cave on The Dagger), and
+> stutters at 70.
 >
 > When the GPU can't keep up, the game slows its pace a little so frames still come out evenly,
-> and returns to full speed as soon as the scene gets lighter. On a 1440p screen 3× looks almost
-> the same as 4×.
+> and returns to full speed as soon as the scene gets lighter.
 
 <details>
-<summary><b>Why is 4× so heavy, and what would it take to reach 60 fps?</b></summary>
+<summary><b>Why is 3× limited to 60 fps, and what happened to 4×?</b></summary>
 <br>
 
-- **The pixel count.** 4× draws 4800×2560 = 12.3 million pixels per frame: 16 times the 1×
-  image and more than 4K (8.3 million). Every pass the game draws (snow, lighting, particles,
-  glow, blur) is drawn at that size.
+- **The pixel count.** 3× draws 3600×1920 = 6.9 million pixels per frame: 9 times the 1× image,
+  close to 4K (8.3 million). Every pass the game draws (snow, lighting, particles, glow, blur)
+  is drawn at that size.
 - **Emulated console video memory.** The Xbox 360 renders into a small, fast on-chip memory. The
   port reproduces it in shaders, which costs extra work for every pixel.
 - **Measured** on an RTX 4080 SUPER while playing: the GPU at 99% the whole time, at full clock
   speed and well within its power and heat limits. The CPU is at about 20%. The GPU is simply
   out of headroom.
-- **For 60 fps** a frame has to take 16.7 ms instead of the 19–25 ms measured, so the GPU would
-  have to do about a quarter less work. Already done: shadows are drawn at 1× when scaling
-  (about 15%), and the full-screen images the game reads back as textures (9 per frame) are
-  loaded without an extra copy (about 12% at 4×). Drawing glow and blur at a lower resolution
-  would gain little: they are small passes. Most of the time goes into the main scene itself.
+- **Already done:** shadows are drawn at 1× when scaling (about 15%), the full-screen images the
+  game reads back as textures are loaded without an extra copy (about 12%), and depth-only
+  passes skip the emulated memory's pixel ordering. Most of the remaining time goes into the main
+  scene itself.
+- **4× was removed.** It draws 4800×2560 (12.3 million pixels). Even after all of the above, an
+  RTX 4080 SUPER needs about 18 ms per frame there, and it stuttered at anything above 40 fps.
+  On a 1440p screen 3× looks almost the same.
 
 </details>
 
@@ -233,14 +231,16 @@ The game is playable and is being tested by playing through the whole World Tour
 - ✅ Yellow specks on dark rock (Africa's caves)
 - ✅ Blocky bands on the snow at 2× resolution scale (snow trails now show up at 2× too)
 - ✅ Flickering yellow/green noise in the flare light on night Deadly Descents (Alaska)
-- ✅ Uneven frame pacing (stutter) when the GPU is at its limit, for example at 4×
+- ✅ Uneven frame pacing (stutter) when the GPU is at its limit
 - ✅ Stutter with a 60 fps cap at 3× (frames came out in pairs, which looked like 30 fps), and
   long slowdowns after a short spike
 - ✅ Uneven frame times at 2× with an uncapped frame rate (frames jumped between 3 and 40 ms)
-- ✅ 4× about 12% faster (45 → 51 fps in the same race)
-- ✅ Stutter at 3× and 4×: their frame rate is now locked to what a fast GPU holds there
-  (3×: up to 60 fps, 4×: up to 40 fps)
+- ✅ High resolution scales about 12% faster (full-screen images load without an extra copy)
+- ✅ Stutter at 3×: its frame rate is now locked to what a fast GPU holds there (up to 60 fps)
 - ✅ Your own name and gamer picture instead of "User" and an empty square
+- ✅ Washed-out, overexposed image at 2× and 3× (worst at 3×, for example on the Alaska map and
+  in bright races): the game's automatic exposure measured the screen's brightness wrong when
+  scaled
 
 **👀 Known issues**
 - A peak label on the world map was once seen drawn as a solid box (Africa). Not reproduced

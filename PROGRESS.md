@@ -431,3 +431,23 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   2022 (17.0) or newer (vswhere -version 17.0) and otherwise installs the 2022 Build Tools next to
   the old one. Checked on this PC: VS 2022 found as before, a newer-than-installed minimum finds
   nothing (the install path).
+- 2026-11-09: user feel tests on the highscale-perf build: 4x at 45 fps and 3x at 70 fps both
+  stutter, so 4x is removed (menu goes to 3x, ssx_framerate_4x gone, startup clamps
+  resolution_scale > 3 to 3) and 3x stays at 30-60. The fused resolve idea is dropped.
+- 2026-11-09: washed-out / overexposed image at 2x-4x (user report: Explore > Alaska at 3x; also
+  races, e.g. Whitehorn snow blown out to white). Worse at 3x than at 2x and 4x. Not caused by
+  resolve readback, occlusion queries, unscaled shadows, the render path, half-pixel settings or
+  patches 0011-0013 (each toggled at 3x). RenderDoc 1x vs 3x (RTV): the HDR scene matched; the
+  tone mapping pass differed with identical constants. Guest shaders (--dump_shaders, matched by
+  their float constant count): the Hable filmic tone map reads the exposure with setTexLOD 8 from
+  mip 8 (1x1) of a 300x160 k_16 luminance texture, at each pixel's own coordinate; 8 passes build
+  that mip chain one level at a time (one bilinear fetch of mip N-1 each). Host mips of a scaled
+  texture are (base * scale) >> level, but the data is (guest >> level) * scale: at 3x mip 3 is
+  112 wide for 111 columns of data, mip 8 is 3x1 for 3x3 of data, and the never-written edge
+  texels read as 0. Mip 8 ended up as 3 different values with a 0 among them, so the exposure
+  varied across the screen and was ~10x too high on one side. Patch 0014: after the load shader,
+  each mip whose data size differs from its host size, or that is 1 guest texel along an axis, is
+  fitted into extra copy-buffer space (texture_mip_fit_scaled.cs.hlsl, typed RWBuffer in the
+  texture's unorm/float format: average along 1-texel axes, nearest stretch otherwise) and that is
+  copied instead. Verified: the Alaska map at 1x/2x/3x/4x looks like 1x, Whitehorn at 3x no
+  longer blown out, D3D12 debug layer clean. SDK package sdk-9 (0001-0014).

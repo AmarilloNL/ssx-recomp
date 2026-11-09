@@ -1,0 +1,721 @@
+diff --git a/include/rex/graphics/d3d12/texture_cache.h b/include/rex/graphics/d3d12/texture_cache.h
+index 0e874a4..dc62130 100644
+--- a/include/rex/graphics/d3d12/texture_cache.h
++++ b/include/rex/graphics/d3d12/texture_cache.h
+@@ -467,6 +467,11 @@ class D3D12TextureCache final : public TextureCache {
+   std::array<Microsoft::WRL::ComPtr<ID3D12PipelineState>, kLoadShaderCount> load_pipelines_scaled_;
+   // See GetDirectLoadVariant.
+   std::array<Microsoft::WRL::ComPtr<ID3D12PipelineState>, 3> load_pipelines_direct_scaled_;
++  // Fits loaded mips of resolution-scaled textures to their host mip size
++  // (texture_mip_fit_scaled.cs.hlsl), and the formats it can use (typed buffer UAV loads and
++  // stores) with their size in bytes.
++  Microsoft::WRL::ComPtr<ID3D12PipelineState> load_pipeline_mip_fit_scaled_;
++  std::vector<std::pair<DXGI_FORMAT, uint32_t>> mip_fit_formats_;
+ 
+   std::vector<SRVDescriptorCachePage> srv_descriptor_cache_;
+   uint32_t srv_descriptor_cache_allocated_;
+diff --git a/src/graphics/d3d12/texture_cache.cpp b/src/graphics/d3d12/texture_cache.cpp
+index 55b5727..feaba04 100644
+--- a/src/graphics/d3d12/texture_cache.cpp
++++ b/src/graphics/d3d12/texture_cache.cpp
+@@ -54,6 +54,7 @@ namespace shaders {
+ #include "../shaders/bytecode/d3d12_5_1/texture_load_direct_depth_float_scaled_cs.h"
+ #include "../shaders/bytecode/d3d12_5_1/texture_load_direct_rgba16f_scaled_cs.h"
+ #include "../shaders/bytecode/d3d12_5_1/texture_load_direct_rgba8_scaled_cs.h"
++#include "../shaders/bytecode/d3d12_5_1/texture_mip_fit_scaled_cs.h"
+ #include "../shaders/bytecode/d3d12_5_1/texture_load_depth_unorm_cs.h"
+ #include "../shaders/bytecode/d3d12_5_1/texture_load_depth_unorm_scaled_cs.h"
+ #include "../shaders/bytecode/d3d12_5_1/texture_load_dxn_rg8_cs.h"
+@@ -609,6 +610,32 @@ bool D3D12TextureCache::Initialize() {
+                                                  direct_load_shaders[i].BytecodeLength,
+                                                  load_root_signature_.Get());
+     }
++    // Optional too: without it, deep mips are copied as before (cut off or partly unwritten).
++    *(load_pipeline_mip_fit_scaled_.ReleaseAndGetAddressOf()) =
++        ui::d3d12::util::CreateComputePipeline(device, shaders::texture_mip_fit_scaled_cs,
++                                               sizeof(shaders::texture_mip_fit_scaled_cs),
++                                               load_root_signature_.Get());
++    static const std::pair<DXGI_FORMAT, uint32_t> kMipFitFormats[] = {
++        {DXGI_FORMAT_R8_UNORM, 1},           {DXGI_FORMAT_R8G8_UNORM, 2},
++        {DXGI_FORMAT_R16_UNORM, 2},          {DXGI_FORMAT_R16_FLOAT, 2},
++        {DXGI_FORMAT_R8G8B8A8_UNORM, 4},     {DXGI_FORMAT_R10G10B10A2_UNORM, 4},
++        {DXGI_FORMAT_R11G11B10_FLOAT, 4},    {DXGI_FORMAT_R16G16_UNORM, 4},
++        {DXGI_FORMAT_R16G16_FLOAT, 4},       {DXGI_FORMAT_R32_FLOAT, 4},
++        {DXGI_FORMAT_R16G16B16A16_UNORM, 8}, {DXGI_FORMAT_R16G16B16A16_FLOAT, 8},
++        {DXGI_FORMAT_R32G32_FLOAT, 8},       {DXGI_FORMAT_R32G32B32A32_FLOAT, 16},
++    };
++    mip_fit_formats_.clear();
++    for (const auto& format : kMipFitFormats) {
++      D3D12_FEATURE_DATA_FORMAT_SUPPORT support = {format.first};
++      if (SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &support,
++                                                sizeof(support))) &&
++          (support.Support1 & D3D12_FORMAT_SUPPORT1_BUFFER) &&
++          (support.Support1 & D3D12_FORMAT_SUPPORT1_TYPED_UNORDERED_ACCESS_VIEW) &&
++          (support.Support2 & D3D12_FORMAT_SUPPORT2_UAV_TYPED_LOAD) &&
++          (support.Support2 & D3D12_FORMAT_SUPPORT2_UAV_TYPED_STORE)) {
++        mip_fit_formats_.push_back(format);
++      }
++    }
+   }
+ 
+   srv_descriptor_cache_allocated_ = 0;
+@@ -1778,6 +1805,51 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+     (is_base ? host_slice_size_base : host_slice_sizes_mips[level]) = level_host_slice_size;
+     copy_buffer_size += level_host_slice_size * array_size;
+   }
++  // Mips of a resolution-scaled texture whose data (the guest mip scaled) doesn't match the host
++  // mip (the scaled base reduced), or that are 1 guest texel along an axis, are fitted to the host
++  // mip size into extra space after the loaded data (texture_mip_fit_scaled.cs.hlsl), and that is
++  // copied instead. SSX's auto exposure reads mip 8 (1x1) of a 300x160 luminance chain rendered
++  // one mip at a time: at 3x that mip held 3 different values with a never-written zero among
++  // them, so the exposure varied across the screen and was ~10x too high on one side.
++  D3D12_PLACED_SUBRESOURCE_FOOTPRINT mip_fit_layouts[xenos::kTextureMaxMips];
++  uint32_t mip_fit_levels = 0;
++  DXGI_FORMAT mip_fit_format = DXGI_FORMAT_UNKNOWN;
++  uint32_t mip_fit_bytes = load_shader_info.bytes_per_host_block;
++  if (texture_resolution_scaled && direct_variant < 0 && !is_3d && array_size == 1 &&
++      !host_block_compressed && load_pipeline_mip_fit_scaled_) {
++    DXGI_FORMAT unorm_format = GetDXGIUnormFormat(guest_format, width, height);
++    for (const auto& format : mip_fit_formats_) {
++      if (format.first == unorm_format && format.second == mip_fit_bytes) {
++        mip_fit_format = unorm_format;
++      }
++    }
++  }
++  if (mip_fit_format != DXGI_FORMAT_UNKNOWN) {
++    const D3D12_RESOURCE_DESC fit_texture_desc = d3d12_texture.resource()->GetDesc();
++    for (uint32_t level = level_first; level <= level_last; ++level) {
++      uint32_t guest_width = std::max(width >> level, uint32_t(1));
++      uint32_t guest_height = std::max(height >> level, uint32_t(1));
++      uint32_t host_width = std::max(uint32_t(fit_texture_desc.Width >> level), uint32_t(1));
++      uint32_t host_height = std::max(uint32_t(fit_texture_desc.Height >> level), uint32_t(1));
++      if (guest_width * texture_resolution_scale_x == host_width &&
++          guest_height * texture_resolution_scale_y == host_height &&
++          (guest_width > 1 || texture_resolution_scale_x == 1) &&
++          (guest_height > 1 || texture_resolution_scale_y == 1)) {
++        continue;
++      }
++      mip_fit_levels |= UINT32_C(1) << level;
++      D3D12_PLACED_SUBRESOURCE_FOOTPRINT& fit_layout = mip_fit_layouts[level];
++      fit_layout.Offset = copy_buffer_size;
++      fit_layout.Footprint.Format = host_copy_format;
++      fit_layout.Footprint.Width = host_width;
++      fit_layout.Footprint.Height = host_height;
++      fit_layout.Footprint.Depth = 1;
++      fit_layout.Footprint.RowPitch =
++          rex::align(host_width * mip_fit_bytes, uint32_t(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT));
++      copy_buffer_size += rex::align(UINT64(fit_layout.Footprint.RowPitch) * host_height,
++                                     UINT64(D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT));
++    }
++  }
+   D3D12_RESOURCE_STATES copy_buffer_state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+   ID3D12Resource* copy_buffer = nullptr;
+   if (direct_variant < 0) {
+@@ -1804,7 +1876,11 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+       ++descriptor_count;
+     }
+   }
+-  ui::d3d12::util::DescriptorCpuGpuHandlePair descriptors_allocated[3];
++  if (mip_fit_levels) {
++    // The typed view of the copy buffer for fitting the mips, last.
++    ++descriptor_count;
++  }
++  ui::d3d12::util::DescriptorCpuGpuHandlePair descriptors_allocated[4];
+   if (!command_processor_.RequestOneUseSingleViewDescriptors(descriptor_count,
+                                                              descriptors_allocated)) {
+     if (copy_buffer) {
+@@ -2001,6 +2077,56 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+     return true;
+   }
+ 
++  if (mip_fit_levels) {
++    ui::d3d12::util::DescriptorCpuGpuHandlePair descriptor_fit =
++        descriptors_allocated[descriptor_count - 1];
++    ui::d3d12::util::CreateBufferTypedUAV(device, descriptor_fit.first, copy_buffer,
++                                          mip_fit_format,
++                                          uint32_t(copy_buffer_size / mip_fit_bytes));
++    // The loaded data must be written before it's read.
++    command_processor_.PushUAVBarrier(copy_buffer);
++    command_processor_.SubmitBarriers();
++    command_processor_.SetExternalPipeline(load_pipeline_mip_fit_scaled_.Get());
++    command_list.D3DSetComputeRootDescriptorTable(2, descriptor_fit.second);
++    for (uint32_t level = level_first; level <= level_last; ++level) {
++      if (!(mip_fit_levels & (UINT32_C(1) << level))) {
++        continue;
++      }
++      uint32_t guest_level = std::min(level, level_packed);
++      const D3D12_PLACED_SUBRESOURCE_FOOTPRINT& source_layout =
++          level ? host_slice_layouts_mips[guest_level] : host_slice_layout_base;
++      uint32_t source_x = 0, source_y = 0;
++      if (level >= level_packed) {
++        uint32_t offset_blocks_x, offset_blocks_y, offset_z;
++        texture_util::GetPackedMipOffset(width, height, depth, guest_format, level,
++                                         offset_blocks_x, offset_blocks_y, offset_z);
++        source_x = offset_blocks_x * block_width * texture_resolution_scale_x;
++        source_y = offset_blocks_y * block_height * texture_resolution_scale_y;
++      }
++      uint32_t source_pitch = source_layout.Footprint.RowPitch / mip_fit_bytes;
++      uint32_t guest_width = std::max(width >> level, uint32_t(1));
++      uint32_t guest_height = std::max(height >> level, uint32_t(1));
++      const D3D12_PLACED_SUBRESOURCE_FOOTPRINT& fit_layout = mip_fit_layouts[level];
++      const uint32_t fit_constants[] = {
++          uint32_t(source_layout.Offset / mip_fit_bytes) + source_y * source_pitch + source_x,
++          source_pitch,
++          guest_width * texture_resolution_scale_x,
++          guest_height * texture_resolution_scale_y,
++          uint32_t(fit_layout.Offset / mip_fit_bytes),
++          fit_layout.Footprint.RowPitch / mip_fit_bytes,
++          fit_layout.Footprint.Width,
++          fit_layout.Footprint.Height,
++          uint32_t(guest_width == 1 && texture_resolution_scale_x > 1),
++          uint32_t(guest_height == 1 && texture_resolution_scale_y > 1),
++      };
++      static_assert(sizeof(fit_constants) == sizeof(LoadConstants));
++      command_list.D3DSetComputeRoot32BitConstants(0, sizeof(fit_constants) / sizeof(uint32_t),
++                                                   fit_constants, 0);
++      command_list.D3DDispatch((fit_layout.Footprint.Width + 7) / 8,
++                               (fit_layout.Footprint.Height + 7) / 8, 1);
++    }
++  }
++
+   // Submit copying from the copy buffer to the host texture.
+   ID3D12Resource* texture_resource = d3d12_texture.resource();
+   command_processor_.PushTransitionBarrier(
+@@ -2084,6 +2210,11 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+         source_box_ptr = &source_box;
+       }
+     }
++    if (mip_fit_levels & (UINT32_C(1) << level)) {
++      // Fitted to the whole host mip (only 2D, single slice).
++      location_source.PlacedFootprint = mip_fit_layouts[level];
++      source_box_ptr = nullptr;
++    }
+     for (uint32_t slice = 0; slice < array_size; ++slice) {
+       command_list.D3DCopyTextureRegion(&location_dest, 0, 0, level ? 0 : base_z_first,
+                                         &location_source, source_box_ptr);
+diff --git a/src/graphics/shaders/bytecode/d3d12_5_1/texture_mip_fit_scaled_cs.h b/src/graphics/shaders/bytecode/d3d12_5_1/texture_mip_fit_scaled_cs.h
+new file mode 100644
+index 0000000..c0122f6
+--- /dev/null
++++ b/src/graphics/shaders/bytecode/d3d12_5_1/texture_mip_fit_scaled_cs.h
+@@ -0,0 +1,467 @@
++#if 0
++//
++// Generated by Microsoft (R) HLSL Shader Compiler 10.1
++//
++//
++// Note: shader requires additional functionality:
++//       Typed UAV Load Additional Formats
++//
++//
++// Buffer Definitions: 
++//
++// cbuffer XeMipFitConstants
++// {
++//
++//   uint xe_fit_source_offset;         // Offset:    0 Size:     4
++//   uint xe_fit_source_pitch;          // Offset:    4 Size:     4
++//   uint2 xe_fit_source_size;          // Offset:    8 Size:     8
++//   uint xe_fit_dest_offset;           // Offset:   16 Size:     4
++//   uint xe_fit_dest_pitch;            // Offset:   20 Size:     4
++//   uint2 xe_fit_dest_size;            // Offset:   24 Size:     8
++//   uint2 xe_fit_average;              // Offset:   32 Size:     8
++//
++// }
++//
++//
++// Resource Bindings:
++//
++// Name                                 Type  Format         Dim      ID      HLSL Bind  Count
++// ------------------------------ ---------- ------- ----------- ------- -------------- ------
++// xe_fit_buffer                         UAV  float4         buf      U0             u0      1 
++// XeMipFitConstants                 cbuffer      NA          NA     CB0            cb0      1 
++//
++//
++//
++// Input signature:
++//
++// Name                 Index   Mask Register SysValue  Format   Used
++// -------------------- ----- ------ -------- -------- ------- ------
++// no Input
++//
++// Output signature:
++//
++// Name                 Index   Mask Register SysValue  Format   Used
++// -------------------- ----- ------ -------- -------- ------- ------
++// no Output
++cs_5_1
++dcl_globalFlags refactoringAllowed
++dcl_constantbuffer CB0[0:0][3], immediateIndexed, space=0
++dcl_uav_typed_buffer (float,float,float,float) U0[0:0], space=0
++dcl_input vThreadID.xy
++dcl_temps 5
++dcl_thread_group 8, 8, 1
++uge r0.xy, vThreadID.xyxx, CB0[0][1].zwzz
++or r0.x, r0.y, r0.x
++if_nz r0.x
++  ret 
++endif 
++imad r0.xy, vThreadID.xyxx, l(2, 2, 0, 0), l(1, 1, 0, 0)
++imul null, r0.xy, r0.xyxx, CB0[0][0].zwzz
++ishl r0.zw, CB0[0][1].zzzw, l(0, 0, 1, 1)
++udiv r0.xy, null, r0.xyxx, r0.zwzz
++iadd r0.zw, CB0[0][0].zzzw, l(0, 0, -1, -1)
++umin r0.xy, r0.zwzz, r0.xyxx
++movc r1.xy, CB0[0][2].xyxx, l(0,0,0,0), r0.xyxx
++movc r0.xy, CB0[0][2].xyxx, r0.zwzz, r0.xyxx
++mov r2.xyzw, l(0,0,0,0)
++mov r0.z, r1.y
++loop 
++  ult r0.w, r0.y, r0.z
++  breakc_nz r0.w
++  mov r3.xyzw, r2.xyzw
++  mov r0.w, r1.x
++  loop 
++    ult r1.z, r0.x, r0.w
++    breakc_nz r1.z
++    imad r1.z, r0.z, CB0[0][0].y, CB0[0][0].x
++    iadd r1.z, r0.w, r1.z
++    ld_uav_typed r4.xyzw, r1.zzzz, U0[0].xyzw
++    add r3.xyzw, r3.xyzw, r4.xyzw
++    iadd r0.w, r0.w, l(1)
++  endloop 
++  mov r2.xyzw, r3.xyzw
++  iadd r0.z, r0.z, l(1)
++endloop 
++iadd r0.xy, -r1.xyxx, r0.xyxx
++iadd r0.xy, r0.xyxx, l(1, 1, 0, 0)
++imul null, r0.x, r0.y, r0.x
++utof r0.x, r0.x
++imad r0.y, vThreadID.y, CB0[0][1].y, CB0[0][1].x
++iadd r0.y, r0.y, vThreadID.x
++div r1.xyzw, r2.xyzw, r0.xxxx
++store_uav_typed U0[0].xyzw, r0.yyyy, r1.xyzw
++ret 
++// Approximately 41 instruction slots used
++#endif
++
++const BYTE texture_mip_fit_scaled_cs[] =
++{
++     68,  88,  66,  67,  82, 109, 
++    163, 144,  79,  53,  22, 144, 
++    187, 248, 110, 111, 174,  66, 
++      8,  61,   1,   0,   0,   0, 
++    160,   8,   0,   0,   6,   0, 
++      0,   0,  56,   0,   0,   0, 
++     32,   3,   0,   0,  48,   3, 
++      0,   0,  64,   3,   0,   0, 
++    244,   7,   0,   0,   4,   8, 
++      0,   0,  82,  68,  69,  70, 
++    224,   2,   0,   0,   1,   0, 
++      0,   0, 172,   0,   0,   0, 
++      2,   0,   0,   0,  60,   0, 
++      0,   0,   1,   5,  83,  67, 
++      0, 133,   0,   0, 181,   2, 
++      0,   0,  19,  19,  68,  37, 
++     60,   0,   0,   0,  24,   0, 
++      0,   0,  40,   0,   0,   0, 
++     40,   0,   0,   0,  36,   0, 
++      0,   0,  12,   0,   0,   0, 
++      0,   0,   0,   0, 140,   0, 
++      0,   0,   4,   0,   0,   0, 
++      5,   0,   0,   0,   1,   0, 
++      0,   0, 255, 255, 255, 255, 
++      0,   0,   0,   0,   1,   0, 
++      0,   0,  12,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0, 154,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   1,   0,   0,   0, 
++      1,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++    120, 101,  95, 102, 105, 116, 
++     95,  98, 117, 102, 102, 101, 
++    114,   0,  88, 101,  77, 105, 
++    112,  70, 105, 116,  67, 111, 
++    110, 115, 116,  97, 110, 116, 
++    115,   0, 154,   0,   0,   0, 
++      7,   0,   0,   0, 196,   0, 
++      0,   0,  48,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0, 220,   1,   0,   0, 
++      0,   0,   0,   0,   4,   0, 
++      0,   0,   2,   0,   0,   0, 
++    248,   1,   0,   0,   0,   0, 
++      0,   0, 255, 255, 255, 255, 
++      0,   0,   0,   0, 255, 255, 
++    255, 255,   0,   0,   0,   0, 
++     28,   2,   0,   0,   4,   0, 
++      0,   0,   4,   0,   0,   0, 
++      2,   0,   0,   0, 248,   1, 
++      0,   0,   0,   0,   0,   0, 
++    255, 255, 255, 255,   0,   0, 
++      0,   0, 255, 255, 255, 255, 
++      0,   0,   0,   0,  48,   2, 
++      0,   0,   8,   0,   0,   0, 
++      8,   0,   0,   0,   2,   0, 
++      0,   0,  76,   2,   0,   0, 
++      0,   0,   0,   0, 255, 255, 
++    255, 255,   0,   0,   0,   0, 
++    255, 255, 255, 255,   0,   0, 
++      0,   0, 112,   2,   0,   0, 
++     16,   0,   0,   0,   4,   0, 
++      0,   0,   2,   0,   0,   0, 
++    248,   1,   0,   0,   0,   0, 
++      0,   0, 255, 255, 255, 255, 
++      0,   0,   0,   0, 255, 255, 
++    255, 255,   0,   0,   0,   0, 
++    131,   2,   0,   0,  20,   0, 
++      0,   0,   4,   0,   0,   0, 
++      2,   0,   0,   0, 248,   1, 
++      0,   0,   0,   0,   0,   0, 
++    255, 255, 255, 255,   0,   0, 
++      0,   0, 255, 255, 255, 255, 
++      0,   0,   0,   0, 149,   2, 
++      0,   0,  24,   0,   0,   0, 
++      8,   0,   0,   0,   2,   0, 
++      0,   0,  76,   2,   0,   0, 
++      0,   0,   0,   0, 255, 255, 
++    255, 255,   0,   0,   0,   0, 
++    255, 255, 255, 255,   0,   0, 
++      0,   0, 166,   2,   0,   0, 
++     32,   0,   0,   0,   8,   0, 
++      0,   0,   2,   0,   0,   0, 
++     76,   2,   0,   0,   0,   0, 
++      0,   0, 255, 255, 255, 255, 
++      0,   0,   0,   0, 255, 255, 
++    255, 255,   0,   0,   0,   0, 
++    120, 101,  95, 102, 105, 116, 
++     95, 115, 111, 117, 114,  99, 
++    101,  95, 111, 102, 102, 115, 
++    101, 116,   0, 100, 119, 111, 
++    114, 100,   0, 171,   0,   0, 
++     19,   0,   1,   0,   1,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++    241,   1,   0,   0, 120, 101, 
++     95, 102, 105, 116,  95, 115, 
++    111, 117, 114,  99, 101,  95, 
++    112, 105, 116,  99, 104,   0, 
++    120, 101,  95, 102, 105, 116, 
++     95, 115, 111, 117, 114,  99, 
++    101,  95, 115, 105, 122, 101, 
++      0, 117, 105, 110, 116,  50, 
++      0, 171, 171, 171,   1,   0, 
++     19,   0,   1,   0,   2,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     67,   2,   0,   0, 120, 101, 
++     95, 102, 105, 116,  95, 100, 
++    101, 115, 116,  95, 111, 102, 
++    102, 115, 101, 116,   0, 120, 
++    101,  95, 102, 105, 116,  95, 
++    100, 101, 115, 116,  95, 112, 
++    105, 116,  99, 104,   0, 120, 
++    101,  95, 102, 105, 116,  95, 
++    100, 101, 115, 116,  95, 115, 
++    105, 122, 101,   0, 120, 101, 
++     95, 102, 105, 116,  95,  97, 
++    118, 101, 114,  97, 103, 101, 
++      0,  77, 105,  99, 114, 111, 
++    115, 111, 102, 116,  32,  40, 
++     82,  41,  32,  72,  76,  83, 
++     76,  32,  83, 104,  97, 100, 
++    101, 114,  32,  67, 111, 109, 
++    112, 105, 108, 101, 114,  32, 
++     49,  48,  46,  49,   0, 171, 
++    171, 171,  73,  83,  71,  78, 
++      8,   0,   0,   0,   0,   0, 
++      0,   0,   8,   0,   0,   0, 
++     79,  83,  71,  78,   8,   0, 
++      0,   0,   0,   0,   0,   0, 
++      8,   0,   0,   0,  83,  72, 
++     69,  88, 172,   4,   0,   0, 
++     81,   0,   5,   0,  43,   1, 
++      0,   0, 106,   8,   0,   1, 
++     89,   0,   0,   7,  70, 142, 
++     48,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   3,   0,   0,   0, 
++      0,   0,   0,   0, 156,   8, 
++      0,   7,  70, 238,  49,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     85,  85,   0,   0,   0,   0, 
++      0,   0,  95,   0,   0,   2, 
++     50,   0,   2,   0, 104,   0, 
++      0,   2,   5,   0,   0,   0, 
++    155,   0,   0,   4,   8,   0, 
++      0,   0,   8,   0,   0,   0, 
++      1,   0,   0,   0,  80,   0, 
++      0,   8,  50,   0,  16,   0, 
++      0,   0,   0,   0,  70,   0, 
++      2,   0, 230, 138,  48,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   1,   0,   0,   0, 
++     60,   0,   0,   7,  18,   0, 
++     16,   0,   0,   0,   0,   0, 
++     26,   0,  16,   0,   0,   0, 
++      0,   0,  10,   0,  16,   0, 
++      0,   0,   0,   0,  31,   0, 
++      4,   3,  10,   0,  16,   0, 
++      0,   0,   0,   0,  62,   0, 
++      0,   1,  21,   0,   0,   1, 
++     35,   0,   0,  14,  50,   0, 
++     16,   0,   0,   0,   0,   0, 
++     70,   0,   2,   0,   2,  64, 
++      0,   0,   2,   0,   0,   0, 
++      2,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      2,  64,   0,   0,   1,   0, 
++      0,   0,   1,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,  38,   0,   0,  10, 
++      0, 208,   0,   0,  50,   0, 
++     16,   0,   0,   0,   0,   0, 
++     70,   0,  16,   0,   0,   0, 
++      0,   0, 230, 138,  48,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     41,   0,   0,  12, 194,   0, 
++     16,   0,   0,   0,   0,   0, 
++    166, 142,  48,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      1,   0,   0,   0,   2,  64, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   1,   0, 
++      0,   0,   1,   0,   0,   0, 
++     78,   0,   0,   8,  50,   0, 
++     16,   0,   0,   0,   0,   0, 
++      0, 208,   0,   0,  70,   0, 
++     16,   0,   0,   0,   0,   0, 
++    230,  10,  16,   0,   0,   0, 
++      0,   0,  30,   0,   0,  12, 
++    194,   0,  16,   0,   0,   0, 
++      0,   0, 166, 142,  48,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      2,  64,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++    255, 255, 255, 255, 255, 255, 
++    255, 255,  84,   0,   0,   7, 
++     50,   0,  16,   0,   0,   0, 
++      0,   0, 230,  10,  16,   0, 
++      0,   0,   0,   0,  70,   0, 
++     16,   0,   0,   0,   0,   0, 
++     55,   0,   0,  14,  50,   0, 
++     16,   0,   1,   0,   0,   0, 
++     70, 128,  48,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      2,   0,   0,   0,   2,  64, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     70,   0,  16,   0,   0,   0, 
++      0,   0,  55,   0,   0,  11, 
++     50,   0,  16,   0,   0,   0, 
++      0,   0,  70, 128,  48,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   2,   0,   0,   0, 
++    230,  10,  16,   0,   0,   0, 
++      0,   0,  70,   0,  16,   0, 
++      0,   0,   0,   0,  54,   0, 
++      0,   8, 242,   0,  16,   0, 
++      2,   0,   0,   0,   2,  64, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     54,   0,   0,   5,  66,   0, 
++     16,   0,   0,   0,   0,   0, 
++     26,   0,  16,   0,   1,   0, 
++      0,   0,  48,   0,   0,   1, 
++     79,   0,   0,   7, 130,   0, 
++     16,   0,   0,   0,   0,   0, 
++     26,   0,  16,   0,   0,   0, 
++      0,   0,  42,   0,  16,   0, 
++      0,   0,   0,   0,   3,   0, 
++      4,   3,  58,   0,  16,   0, 
++      0,   0,   0,   0,  54,   0, 
++      0,   5, 242,   0,  16,   0, 
++      3,   0,   0,   0,  70,  14, 
++     16,   0,   2,   0,   0,   0, 
++     54,   0,   0,   5, 130,   0, 
++     16,   0,   0,   0,   0,   0, 
++     10,   0,  16,   0,   1,   0, 
++      0,   0,  48,   0,   0,   1, 
++     79,   0,   0,   7,  66,   0, 
++     16,   0,   1,   0,   0,   0, 
++     10,   0,  16,   0,   0,   0, 
++      0,   0,  58,   0,  16,   0, 
++      0,   0,   0,   0,   3,   0, 
++      4,   3,  42,   0,  16,   0, 
++      1,   0,   0,   0,  35,   0, 
++      0,  13,  66,   0,  16,   0, 
++      1,   0,   0,   0,  42,   0, 
++     16,   0,   0,   0,   0,   0, 
++     26, 128,  48,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,  10, 128, 
++     48,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,  30,   0,   0,   7, 
++     66,   0,  16,   0,   1,   0, 
++      0,   0,  58,   0,  16,   0, 
++      0,   0,   0,   0,  42,   0, 
++     16,   0,   1,   0,   0,   0, 
++    163,   0,   0,   8, 242,   0, 
++     16,   0,   4,   0,   0,   0, 
++    166,  10,  16,   0,   1,   0, 
++      0,   0,  70, 238,  33,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   7, 
++    242,   0,  16,   0,   3,   0, 
++      0,   0,  70,  14,  16,   0, 
++      3,   0,   0,   0,  70,  14, 
++     16,   0,   4,   0,   0,   0, 
++     30,   0,   0,   7, 130,   0, 
++     16,   0,   0,   0,   0,   0, 
++     58,   0,  16,   0,   0,   0, 
++      0,   0,   1,  64,   0,   0, 
++      1,   0,   0,   0,  22,   0, 
++      0,   1,  54,   0,   0,   5, 
++    242,   0,  16,   0,   2,   0, 
++      0,   0,  70,  14,  16,   0, 
++      3,   0,   0,   0,  30,   0, 
++      0,   7,  66,   0,  16,   0, 
++      0,   0,   0,   0,  42,   0, 
++     16,   0,   0,   0,   0,   0, 
++      1,  64,   0,   0,   1,   0, 
++      0,   0,  22,   0,   0,   1, 
++     30,   0,   0,   8,  50,   0, 
++     16,   0,   0,   0,   0,   0, 
++     70,   0,  16, 128,  65,   0, 
++      0,   0,   1,   0,   0,   0, 
++     70,   0,  16,   0,   0,   0, 
++      0,   0,  30,   0,   0,  10, 
++     50,   0,  16,   0,   0,   0, 
++      0,   0,  70,   0,  16,   0, 
++      0,   0,   0,   0,   2,  64, 
++      0,   0,   1,   0,   0,   0, 
++      1,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     38,   0,   0,   8,   0, 208, 
++      0,   0,  18,   0,  16,   0, 
++      0,   0,   0,   0,  26,   0, 
++     16,   0,   0,   0,   0,   0, 
++     10,   0,  16,   0,   0,   0, 
++      0,   0,  86,   0,   0,   5, 
++     18,   0,  16,   0,   0,   0, 
++      0,   0,  10,   0,  16,   0, 
++      0,   0,   0,   0,  35,   0, 
++      0,  12,  34,   0,  16,   0, 
++      0,   0,   0,   0,  26,   0, 
++      2,   0,  26, 128,  48,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   1,   0,   0,   0, 
++     10, 128,  48,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      1,   0,   0,   0,  30,   0, 
++      0,   6,  34,   0,  16,   0, 
++      0,   0,   0,   0,  26,   0, 
++     16,   0,   0,   0,   0,   0, 
++     10,   0,   2,   0,  14,   0, 
++      0,   7, 242,   0,  16,   0, 
++      1,   0,   0,   0,  70,  14, 
++     16,   0,   2,   0,   0,   0, 
++      6,   0,  16,   0,   0,   0, 
++      0,   0, 164,   0,   0,   8, 
++    242, 224,  33,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++     86,   5,  16,   0,   0,   0, 
++      0,   0,  70,  14,  16,   0, 
++      1,   0,   0,   0,  62,   0, 
++      0,   1,  83,  70,  73,  48, 
++      8,   0,   0,   0,   0,   8, 
++      0,   0,   0,   0,   0,   0, 
++     83,  84,  65,  84, 148,   0, 
++      0,   0,  41,   0,   0,   0, 
++      5,   0,   0,   0,   0,   0, 
++      0,   0,   1,   0,   0,   0, 
++      2,   0,   0,   0,  13,   0, 
++      0,   0,   6,   0,   0,   0, 
++      2,   0,   0,   0,   3,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   1,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      5,   0,   0,   0,   2,   0, 
++      0,   0,   1,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   0,   0,   0,   0, 
++      0,   0,   1,   0,   0,   0
++};
+diff --git a/src/graphics/shaders/texture_mip_fit_scaled.cs.hlsl b/src/graphics/shaders/texture_mip_fit_scaled.cs.hlsl
+new file mode 100644
+index 0000000..1eea610
+--- /dev/null
++++ b/src/graphics/shaders/texture_mip_fit_scaled.cs.hlsl
+@@ -0,0 +1,47 @@
++// Build (Windows SDK fxc):
++//   fxc /T cs_5_1 /E main /O3 /Vn texture_mip_fit_scaled_cs
++//       /Fh bytecode/d3d12_5_1/texture_mip_fit_scaled_cs.h texture_mip_fit_scaled.cs.hlsl
++//
++// Fits a loaded mip of a resolution-scaled texture to its host mip size. The loaded data is the
++// guest mip scaled ((width >> level) * scale), but the host mip is the scaled base halved
++// ((width * scale) >> level), so deep mips of render-to-texture chains (an auto-exposure
++// luminance chain down to 1x1, for instance) are a few texels wider or narrower than their data:
++// the extra host texels were never written, and the copy cut off data rows. Along an axis where
++// the guest mip is 1 texel the result is the average of the data, uniform as at 1x; otherwise it is
++// the data stretched to the host size (nearest). Source and destination are separate regions of
++// one buffer, accessed through a typed view in the texture's format, so the average is taken on
++// decoded values.
++
++cbuffer XeMipFitConstants : register(b0, space0) {
++  // In elements of the view format.
++  uint xe_fit_source_offset;
++  uint xe_fit_source_pitch;
++  uint2 xe_fit_source_size;
++  uint xe_fit_dest_offset;
++  uint xe_fit_dest_pitch;
++  uint2 xe_fit_dest_size;
++  // Per axis, non-zero to average the whole source along it.
++  uint2 xe_fit_average;
++};
++
++RWBuffer<float4> xe_fit_buffer : register(u0, space0);
++
++[numthreads(8, 8, 1)]
++void main(uint3 xe_thread_id : SV_DispatchThreadID) {
++  uint2 dest = xe_thread_id.xy;
++  [branch] if (any(dest >= xe_fit_dest_size)) {
++    return;
++  }
++  uint2 nearest = min((dest * 2u + 1u) * xe_fit_source_size / (xe_fit_dest_size * 2u),
++                      xe_fit_source_size - 1u);
++  uint2 first = xe_fit_average != 0u ? uint2(0u, 0u) : nearest;
++  uint2 last = xe_fit_average != 0u ? xe_fit_source_size - 1u : nearest;
++  float4 sum = float4(0.0f, 0.0f, 0.0f, 0.0f);
++  for (uint y = first.y; y <= last.y; ++y) {
++    for (uint x = first.x; x <= last.x; ++x) {
++      sum += xe_fit_buffer[xe_fit_source_offset + y * xe_fit_source_pitch + x];
++    }
++  }
++  float count = float((last.x - first.x + 1u) * (last.y - first.y + 1u));
++  xe_fit_buffer[xe_fit_dest_offset + dest.y * xe_fit_dest_pitch + dest.x] = sum / count;
++}
