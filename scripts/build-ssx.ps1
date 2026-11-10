@@ -206,7 +206,7 @@ if ($NoTitleUpdate) {
     if ($xexpHash -eq $OlderXexpSha256) {
         Remove-Item $updateDir -Recurse -Force
         Fail ("This is an older SSX title update (0.0.1.2, about 1 MB). Use the latest one (0.0.3.2, about 9 MB, " +
-              "file name tu00000002_00000000 on the console); it already contains this one.")
+              "in the same console folder); it already contains this one.")
     }
     if ($xexpHash -ne $ExpectedXexpSha256 -or -not $hasPatch0 -or
         (Get-FileHash "$updateDir\patch0.big" -Algorithm SHA256).Hash -ne $ExpectedPatch0Sha256) {

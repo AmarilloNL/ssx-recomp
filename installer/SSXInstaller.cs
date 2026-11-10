@@ -621,7 +621,8 @@ class InstallerForm : Form {
     p.Controls.Add(dlcHint);
     SetHint(dlcHint, "Copied off your own Xbox 360 with a tool like FATXplorer or Velocity. In " +
                      "Content\\0000000000000000\\4541096D, the DLC (long-named files) is in 00000002 and the title " +
-                     "update (tu00000002_00000000) in 000B0000. Add them once: later updates keep them.", Th.Faint);
+                     "update in 000B0000 (if there are two, the larger one). Add them once: later updates keep them.",
+            Th.Faint);
 
     ownCheck.Bounds = new Rectangle(x, Th.D(400), w, Th.D(40));
     ownCheck.CheckedChanged += delegate { UpdateFooter(); };
@@ -846,7 +847,7 @@ class InstallerForm : Form {
       }
       if (titleUpdateFile != null) names.Insert(0, "Title update");
       else if (olderUpdate != null && rejected == null) {
-        rejected = Path.GetFileName(olderUpdate) + " is an older title update: add tu00000002_00000000 (about 9 MB)";
+        rejected = Path.GetFileName(olderUpdate) + " is an older title update: add the larger one (about 9 MB)";
       }
       if (rejected != null) {
         SetHint(dlcHint, (names.Count > 0 ? string.Join(", ", names.ToArray()) + " added. Skipped: " : "Skipped: ") +
