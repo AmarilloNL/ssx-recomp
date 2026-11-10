@@ -1,0 +1,173 @@
+diff --git a/src/gpu/renderer.cpp b/src/gpu/renderer.cpp
+index a6c33ec..9dc1b15 100644
+--- a/src/gpu/renderer.cpp
++++ b/src/gpu/renderer.cpp
+@@ -1573,7 +1573,7 @@ void InitDepthBlit()
+     params[0].DescriptorTable.pDescriptorRanges = &range;
+     params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+     params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+-    params[1].Constants.Num32BitValues = 8;
++    params[1].Constants.Num32BitValues = 9;
+     params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+     D3D12_ROOT_SIGNATURE_DESC rs{};
+     rs.NumParameters = 2;
+@@ -1587,7 +1587,7 @@ void InitDepthBlit()
+     static const char kSource[] = R"(
+ Texture2D<float> depthTex : register(t0);
+ Texture2D<float4> colorTex : register(t0);
+-cbuffer Blit : register(b0) { float scale; uint swapRB; uint clampDest; float destMin; float destMax; uint toGamma; uint blockX; uint blockY; };
++cbuffer Blit : register(b0) { float scale; uint swapRB; uint clampDest; float destMin; float destMax; uint toGamma; uint blockX; uint blockY; int srcOffsetY; };
+ // Xenia's LinearToPWLGamma: what a k_8_8_8_8_GAMMA surface holds in memory.
+ float LinearToPWLGamma(float l)
+ {
+@@ -1612,7 +1612,7 @@ float4 vs(uint id : SV_VertexID) : SV_Position
+ }
+ float ps(float4 pos : SV_Position) : SV_Target
+ {
+-    return depthTex.Load(int3(int2(pos.xy), 0));
++    return depthTex.Load(int3(int2(pos.xy) - int2(0, srcOffsetY), 0));
+ }
+ Texture2D<uint2> stencilTex : register(t1);
+ // 20e4 (D24FS8): 4-bit exponent biased by 15, 20-bit mantissa, [0, 2).
+@@ -1627,8 +1627,8 @@ uint Encode20e4(float v)
+ }
+ float4 psPack(float4 pos : SV_Position) : SV_Target
+ {
+-    float z = depthTex.Load(int3(int2(pos.xy), 0));
+-    uint st = stencilTex.Load(int3(int2(pos.xy), 0)).g;
++    float z = depthTex.Load(int3(int2(pos.xy) - int2(0, srcOffsetY), 0));
++    uint st = stencilTex.Load(int3(int2(pos.xy) - int2(0, srcOffsetY), 0)).g;
+     uint d = swapRB != 0 ? Encode20e4(z) : uint(round(saturate(z) * 16777215.0));
+     return float4(float(st & 0xFFu), float(d & 0xFFu), float((d >> 8) & 0xFFu), float(d >> 16)) / 255.0;
+ }
+@@ -1638,7 +1638,7 @@ float4 psColor(float4 pos : SV_Position) : SV_Target
+     // destination pixel averages its block of the surface (blockX x blockY; 1x1 a plain copy).
+     float4 c = 0;
+     const uint2 block = uint2(max(blockX, 1u), max(blockY, 1u));
+-    const int2 at = int2(pos.xy) * int2(block);
++    const int2 at = (int2(pos.xy) - int2(0, srcOffsetY)) * int2(block);
+     for (uint y = 0; y < block.y; y++)
+         for (uint x = 0; x < block.x; x++)
+             c += colorTex.Load(int3(at + int2(x, y), 0));
+@@ -1689,7 +1689,7 @@ float4 psColor(float4 pos : SV_Position) : SV_Target
+         const std::string msSource = "#define SAMPLES " + std::to_string(g_msaa) + R"(
+ Texture2DMS<float, SAMPLES> depthMs : register(t0);
+ Texture2DMS<float4, SAMPLES> colorMs : register(t0);
+-cbuffer Blit : register(b0) { float scale; uint swapRB; uint clampDest; float destMin; float destMax; uint toGamma; uint blockX; uint blockY; };
++cbuffer Blit : register(b0) { float scale; uint swapRB; uint clampDest; float destMin; float destMax; uint toGamma; uint blockX; uint blockY; int srcOffsetY; };
+ // Xenia's LinearToPWLGamma: what a k_8_8_8_8_GAMMA surface holds in memory.
+ float LinearToPWLGamma(float l)
+ {
+@@ -6060,7 +6060,7 @@ void EnsureResolved(ResolvedTexture& dest, uint32_t width, uint32_t height, uint
+ // destRange: the destination's fixed-point range after the scale (the 16-bit integer range for the
+ // 16-bit fixed formats); null none.
+ void BlitResolve(bool depth, uint32_t base, uint32_t width, uint32_t height, DXGI_FORMAT format, const D3D12_RECT& rect, float scale, bool swapRB = false,
+-    const float* destRange = nullptr, uint32_t toGamma = 0, uint32_t blockX = 1, uint32_t blockY = 1)
++    const float* destRange = nullptr, uint32_t toGamma = 0, uint32_t blockX = 1, uint32_t blockY = 1, uint32_t destRowOffset = 0)
+ {
+     // REGPU_FREEZE_RESOLVES=<hex base>[,<hex base>...]: those images keep what they hold, later resolves
+     // to them are skipped (debug: does a flicker come from an image's redraws?). Read every resolve, so
+@@ -6104,7 +6104,7 @@ void BlitResolve(bool depth, uint32_t base, uint32_t width, uint32_t height, DXG
+         NoteResolvedMemory(base, dest);
+     dest.frame = g_r.frame;
+     dest.serial = ++g_resolveSerial;
+-    const D3D12_RECT sr{ rect.left, rect.top, std::min<LONG>(rect.right, width), std::min<LONG>(rect.bottom, height) };
++    const D3D12_RECT sr{ rect.left, rect.top, std::min<LONG>(rect.right, width), std::min<LONG>(rect.bottom, LONG(height) - LONG(destRowOffset)) };
+     FrameResources& f = Frame();
+     if (sr.right <= sr.left || sr.bottom <= sr.top || f.descriptorsUsed >= kDescriptorsPerFrame)
+         return;
+@@ -6145,14 +6145,18 @@ void BlitResolve(bool depth, uint32_t base, uint32_t width, uint32_t height, DXG
+     C().list->SetGraphicsRootSignature(g_r.blitRootSignature.Get());
+     C().list->SetPipelineState(pso);
+     C().list->SetGraphicsRootDescriptorTable(0, Gpu(g_r.srvHeap.Get(), slot, g_r.srvStride));
+-    const uint32_t blitConstants[8] = { std::bit_cast<uint32_t>(scale), uint32_t(swapRB), uint32_t(destRange != nullptr),
++    // (destRowOffset: the rectangle's rows land that many rows lower in the image.)
++    const uint32_t hostRowOffset = destRowOffset ? uint32_t(double(destRowOffset) * ScaleY() + 1e-3) : 0u;
++    const uint32_t blitConstants[9] = { std::bit_cast<uint32_t>(scale), uint32_t(swapRB), uint32_t(destRange != nullptr),
+         std::bit_cast<uint32_t>(destRange ? destRange[0] : 0.0f), std::bit_cast<uint32_t>(destRange ? destRange[1] : 0.0f), uint32_t(toGamma),
+-        depth || ms ? 1u : blockX, depth || ms ? 1u : blockY };
+-    C().list->SetGraphicsRoot32BitConstants(1, 8, blitConstants, 0);
++        depth || ms ? 1u : blockX, depth || ms ? 1u : blockY, hostRowOffset };
++    C().list->SetGraphicsRoot32BitConstants(1, 9, blitConstants, 0);
+     // Width and height stay in game pixels (the size the title knows); the texture and the
+     // rectangle are scaled.
+     const D3D12_VIEWPORT vp{ 0, 0, float(hostWidth), float(hostHeight), 0, 1 };
+-    const D3D12_RECT hostRect = ToHost(sr);
++    D3D12_RECT hostRect = ToHost(sr);
++    hostRect.top += LONG(hostRowOffset);
++    hostRect.bottom = std::min<LONG>(hostRect.bottom + LONG(hostRowOffset), LONG(hostHeight));
+     C().list->RSSetViewports(1, &vp);
+     C().list->RSSetScissorRects(1, &hostRect);
+     C().list->DrawInstanced(3, 1, 0, 0);
+@@ -6274,8 +6278,8 @@ void ResolveIntoVolumes(uint32_t destBase, uint32_t slice, uint32_t srcBase, boo
+         // Stored as the copy holds it: a volume is decoded with its fetch's swizzle applied, which undoes the
+         // copy's red/blue swap (SSX's trail normals came out sideways, dark, when stored swapped).
+         static LiveSwitch swapped("REGPU_RESOLVE_TO_3D_SWAPPED"); // A/B: stored swapped, as in memory
+-        const uint32_t constants[8] = { std::bit_cast<uint32_t>(1.0f), uint32_t(swapRB && swapped), 0, 0, 0, 0, blockX, blockY };
+-        C().list->SetGraphicsRoot32BitConstants(1, 8, constants, 0);
++        const uint32_t constants[9] = { std::bit_cast<uint32_t>(1.0f), uint32_t(swapRB && swapped), 0, 0, 0, 0, blockX, blockY, 0 };
++        C().list->SetGraphicsRoot32BitConstants(1, 9, constants, 0);
+         const D3D12_VIEWPORT vp{ 0, 0, float(v.width), float(v.height), 0, 1 };
+         const D3D12_RECT sc{ 0, 0, LONG(v.width), LONG(v.height) };
+         C().list->RSSetViewports(1, &vp);
+@@ -7054,13 +7058,13 @@ void Resolve()
+         // (Only for a rectangle narrower than the image: full-width rows are a tall pass's tiles, which
+         // FH1's scene resolves are too, at the tile's own row.)
+         const bool placedInImage = imageBase && rect.top > 0 && uint32_t(rect.bottom) <= declaredHeight && uint32_t(rect.right - rect.left) < pitch;
+-        const uint32_t base = placedInImage ? gpureg::Get(RB_COPY_DEST_BASE) & 0x1FFFFFFF
+-                                            : ((gpureg::Get(RB_COPY_DEST_BASE) & 0x1FFFFFFF) - uint32_t(rect.top) * pitch * (noTileBpp ? 4 : guestBpp)) & 0x1FFFFFFF;
++        uint32_t base = placedInImage ? gpureg::Get(RB_COPY_DEST_BASE) & 0x1FFFFFFF
++                                      : ((gpureg::Get(RB_COPY_DEST_BASE) & 0x1FFFFFFF) - uint32_t(rect.top) * pitch * (noTileBpp ? 4 : guestBpp)) & 0x1FFFFFFF;
+         const uint32_t width = std::clamp<uint32_t>(pitch, 1, std::max<uint32_t>(kWidth, BigPassSize()));
+         // Taller than the screen is possible: a 1024x1024 target drawn as tall passes is resolved
+         // 720 rows at a time and sampled as 1024 rows. The texture keeps all its rows (clamped to
+         // kHeight it was stretched 1.4x vertically when sampled).
+-        constexpr uint32_t kMaxResolveHeight = 2048;
++        constexpr uint32_t kMaxResolveHeight = 4096;
+         uint32_t height = std::clamp<uint32_t>(placedInImage ? declaredHeight : declaredHeight + uint32_t(rect.top), 1, kMaxResolveHeight);
+         // A later tile into an image that already holds its rows keeps the image: some copies give
+         // the full image's rows for every tile (720, then 976 and 1232 with the tile's offset), and
+@@ -7070,6 +7074,33 @@ void Resolve()
+         if (auto it = g_r.resolved.find(base); !noKeep && it != g_r.resolved.end() && it->second.resource && rect.top > 0 &&
+                                                 uint32_t(rect.bottom) <= it->second.height && it->second.height < height)
+             height = it->second.height;
++        // A copy whose destination lies inside an image resolved earlier this frame, at a whole row of it
++        // with the same pitch and format, lands in that image: titles fill an atlas one part at a time, each
++        // copy drawn at the top of the EDRAM and sent to its rows of the image (SSX's sun shadows: three
++        // 1024x1024 cascades into one 1024x3072 depth atlas, the copies declaring 3072, 2048 and 1024 rows).
++        // Kept apart, the atlas held its first cascade only and far shadows came and went.
++        // REGPU_NO_RESOLVE_INTO_IMAGE=1: separate images, as before.
++        uint32_t destRowOffset = 0;
++        static LiveSwitch noIntoImage("REGPU_NO_RESOLVE_INTO_IMAGE");
++        if (!noIntoImage && !placedInImage && rect.top == 0)
++        {
++            const DXGI_FORMAT wanted = depth ? DXGI_FORMAT_R32_FLOAT : DXGI_FORMAT_UNKNOWN;
++            const uint64_t rowBytes = uint64_t(pitch) * guestBpp;
++            for (const auto& [imageBase, image] : g_r.resolved)
++            {
++                if (imageBase >= base || !image.resource || image.frame != g_r.frame || image.width != width || image.guestBpp != guestBpp ||
++                    (wanted != DXGI_FORMAT_UNKNOWN && image.format != wanted) || rowBytes == 0)
++                    continue;
++                const uint64_t offset = uint64_t(base - imageBase);
++                if (offset % rowBytes == 0 && offset / rowBytes + uint64_t(rect.bottom) <= image.height)
++                {
++                    destRowOffset = uint32_t(offset / rowBytes);
++                    base = imageBase;
++                    height = image.height;
++                    break;
++                }
++            }
++        }
+         // Destination: 8888 stays 8-bit (clamped, as the hardware does); other
+         // formats keep the HDR range. The exponent bias scales colour copies.
+         // k_2_10_10_10 (7) is a fixed-point front-buffer format too (PGR4 presents one); it gets the same
+@@ -7139,7 +7170,8 @@ void Resolve()
+                 blockY = MsaaDown(view) / MsaaDown(native & 3);
+             }
+         }
+-        BlitResolve(depth, base, width, height, format, rect, depth ? 1.0f : std::ldexp(1.0f, bias), false, destRange, blitFlags, blockX, blockY);
++        BlitResolve(depth, base, width, height, format, rect, depth ? 1.0f : std::ldexp(1.0f, bias), false, destRange, blitFlags, blockX, blockY,
++                    destRowOffset);
+         // Temporal upscaling: each tile of the main view keeps its depth before it is cleared.
+         if (g_temporal && g_scenePhase && !depth && width >= kWidth && rect.left == 0 && rect.right >= LONG(kWidth))
+             CopySceneDepth(rect);
