@@ -198,8 +198,8 @@ installs them the next time it starts.
 <br>
 
 **What the files look like.** Xbox 360 DLC is stored as package files with a long hexadecimal
-name and no extension, for example `8A7D066F7125F0B02BF4D8F520A12607DD5CB41B45`. SSX's DLC lives
-in a folder named after the game's title ID and the content type "marketplace":
+name and no extension. SSX's DLC lives in a folder named after the game's title ID and the
+content type "marketplace":
 
 ```
 Content\0000000000000000\4541096D\00000002\
@@ -218,15 +218,14 @@ folder. Copy the package files themselves, not the folder.
 1. Close the game.
 2. Open the folder `Documents\ssx\dlc`. The game creates it the first time it starts, or you can
    create it yourself.
-3. Copy the package files (the long-named files) into it. The result looks like
-   `Documents\ssx\dlc\8A7D066F7125F0B02BF4D8F520A12607DD5CB41B45`.
+3. Copy the package files (the long-named files) directly into it, not in a subfolder.
 4. Start the game. On startup it unpacks each new package into
    `Documents\ssx\0000000000000000\4541096D\00000002\`. This happens once per package, and the
    files in `dlc` can be deleted afterwards.
 
 **Checking it worked.** Mt. Eddie and Japan appear on the world map, and the classic riders and
 Eddie are selectable.
-The game's log (`logs` folder next to `ssx.exe`) shows a line like `DLC: installed 8A7D066F...`
+The game's log (`logs` folder next to `ssx.exe`) shows a line starting with `DLC: installed`
 for each package. If it says `failed to install`, the file isn't an Xbox 360 content package:
 check that you copied the long-named package file, not a folder or an archive.
 
@@ -241,17 +240,15 @@ and adds the gear for levels 11 to 15 to the store. With it, the game is built f
 version of its own code, so everything in this port (frame rates, resolution scale, DLC, your name
 and picture) works the same.
 
-| File | Size | |
-|---|---|---|
-| `tu00000002_00000000` | ~9 MB | version 0.0.3.2: **use this one** |
-| `TU_12K22BD_…` | ~1 MB | version 0.0.1.2: older, already contained in 0.0.3.2 |
-
 **Getting it off your console:** like the DLC, with an Xbox 360 file tool. Installed title updates
-are in `Content\0000000000000000\4541096D\000B0000\` on the console's storage.
+are in `Content\0000000000000000\4541096D\000B0000\` on the console's storage. If there are two
+files, use the larger one (about 9 MB, version 0.0.3.2). The smaller one (about 1 MB) is an older
+update that's already contained in it.
 
 **Adding it:** in the installer, click **Add files...** on the *Your game* page and select the title
 update file, then click **Install**. To add DLC too, click **Add files...** again for the files in
-the other folder: the picks add up. The installer checks that it's the supported update. Running the installer again later keeps it; you only add it once.
+the other folder: the picks add up. The installer checks that it's the supported update and tells
+you if you picked the older one. Running the installer again later keeps it; you only add it once.
 
 - **Saves:** they work with both versions. The update loads saves from the disc version, and the
   disc version also loads saves the update wrote.

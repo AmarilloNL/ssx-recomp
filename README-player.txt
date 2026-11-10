@@ -28,8 +28,7 @@ Keyboard (default)
   1/3 bumpers, Enter start, Tab back. Change them in F1 > Controls.
 
 DLC (optional, not included - you need it from your own Xbox 360)
-  SSX's DLC packages are files with long hexadecimal names and no extension,
-  e.g. 8A7D066F7125F0B02BF4D8F520A12607DD5CB41B45 (Mt. Eddie pack, ~250 MB).
+  SSX's DLC packages are files with long hexadecimal names and no extension.
   On the console they are in Content\0000000000000000\4541096D\00000002\;
   copy them to your PC with an Xbox 360 file tool (FATXplorer, Velocity, Horizon).
   1. Close the game.
@@ -39,8 +38,9 @@ DLC (optional, not included - you need it from your own Xbox 360)
   "DLC: installed ...". The files in the dlc folder can be deleted afterwards.
 
 Title update (optional, not included - you need it from your own Xbox 360)
-  SSX's last update (file tu00000002_00000000, ~9 MB) lets riders reach level 15.
-  On the console it is in Content\0000000000000000\4541096D\000B0000\.
+  SSX's last update (~9 MB) lets riders reach level 15. On the console it is
+  in Content\0000000000000000\4541096D\000B0000\ (if there are two files, use
+  the larger one).
   Run SSX-Installer.exe again and add it with "Add files...": the game is
   rebuilt with it (the "update" folder next to ssx.exe). Saves work with and
   without it.
