@@ -5,9 +5,18 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdlib>
 #include <fstream>
 #include <memory>
+
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
 
 #include <rex/cvar.h>
 #include <rex/filesystem.h>
@@ -19,7 +28,10 @@
 #include <rex/runtime.h>
 #include <rex/system/gpu_plugin.h>
 #include <rex/system/xmemory.h>
+#include <rex/ui/imgui_drawer.h>
+#include <rex/ui/immediate_drawer.h>
 #include <rex/ui/keybinds.h>
+#include <rex/ui/presenter.h>
 #include <rex/ui/window.h>
 
 #include "ssx_dlc.h"
@@ -103,10 +115,19 @@ class SsxApp : public rex::ReXApp {
   }
 
   void OnPreSetup(rex::RuntimeConfig& config) override {
-    if (config.gpu_plugin.empty()) config.gpu_plugin = "xenos";
+    // ssx_renderer picks the GPU plugin (--gpu_plugin still wins); ReGPU falls back to the
+    // standard renderer when its DLL is missing or doesn't load.
+    if (config.gpu_plugin.empty()) {
+      config.gpu_plugin = rex::cvar::GetFlagByName("ssx_renderer") == "regpu" ? "regpu" : "xenos";
+    }
     // Load the plugin now (ReXApp would right after this hook) so its cvars,
     // e.g. resolution_scale, exist for SsxApplyStartupSettings.
     if (!config.graphics) config.graphics = rex::system::LoadGpuPlugin(config.gpu_plugin);
+    if (!config.graphics && config.gpu_plugin == "regpu") {
+      REXLOG_WARN("ReGPU renderer not available; using the standard renderer");
+      config.gpu_plugin = "xenos";
+      config.graphics = rex::system::LoadGpuPlugin(config.gpu_plugin);
+    }
     // Keyboard play on by default; an explicit choice in ssx.toml wins.
     if (rex::cvar::GetFlagSource("mnk_mode") == rex::cvar::Source::kDefault) {
       rex::cvar::SetFlagByName("mnk_mode", "true");
@@ -122,8 +143,11 @@ class SsxApp : public rex::ReXApp {
     InstallDroppedDlc(runtime(), user_data_root());
 
     window()->SetTitle("SSX");
+    rex::ui::ImGuiDrawer* drawer = imgui_drawer();
+    if (!drawer) drawer = CreateReGpuOverlay();
+    if (!drawer) return;
     settings_ = std::make_unique<SsxSettingsDialog>(
-        imgui_drawer(), static_cast<rex::input::InputSystem*>(runtime()->input_system()),
+        drawer, static_cast<rex::input::InputSystem*>(runtime()->input_system()),
         config_path_, [this] {
           // Same path as the window close button: ends the title and exits the process.
           if (SsxSpawnRestart()) window()->RequestClose();
@@ -136,9 +160,45 @@ class SsxApp : public rex::ReXApp {
 
   void OnConfigureFonts(ImFontAtlas* atlas) override { SsxSettingsDialog::ConfigureFonts(atlas); }
 
-  void OnShutdown() override { settings_.reset(); }
+  void OnShutdown() override {
+    settings_.reset();
+    overlay_.reset();
+  }
 
  private:
+  // ReXGlue draws its overlays (the F1 menu) through the GPU plugin's presenter; the ReGPU plugin
+  // has none, but draws them itself over each frame (regpu-plugin/src/overlay.h). The frame is
+  // built on the UI thread once per presented frame.
+  struct OverlayContext : rex::ui::UIDrawContext {
+    OverlayContext(uint32_t width, uint32_t height) : UIDrawContext(width, height) {}
+  };
+
+  rex::ui::ImGuiDrawer* CreateReGpuOverlay() {
+    using OverlayFn = rex::ui::ImmediateDrawer* (*)(void (*)(void*), void*);
+    HMODULE plugin = GetModuleHandleW(L"rexgpu-regpu.dll");
+    auto get = plugin ? reinterpret_cast<OverlayFn>(GetProcAddress(plugin, "ssx_regpu_overlay")) : nullptr;
+    if (!get) return nullptr;
+    overlay_ = std::make_unique<rex::ui::ImGuiDrawer>(
+        window(), 64, [this](ImFontAtlas* atlas) { OnConfigureFonts(atlas); },
+        [this](ImGuiStyle& imgui_style, rex::ui::Style& ui_style) { OnConfigureStyle(imgui_style, ui_style); });
+    overlay_->SetPresenterAndImmediateDrawer(nullptr, get(&OnReGpuFrame, this));
+    return overlay_.get();
+  }
+
+  // On ReGPU's presenting thread: build the next overlay frame on the UI thread (one at a time).
+  static void OnReGpuFrame(void* context) {
+    auto* app = static_cast<SsxApp*>(context);
+    if (app->overlay_pending_.exchange(true)) return;
+    app->app_context().CallInUIThreadDeferred([app] {
+      app->overlay_pending_ = false;
+      if (!app->overlay_) return;
+      OverlayContext context(app->window()->GetActualPhysicalWidth(), app->window()->GetActualPhysicalHeight());
+      app->overlay_->Draw(context);
+    });
+  }
+
+  std::unique_ptr<rex::ui::ImGuiDrawer> overlay_;
+  std::atomic<bool> overlay_pending_{false};
   std::filesystem::path config_path_;
   std::filesystem::path iso_path_;
   std::unique_ptr<SsxSettingsDialog> settings_;

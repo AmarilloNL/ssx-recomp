@@ -39,6 +39,10 @@ REXCVAR_DEFINE_STRING(ssx_render_resolution, "high", "SSX",
     .allowed({"original", "high", "720p"})  // 720p: older configs, now means high
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 REXCVAR_DEFINE_INT32(ssx_volume, 100, "SSX", "Master volume (0-100)").range(0, 100);
+REXCVAR_DEFINE_STRING(ssx_renderer, "standard", "SSX",
+                      "Renderer: standard (ReXGlue's) or regpu (ReGPU, experimental) (restart)")
+    .allowed({"standard", "regpu"})
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 namespace {
 
@@ -46,11 +50,16 @@ void ApplyVolume(int32_t volume) { rex::audio::SetOutputGain(volume / 100.0f); }
 
 }  // namespace
 
+bool SsxUsingReGpu() {
+  static const bool regpu = GetModuleHandleW(L"rexgpu-regpu.dll") != nullptr;
+  return regpu;
+}
+
 int32_t SsxTargetFps() {
-  // The scale needs a restart: read it once.
+  // The scale needs a restart: read it once. (ReGPU holds high frame rates at 3x: no lock there.)
   static const int32_t scale =
       rex::string::from_string<int32_t>(rex::cvar::GetFlagByName("resolution_scale"), 1);
-  if (scale >= 3) return std::clamp(REXCVAR_GET(ssx_framerate_3x), 30, 60);
+  if (scale >= 3 && !SsxUsingReGpu()) return std::clamp(REXCVAR_GET(ssx_framerate_3x), 30, 60);
   int32_t fps = REXCVAR_GET(ssx_framerate);
   if (fps == 0) {  // match the main display
     DEVMODEW mode = {};
@@ -68,6 +77,16 @@ int32_t SsxTargetFps() {
 // the config file or was set at runtime, as valid TOML.
 void SsxSaveConfig(const std::filesystem::path& path) {
   std::string out = "# SSX settings - written by the game. Edit in-game with F1.\n";
+  // Lines for settings that don't exist right now (the other renderer's) are kept as they are.
+  {
+    std::ifstream in(path);
+    for (std::string line; std::getline(in, line);) {
+      size_t eq = line.find('=');
+      if (line.empty() || line[0] == '#' || eq == std::string::npos || eq == 0) continue;
+      std::string key = line.substr(0, line.find_last_not_of(" \t", eq - 1) + 1);
+      if (!rex::cvar::GetFlagInfo(key)) out += line + "\n";
+    }
+  }
   for (const auto& entry : rex::cvar::GetRegistry()) {
     if (entry.type == rex::cvar::FlagType::Command ||
         (entry.source != rex::cvar::Source::kConfig && entry.source != rex::cvar::Source::kRuntime)) {

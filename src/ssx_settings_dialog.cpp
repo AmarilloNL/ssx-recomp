@@ -55,6 +55,11 @@ const Choice kFramerates3x[] = {{"30 fps  (original)", "30"}, {"40 fps", "40"}, 
 const Choice kScales[] = {{"1x  (fastest)", "1"},
                           {"2x  (sharp, recommended)", "2"},
                           {"3x  (about 4K, 60 fps at most)", "3"}};
+// ReGPU draws at 1280 x 720 times the scale and holds high frame rates at 3x.
+const Choice kScalesReGpu[] = {{"1x  (1280 x 720)", "1"},
+                               {"2x  (2560 x 1440, sharp)", "2"},
+                               {"3x  (3840 x 2160, about 4K)", "3"}};
+const Choice kRenderers[] = {{"Standard", "standard"}, {"ReGPU  (experimental)", "regpu"}};
 const Choice kUpscaling[] = {{"Bilinear  (soft)", "bilinear"},
                              {"AMD CAS  (sharpen)", "cas"},
                              {"AMD FSR 1  (upscale + sharpen)", "fsr"}};
@@ -355,15 +360,17 @@ void SsxSettingsDialog::DrawDisplayTab() {
   Checkbox("##fullscreen", "fullscreen");
   // 3x has its own choices (and setting), see DrawScaleWarning.
   int scale = std::atoi(rex::cvar::GetFlagByName("resolution_scale").c_str());
-  if (scale >= 3) {
+  if (scale >= 3 && !SsxUsingReGpu()) {
     Row("Frame rate", "Locked to 30-60 fps at 3x resolution scale (Graphics tab).");
     Combo("##framerate", "ssx_framerate_3x", kFramerates3x, std::size(kFramerates3x));
   } else {
     Row("Frame rate", "Gameplay keeps real-time speed at any rate.");
     Combo("##framerate", "ssx_framerate", kFramerates, std::size(kFramerates));
   }
-  Row("Keep 16:9 aspect ratio", "Black bars instead of stretching on other window shapes.");
-  Checkbox("##letterbox", "present_letterbox");
+  if (!SsxUsingReGpu()) {  // (ReXGlue's presenter settings: not used by ReGPU)
+    Row("Keep 16:9 aspect ratio", "Black bars instead of stretching on other window shapes.");
+    Checkbox("##letterbox", "present_letterbox");
+  }
   Row("Show FPS counter", "In the top-left corner.");
   Checkbox("##fps", "ssx_show_fps");
   ImGui::EndTable();
@@ -371,9 +378,17 @@ void SsxSettingsDialog::DrawDisplayTab() {
 
 void SsxSettingsDialog::DrawGraphicsTab() {
   if (!BeginRows("##graphics")) return;
+  Row("Renderer", SsxUsingReGpu()
+                      ? "ReGPU: a newer renderer, faster at 2x and 3x. Experimental: report anything that "
+                        "looks wrong."
+                      : "Standard, or ReGPU: a newer renderer, faster at 2x and 3x (experimental).");
+  Combo("##renderer", "ssx_renderer", kRenderers, std::size(kRenderers));
   Row("Resolution scale", "N x N times as many pixels: sharper, but heavier on the GPU.");
-  bool heavy = std::atoi(rex::cvar::GetFlagByName("resolution_scale").c_str()) >= 3;
-  if (Combo("##scale", "resolution_scale", kScales, std::size(kScales)) && !heavy &&
+  if (SsxUsingReGpu()) {
+    Combo("##scale", "resolution_scale", kScalesReGpu, std::size(kScalesReGpu));
+  }
+  bool heavy = !SsxUsingReGpu() && std::atoi(rex::cvar::GetFlagByName("resolution_scale").c_str()) >= 3;
+  if (!SsxUsingReGpu() && Combo("##scale", "resolution_scale", kScales, std::size(kScales)) && !heavy &&
       std::atoi(rex::cvar::GetFlagByName("resolution_scale").c_str()) >= 3) {
     ImGui::OpenPopup("##scale_warning");
   }
@@ -384,10 +399,12 @@ void SsxSettingsDialog::DrawGraphicsTab() {
   }
   DrawScaleWarning();
 
-  Row("Upscaling", "How the image is scaled to your screen. FSR is sharpest at 1x.");
-  Combo("##upscaling", "present_effect", kUpscaling, std::size(kUpscaling));
   std::string effect = rex::cvar::GetFlagByName("present_effect");
-  if (effect == "fsr" || effect == "cas") {
+  if (!SsxUsingReGpu()) {
+    Row("Upscaling", "How the image is scaled to your screen. FSR is sharpest at 1x.");
+    Combo("##upscaling", "present_effect", kUpscaling, std::size(kUpscaling));
+  }
+  if (!SsxUsingReGpu() && (effect == "fsr" || effect == "cas")) {
     // FSR: "sharpness reduction" 0 (sharpest) .. 2 stops. CAS: additional sharpness 0 .. 1.
     const char* cvar = effect == "fsr" ? "present_fsr_sharpness_reduction" : "present_cas_additional_sharpness";
     float raw = std::strtof(rex::cvar::GetFlagByName(cvar).c_str(), nullptr);
@@ -399,8 +416,10 @@ void SsxSettingsDialog::DrawGraphicsTab() {
     }
   }
 
-  Row("Anti-aliasing", "Smooths jagged edges after rendering.");
-  Combo("##aa", "swap_post_effect", kAntiAliasing, std::size(kAntiAliasing));
+  if (!SsxUsingReGpu()) {
+    Row("Anti-aliasing", "Smooths jagged edges after rendering.");
+    Combo("##aa", "swap_post_effect", kAntiAliasing, std::size(kAntiAliasing));
+  }
   Row("Texture filtering", "Sharper textures at steep angles.");
   Combo("##aniso", "anisotropic_override", kAniso, std::size(kAniso));
   Row("3D render size", "High is the sharpest size the game's renderer supports without glitches.");

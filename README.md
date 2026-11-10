@@ -256,6 +256,22 @@ you if you picked the older one. Running the installer again later keeps it; you
   `powershell -ExecutionPolicy Bypass -File "%USERPROFILE%\SSX-PC\source\scripts\build-ssx.ps1" -NoTitleUpdate`
   (or your own install folder instead of `%USERPROFILE%\SSX-PC`). It asks for your ISO again.
 
+<a id="regpu"></a>
+
+## 🧪 ReGPU renderer (experimental, `regpu` branch)
+
+[ReGPU](https://github.com/zer0ducksgiven/ReGPU) is a newer, much smaller Direct3D 12 renderer for
+recompiled Xbox 360 games. SSX loads it as a ReXGlue GPU plugin (`regpu-plugin/`, adapted from
+[Glue2GPU](https://github.com/zer0ducksgiven/Glue2GPU)). On the test PC (RTX 4080 SUPER) it runs
+2x at about 200 fps where the standard renderer manages about 140, and 3x (4K) at about 110 fps.
+
+- **Build it:** `scripts\build-ssx.ps1 -ReGpu` (or `scripts\build-regpu.ps1` after a normal build).
+  Needs Git and Python 3 on top of the usual tools.
+- **Use it:** F1 > Graphics > Renderer > ReGPU, then restart. Switching back works the same way.
+- **What differs:** resolution scale draws at 1280x720 times the scale (2x is 2560x1440), the frame
+  rate isn't locked at 3x, and the FSR, CAS and FXAA options belong to the standard renderer.
+- **Known issues:** a stretched strip at the right edge in some races.
+
 <a id="roadmap"></a>
 
 ## 🗺️ Roadmap
@@ -323,6 +339,8 @@ in `tools/rexglue-src`.
 - [XenonRecomp](https://github.com/hedge-dev/XenonRecomp) (hedge-dev): the codegen approach ReXGlue builds on
 - [xenia-canary game patches](https://github.com/xenia-canary/game-patches) (Margen67): the SSX 60 fps and render size findings
 - AMD FidelityFX (FSR / CAS)
+- [ReGPU](https://github.com/zer0ducksgiven/ReGPU) and [Glue2GPU](https://github.com/zer0ducksgiven/Glue2GPU)
+  (MIT): the experimental renderer on the `regpu` branch
 
 ---
 

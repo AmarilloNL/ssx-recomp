@@ -9,7 +9,9 @@
 # -TitleUpdate: the game's last title update (v0.0.3.2) from your own console, an Xbox 360
 #   package file. Once added, later builds keep using it; -NoTitleUpdate goes back to the disc version.
 # -NoPause: don't wait for Enter at the end (when driven by the installer).
-param([string]$Iso, [string]$TitleUpdate, [switch]$NoTitleUpdate, [switch]$NoPause)
+# -ReGpu: also build the experimental ReGPU renderer (scripts\build-regpu.ps1; needs Git and Python 3).
+#   F1 > Graphics > Renderer switches to it.
+param([string]$Iso, [string]$TitleUpdate, [switch]$NoTitleUpdate, [switch]$NoPause, [switch]$ReGpu)
 
 $ErrorActionPreference = 'Continue'
 $root = (Resolve-Path "$PSScriptRoot\..").Path
@@ -383,6 +385,10 @@ if (Test-Path "$root\tools\rexglue-src\.ssx-ready") {
 Step "Recompiling SSX and building the PC version (this takes a while)"
 & "$root\scripts\package.ps1" -Preset ssx-player -Clang $clang
 if (-not (Test-Path "$root\dist\SSX\ssx.exe")) { Fail "The build failed." }
+if ($ReGpu) {
+    Step "Building the ReGPU renderer (experimental)"
+    try { & "$root\scripts\build-regpu.ps1" -Dist "$root\dist\SSX" } catch { Fail "Building ReGPU failed: $_" }
+}
 
 # Point the game at the ISO so the first start needs no questions.
 $toml = "$root\dist\SSX\ssx.toml"

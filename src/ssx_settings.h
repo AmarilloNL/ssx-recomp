@@ -12,6 +12,8 @@ REXCVAR_DECLARE(int32_t, ssx_volume);
 // Frame rate the game should run at: ssx_framerate (0 = the main display's refresh rate), or
 // at 3x resolution scale ssx_framerate_3x.
 int32_t SsxTargetFps();
+// The ReGPU renderer plugin is in use (rather than ReXGlue's own).
+bool SsxUsingReGpu();
 
 // Adaptive frame pacing above 60 fps when the GPU can't keep up; call once per
 // presented frame (VdSwap).
