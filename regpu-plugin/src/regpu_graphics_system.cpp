@@ -41,12 +41,6 @@ REXCVAR_DEFINE_INT32(resolution_scale, 1, "GPU",
 REXCVAR_DEFINE_INT32(anisotropic_override, 3, "GPU",
                      "Texture filtering: -1 the game's, 0 off, 1-5 1x-16x anisotropic")
     .range(-1, 5);
-// Snow trails: the trail volume is fed from its slice resolves and its 3.2 MB tile table is checked
-// densely. Off until the trail tiles match the snow around them (in strong sun they showed as a
-// square following the rider).
-REXCVAR_DEFINE_BOOL(regpu_snow_trails, false, "GPU", "ReGPU: snow trails (experimental) (restart)")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-
 namespace glue2gpu
 {
 namespace
@@ -338,12 +332,8 @@ X_STATUS ReGpuGraphicsSystem::SetupGuestGpu(rex::runtime::FunctionDispatcher* di
     // backdrop and a full-screen pass): sampled, as on the console (the standard renderer's
     // gpu_allow_invalid_fetch_constants, src/ssx_app.h).
     SetDefaultSwitch("REGPU_INVALID_FETCH_AS_TEXTURE");
-    // (Only the font atlas with the trails off: regpu_snow_trails.)
-    const bool trails = REXCVAR_GET(regpu_snow_trails);
     if (!std::getenv("REGPU_DENSE_HASH_KB"))
-        _putenv_s("REGPU_DENSE_HASH_KB", trails ? "4096" : "1024");
-    if (!trails && !std::getenv("REGPU_NO_RESOLVE_TO_3D"))
-        _putenv_s("REGPU_NO_RESOLVE_TO_3D", "1");
+        _putenv_s("REGPU_DENSE_HASH_KB", "4096");
 
     regpu::Start();
     started_ = true;
