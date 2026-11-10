@@ -1,0 +1,185 @@
+diff --git a/src/gpu/renderer.cpp b/src/gpu/renderer.cpp
+index a5f1ab4..1c67bdd 100644
+--- a/src/gpu/renderer.cpp
++++ b/src/gpu/renderer.cpp
+@@ -386,8 +386,19 @@ struct CachedTexture
+     uint32_t width = 0, height = 0;
+     DXGI_FORMAT format = DXGI_FORMAT_R8G8B8A8_UNORM; // cubes: matches their faces
+     bool native = false; // block-compressed on the GPU: the shader applies the fetch swizzle
++    // 3D textures: guest address, depth and the first of their per-slice render-target views
++    // (g_volumeRtvs), which resolves into their slices draw through (ResolveIntoVolumes).
++    uint32_t address = 0, depth = 0, rtvFirst = ~0u;
+ };
+ 
++// Render-target views of 3D texture slices, created with their volume and never rewritten.
++struct VolumeRtvs
++{
++    static constexpr UINT kCount = 4096;
++    ComPtr<ID3D12DescriptorHeap> heap;
++    UINT stride = 0, next = 0;
++} g_volumeRtvs;
++
+ // A resolve destination backed by a host texture: fetches of this guest
+ // address read the copy of the render target instead of guest memory.
+ struct ResolvedTexture
+@@ -4579,6 +4590,19 @@ ID3D12PipelineState* GetPipeline(const CompiledShader& vs, const CompiledShader&
+ // Cube textures: six faces, each a padded 2D slice. Faces the title rendered
+ // and resolved (dynamic reflections) are copied from their host textures every
+ // frame; static faces are decoded once and re-decoded when their data changes.
++// 3D textures decoded from memory and slices drawn into them, logged every 600 frames when either happened.
++std::atomic<uint32_t> g_volumeDecodes{ 0 }, g_volumeSlices{ 0 };
++void LogVolumeActivity()
++{
++    static uint64_t next = 600;
++    if (g_r.frame < next)
++        return;
++    next = g_r.frame + 600;
++    const uint32_t decodes = g_volumeDecodes.exchange(0), slices = g_volumeSlices.exchange(0);
++    if (decodes || slices)
++        Log("3D textures: %u decoded from memory, %u slices resolved into them (600 frames)", decodes, slices);
++}
++
+ // A 3D texture, decoded on the CPU (DecodeTexture3D) and uploaded as RGBA8 when its contents change.
+ ID3D12Resource* GetVolumeTexture(const TextureFetch& fetch, DXGI_FORMAT& format)
+ {
+@@ -4614,6 +4638,7 @@ ID3D12Resource* GetVolumeTexture(const TextureFetch& fetch, DXGI_FORMAT& format)
+         td.MipLevels = 1;
+         td.SampleDesc.Count = 1;
+         td.Format = format;
++        td.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET; // (resolves into its slices)
+         if (cached.resource)
+             Frame().garbage.push_back(std::move(cached.resource));
+         Check(g_r.device->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &td,
+@@ -4623,10 +4648,36 @@ ID3D12Resource* GetVolumeTexture(const TextureFetch& fetch, DXGI_FORMAT& format)
+         cached.width = w;
+         cached.height = h;
+         cached.format = format;
++        cached.address = fetch.Address();
++        cached.depth = d;
++        cached.rtvFirst = ~0u;
++        if (!g_volumeRtvs.heap)
++        {
++            D3D12_DESCRIPTOR_HEAP_DESC hd{ D3D12_DESCRIPTOR_HEAP_TYPE_RTV, VolumeRtvs::kCount, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, 0 };
++            Check(g_r.device->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&g_volumeRtvs.heap)), "CreateDescriptorHeap(3D slices)");
++            g_volumeRtvs.stride = g_r.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
++        }
++        // ponytail: views are never freed; a title recreating many volumes runs out and its later
++        // ones keep the memory path only.
++        if (g_volumeRtvs.next + d <= VolumeRtvs::kCount)
++        {
++            cached.rtvFirst = g_volumeRtvs.next;
++            g_volumeRtvs.next += d;
++            for (uint32_t z = 0; z < d; z++)
++            {
++                D3D12_RENDER_TARGET_VIEW_DESC rd{};
++                rd.Format = format;
++                rd.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE3D;
++                rd.Texture3D = { 0, z, 1 };
++                g_r.device->CreateRenderTargetView(cached.resource.Get(), &rd, Cpu(g_volumeRtvs.heap.Get(), cached.rtvFirst + z, g_volumeRtvs.stride));
++            }
++        }
+     }
+     std::vector<uint8_t> rgba;
+     if (!DecodeTexture3D(fetch, rgba))
+         return nullptr;
++    g_volumeDecodes++;
++    LogVolumeActivity();
+     const UINT rowPitch = (w * 4 + 255) & ~255u;
+     const UINT64 offset = RingAlloc(UINT64(rowPitch) * h * d, 512);
+     if (offset == ~0ull)
+@@ -6156,6 +6207,74 @@ void BlitResolve(bool depth, uint32_t base, uint32_t width, uint32_t height, DXG
+     g_drawState.Invalidate();
+ }
+ 
++// A resolve into a 3D texture (RB_COPY_DEST_INFO bit 3, the slice in bits 4-6 of an 8-slice group at the
++// destination base): the console writes the slice into the volume's memory, which the title then samples
++// as a 3D texture. Volumes are decoded from guest memory here, so the resolved image is drawn into the slice
++// of every cached volume at that address instead (averaged down to the volume's size). SSX's snow trails: a
++// simulation resolves into slices of a 128x128x256 trail volume every frame, and without this the snow
++// showed no tracks. REGPU_NO_RESOLVE_TO_3D=1: off.
++void ResolveIntoVolumes(uint32_t destBase, uint32_t slice, uint32_t srcBase, bool swapRB)
++{
++    static LiveSwitch off("REGPU_NO_RESOLVE_TO_3D");
++    if (off)
++        return;
++    const auto found = g_r.resolved.find(srcBase);
++    if (found == g_r.resolved.end() || !found->second.resource)
++        return;
++    ResolvedTexture& src = found->second;
++    std::lock_guard<std::recursive_mutex> lock{ g_textureMutex };
++    for (auto& [key, v] : g_r.volumes)
++    {
++        // ponytail: 32-bit texels only (RGBA8 volumes); others keep the memory path.
++        if (!v.resource || v.rtvFirst == ~0u || v.format != DXGI_FORMAT_R8G8B8A8_UNORM || destBase < v.address)
++            continue;
++        const uint32_t groupBytes = v.width * v.height * 4 * 8, offset = destBase - v.address;
++        const uint32_t z = offset / groupBytes * 8 + slice;
++        if (offset % groupBytes || z >= v.depth)
++            continue;
++        FrameResources& f = Frame();
++        if (f.descriptorsUsed >= kDescriptorsPerFrame)
++            return;
++        const UINT slot = f.descriptorBase + f.descriptorsUsed++;
++        D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
++        srv.Format = src.resource->GetDesc().Format;
++        srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
++        srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
++        srv.Texture2D.MipLevels = 1;
++        g_r.device->CreateShaderResourceView(src.resource.Get(), &srv, Cpu(g_r.srvHeap.Get(), slot, g_r.srvStride));
++        D3D12_RESOURCE_BARRIER b{};
++        b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
++        b.Transition.pResource = v.resource.Get();
++        b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
++        b.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
++        b.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
++        C().list->ResourceBarrier(1, &b);
++        const D3D12_CPU_DESCRIPTOR_HANDLE rtv = Cpu(g_volumeRtvs.heap.Get(), v.rtvFirst + z, g_volumeRtvs.stride);
++        C().list->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
++        C().list->SetGraphicsRootSignature(g_r.blitRootSignature.Get());
++        C().list->SetPipelineState(g_r.colorBlit8.Get());
++        C().list->SetGraphicsRootDescriptorTable(0, Gpu(g_r.srvHeap.Get(), slot, g_r.srvStride));
++        const uint32_t blockX = std::max(1u, src.hostWidth / v.width), blockY = std::max(1u, src.hostHeight / v.height);
++        // Stored as the copy holds it: a volume is decoded with its fetch's swizzle applied, which undoes the
++        // copy's red/blue swap (SSX's trail normals came out sideways, dark, when stored swapped).
++        static LiveSwitch swapped("REGPU_RESOLVE_TO_3D_SWAPPED"); // A/B: stored swapped, as in memory
++        const uint32_t constants[8] = { std::bit_cast<uint32_t>(1.0f), uint32_t(swapRB && swapped), 0, 0, 0, 0, blockX, blockY };
++        C().list->SetGraphicsRoot32BitConstants(1, 8, constants, 0);
++        const D3D12_VIEWPORT vp{ 0, 0, float(v.width), float(v.height), 0, 1 };
++        const D3D12_RECT sc{ 0, 0, LONG(v.width), LONG(v.height) };
++        C().list->RSSetViewports(1, &vp);
++        C().list->RSSetScissorRects(1, &sc);
++        C().list->DrawInstanced(3, 1, 0, 0);
++        g_volumeSlices++;
++        LogVolumeActivity();
++        std::swap(b.Transition.StateBefore, b.Transition.StateAfter);
++        C().list->ResourceBarrier(1, &b);
++        C().list->OMSetRenderTargets(1, &C().rtv, FALSE, &C().dsv);
++        C().list->SetGraphicsRootSignature(g_r.rootSignature.Get());
++        g_drawState.Invalidate();
++    }
++}
++
+ // EDRAM resolve: copy a rectangle of the render target to the destination
+ // (as a host texture), then optionally clear colour and depth.
+ // ---- Upscaling ---------------------------------------------------------------------------
+@@ -7014,6 +7133,9 @@ void Resolve()
+         g_r.resolved[base].swapped = swapRB;
+         g_r.resolved[base].guestFormat = depth ? 0u : destFormat;
+         g_r.resolved[base].plain8888 = !depth && destFormat == 6 && ((gpureg::Get(RB_COLOR_INFO) >> 16) & 0xF) == 0;
++        const bool toVolume = !depth && ((info >> 3) & 1) && format == DXGI_FORMAT_R8G8B8A8_UNORM;
++        if (toVolume)
++            ResolveIntoVolumes(gpureg::Get(RB_COPY_DEST_BASE) & 0x1FFFFFFF, (info >> 4) & 7, base, swapRB);
+         // Images the game reads on the CPU are also written to memory (regpu.h Host::resolveWriteback;
+         // without it, REGPU_RESOLVE_WRITEBACK's "WxH,WxH" sizes of 8888 colour, at once).
+         regpu::Writeback request;
+@@ -7047,6 +7169,10 @@ void Resolve()
+         static const uint64_t writebackMax = getenv("REGPU_RESOLVE_WRITEBACK_MAX") ? strtoull(getenv("REGPU_RESOLVE_WRITEBACK_MAX"), nullptr, 10) : 0;
+         if (request.mode == regpu::Writeback::Mode::None && uint64_t(width) * height <= writebackMax)
+             request.mode = regpu::Writeback::Mode::Deferred;
++        // (Written as a 2D image it would land in the wrong place of the volume's tiled memory, and a
++        // changed volume is decoded again from memory over the slices drawn into it.)
++        if (toVolume && !getenv("REGPU_NO_RESOLVE_TO_3D"))
++            request.mode = regpu::Writeback::Mode::None;
+         // Any destination format the copy can write (from the FM4 port; 8888 only before).
+         const bool anyFormat = destFormat == 6 || !g_writeback8888Only;
+         if (request.mode == regpu::Writeback::Mode::Now && !depth && anyFormat)
