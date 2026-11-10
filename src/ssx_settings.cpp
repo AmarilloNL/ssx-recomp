@@ -2,8 +2,10 @@
 //
 // All settings are cvars, so they load from / save to ssx.toml next to the exe
 // and show up in the SDK's F4 overlay as well as the SSX settings menu.
+// Guest addresses in comments are the disc release's; ssx_guest.h has the title update's too.
 
 #include "ssx_settings.h"
+#include "ssx_guest.h"
 
 #include <algorithm>
 #include <atomic>
@@ -167,16 +169,16 @@ void SsxPresentInterval(PPCRegister& r11) {
 // Main-loop period from the adaptive pacing below (SsxPaceFrameEnd), 0 until set.
 static std::atomic<int64_t> pace_period_ns{0};
 
-REX_EXTERN(__imp__sub_83047248);
-REX_HOOK_RAW(sub_83047248) {
+REX_EXTERN(SSX_FN_TASK_TICK_IMP);
+REX_HOOK_RAW(SSX_FN_TASK_TICK) {
   uint32_t task = ctx.r3.u32;
   int32_t fps = SsxTargetFps();
-  if (fps > 30 && REX_LOAD_U32(task) == 0x82007738) {
+  if (fps > 30 && REX_LOAD_U32(task) == SSX_VTABLE_MAIN_LOOP_TASK) {
     int64_t period = pace_period_ns.load(std::memory_order_relaxed);
     REX_STORE_U64(task + 72, uint64_t(std::max<int64_t>(period, 1000000000 / fps)));
 
   }
-  __imp__sub_83047248(ctx, base);
+  SSX_FN_TASK_TICK_IMP(ctx, base);
 }
 
 // Adaptive pacing when the host GPU can't reach the target rate (e.g. 4x resolution scale):
@@ -202,17 +204,17 @@ static void AddGpuWait(std::chrono::steady_clock::time_point start) {
       std::memory_order_relaxed);
 }
 
-REX_EXTERN(__imp__sub_8233D770);
-REX_HOOK_RAW(sub_8233D770) {
+REX_EXTERN(SSX_FN_FRAME_THROTTLE_IMP);
+REX_HOOK_RAW(SSX_FN_FRAME_THROTTLE) {
   auto start = std::chrono::steady_clock::now();
-  __imp__sub_8233D770(ctx, base);
+  SSX_FN_FRAME_THROTTLE_IMP(ctx, base);
   AddGpuWait(start);
 }
 
-REX_EXTERN(__imp__sub_8232C258);
-REX_HOOK_RAW(sub_8232C258) {
+REX_EXTERN(SSX_FN_FENCE_BLOCK_IMP);
+REX_HOOK_RAW(SSX_FN_FENCE_BLOCK) {
   auto start = std::chrono::steady_clock::now();
-  __imp__sub_8232C258(ctx, base);
+  SSX_FN_FENCE_BLOCK_IMP(ctx, base);
   AddGpuWait(start);
 }
 
@@ -295,7 +297,7 @@ static uint64_t SchedulerClockNs() {
                       std::chrono::steady_clock::now().time_since_epoch())
                       .count());
 }
-REX_HOOK(sub_83047368, SchedulerClockNs)
+REX_HOOK(SSX_FN_SCHEDULER_CLOCK, SchedulerClockNs)
 
 // sub_82FB6120(r4 = quality mode 1-8, r5/r6 = fallback size, r7/r8 = out width/height).
 // Gameplay uses mode 4, 1120x584. The renderer places its targets at fixed EDRAM
@@ -304,8 +306,8 @@ REX_HOOK(sub_83047368, SchedulerClockNs)
 // pixels each) for it. 1280x720 needs 16 x 45 = 720 there: rows 608-719 wrap onto
 // the top of the lighting buffer, giving hard-edged light/shadow rectangles on
 // the snow. 1200x640 needs 15 x 40 = 600 and fits every pass in the layout.
-REX_EXTERN(__imp__sub_82FB6120);
-REX_HOOK_RAW(sub_82FB6120) {
+REX_EXTERN(SSX_FN_RENDER_SIZE_IMP);
+REX_HOOK_RAW(SSX_FN_RENDER_SIZE) {
   static std::set<uint32_t> seen;
   uint32_t mode = ctx.r4.u32;
   if (seen.insert(mode).second) {
@@ -317,5 +319,5 @@ REX_HOOK_RAW(sub_82FB6120) {
     REX_STORE_U32(ctx.r8.u32, 640);
     return;
   }
-  __imp__sub_82FB6120(ctx, base);
+  SSX_FN_RENDER_SIZE_IMP(ctx, base);
 }

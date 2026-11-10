@@ -8,4 +8,4 @@ game_root = "game-dump/files"
 [entrypoint]
 file_path = "game-dump/files/default.xex"
 out_directory_path = "generated/default"
-includes = ["ssx_config.toml"]
+includes = ["ssx_config.toml", "game-dump/ssx_version.toml"]

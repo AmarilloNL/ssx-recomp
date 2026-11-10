@@ -58,4 +58,11 @@ Remove-Item "$dist\*" -Include *.exe, *.dll, README.txt -ErrorAction SilentlyCon
 Copy-Item "$build\*" $dist -Include ssx.exe, *.dll
 Copy-Item "$root\README-player.txt" "$dist\README.txt"
 Copy-Item "$root\installer\ssx.ico" $dist  # used by the installer's desktop shortcut
+# Built for the title update (CMakeLists.txt): the game loads its default.xexp and patch0.big
+# from update\ next to the exe (put in game-dump\update by build-ssx.ps1).
+Remove-Item "$dist\update" -Recurse -Force -ErrorAction SilentlyContinue
+if (Test-Path "$root\game-dump\files\default.xexp") {
+    New-Item -ItemType Directory "$dist\update" -Force | Out-Null
+    Copy-Item "$root\game-dump\update\default.xexp", "$root\game-dump\update\patch0.big" "$dist\update"
+}
 Get-ChildItem $dist | Select-Object Name, @{n = 'MB'; e = { [math]::Round($_.Length / 1MB, 1) } }

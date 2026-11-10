@@ -10,7 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge)](LICENSE)
 <a href="https://playported.com/ports/1191-ssx/"><img src="https://playported.com/badge.svg" alt="Listed on PlayPorted" height="28"></a>
 
-[**⬇️ Download**](../../releases/latest) · [🎬 Gameplay](#gameplay) · [✨ Features](#features) · [🛠️ Install](#installing) · [🎮 Controls](#playing) · [📦 DLC](#adding-dlc) · [🗺️ Roadmap](#roadmap)
+[**⬇️ Download**](../../releases/latest) · [🎬 Gameplay](#gameplay) · [✨ Features](#features) · [🛠️ Install](#installing) · [🎮 Controls](#playing) · [📦 DLC & update](#adding-dlc) · [🗺️ Roadmap](#roadmap)
 
 </div>
 
@@ -53,6 +53,7 @@ code runs natively, and its Xbox 360 graphics are translated to Direct3D 12.
 | 🪪 **Your name & picture** | instead of "User" and an empty square (settings → **Profile**) |
 | 💿 **Runs from your ISO** | saves stay in `Documents\ssx` |
 | 📦 **DLC support** | Mt. Eddie, Japan and the other packs, from your own console ([how](#adding-dlc)) |
+| 📈 **Title update** | the game's last update: riders up to level 15 and the gear for it, from your own console ([how](#title-update)) |
 
 <a id="installing"></a>
 
@@ -62,8 +63,9 @@ code runs natively, and its Xbox 360 graphics are translated to Direct3D 12.
 2. ⬇️ Download **`SSX-Installer.exe`** from the [latest release](../../releases/latest).
 3. ▶️ Run it. SmartScreen may warn because the installer isn't code-signed: click
    **More info → Run anyway**. Its source is [`installer/SSXInstaller.cs`](installer/SSXInstaller.cs).
-4. ✅ Click **Next**, select your ISO, optionally click **Add DLC...** for DLC from your own
-   console ([which packs](#adding-dlc)), tick the ownership box, and click **Install**.
+4. ✅ Click **Next**, select your ISO, optionally click **Add files...** for DLC and the title
+   update from your own console ([which files](#adding-dlc)), tick the ownership box, and click
+   **Install**.
 5. 🏂 When it says **DONE**, click **Play SSX** or use the desktop shortcut.
 
 > [!NOTE]
@@ -100,9 +102,10 @@ issue.
 | Game | SSX (USA), Xbox 360 |
 | Title ID / Media ID | `4541096D` / `55ABAB6C` |
 | `default.xex` SHA-256 | `F509845401D65A6791C5D28A3E9636A6558DA204F3851028B0B369A44A4B68EA` |
+| Title update (optional) | version 0.0.3.2, see [the title update](#title-update) |
 
 Other regions or versions aren't supported yet, because the recompilation settings are tied to
-this exact executable. Some ISOs named "World" contain this same release; the installer checks
+these exact executables. Some ISOs named "World" contain this same release; the installer checks
 the file for you.
 
 </details>
@@ -168,10 +171,11 @@ the file for you.
 
 <a id="adding-dlc"></a>
 
-## 📦 Adding DLC
+## 📦 Adding DLC and the title update
 
-The base game works without DLC. Like the game itself, **DLC is not included**: you need the
-packages from your own Xbox 360, bought on your own Xbox Live account.
+The base game works without DLC and without the title update. Like the game itself, **neither is
+included**: you need the files from your own Xbox 360, bought or downloaded on your own Xbox Live
+account.
 
 | Package | Size | Contents |
 |---|---|---|
@@ -185,7 +189,7 @@ All five work. Japan Range, Eddie Pack and Mac Board Pack are the original pre-o
 with Mount Eddie and the Presell Pack installed, Japan, Eddie and Mac's Ultimate Board are
 already there, so they add nothing new (installing them anyway does no harm).
 
-**Quick version:** in the installer, click **Add DLC...** on the *Your game* page and select the
+**Quick version:** in the installer, click **Add files...** on the *Your game* page and select the
 package files; they're copied to `Documents\ssx\dlc`. Or copy them there yourself. The game
 installs them the next time it starts.
 
@@ -208,7 +212,7 @@ storage uses its own file system, so use an Xbox 360 file tool (for example *FAT
 folder. Copy the package files themselves, not the folder.
 
 **Installing them.** The easiest way is the installer: run `SSX-Installer.exe`, click
-**Add DLC...** on the *Your game* page and select the package files. It shows each package's name
+**Add files...** on the *Your game* page and select the package files. It shows each package's name
 (or why a file isn't an SSX DLC package) and copies them when you click **Install**. By hand:
 
 1. Close the game.
@@ -228,6 +232,33 @@ check that you copied the long-named package file, not a folder or an archive.
 
 </details>
 
+<a id="title-update"></a>
+
+### 📈 The title update
+
+SSX's last title update (version 0.0.3.2) lets riders reach **level 15** (the disc stops at 10)
+and adds the gear for levels 11 to 15 to the store. With it, the game is built from the updated
+version of its own code, so everything in this port (frame rates, resolution scale, DLC, your name
+and picture) works the same.
+
+| File | Size | |
+|---|---|---|
+| `tu00000002_00000000` | ~9 MB | version 0.0.3.2: **use this one** |
+| `TU_12K22BD_…` | ~1 MB | version 0.0.1.2: older, already contained in 0.0.3.2 |
+
+**Getting it off your console:** like the DLC, with an Xbox 360 file tool. Installed title updates
+are in `Content\0000000000000000\4541096D\000B0000\` on the console's storage.
+
+**Adding it:** in the installer, click **Add files...** on the *Your game* page and select the title
+update file, then click **Install**. To add DLC too, click **Add files...** again for the files in
+the other folder: the picks add up. The installer checks that it's the supported update. Running the installer again later keeps it; you only add it once.
+
+- **Saves:** they work with both versions. The update loads saves from the disc version, and the
+  disc version also loads saves the update wrote.
+- **Going back to the disc version:** run the builder with `-NoTitleUpdate`:
+  `powershell -ExecutionPolicy Bypass -File "%USERPROFILE%\SSX-PC\source\scripts\build-ssx.ps1" -NoTitleUpdate`
+  (or your own install folder instead of `%USERPROFILE%\SSX-PC`). It asks for your ISO again.
+
 <a id="roadmap"></a>
 
 ## 🗺️ Roadmap
@@ -238,8 +269,6 @@ The game is playable and is being tested by playing through the whole World Tour
 - 🏔️ **Playing through every region** to find and fix bugs, especially the Deadly Descent
   mechanics (cold, darkness, oxygen and so on), which depend on details of the original hardware.
 - 💻 **Installer reliability** on more PCs, based on the reports in the issues.
-- 📈 **Title update support** (next): the game's last update from your own console, which among
-  other things adds gear up to level 15.
 
 **✅ Fixed so far**
 - ✅ Antarctica's thermal protection (the rider froze in the sun)
@@ -256,12 +285,13 @@ The game is playable and is being tested by playing through the whole World Tour
 - ✅ Washed-out, overexposed image at 2× and 3× (worst at 3×, for example on the Alaska map and
   in bright races): the game's automatic exposure measured the screen's brightness wrong when
   scaled
-- ✅ All five DLC packs work, and the installer can add them for you (**Add DLC...**)
+- ✅ All five DLC packs work, and the installer can add them for you (**Add files...**)
+- ✅ The title update (0.0.3.2) from your own console: riders up to level 15 and the gear for it
 
 **👀 Known issues**
 - A peak label on the world map was once seen drawn as a solid box (Africa). Not reproduced
   yet; screenshots are welcome.
-- Only SSX (USA) is supported, and title updates can't be used yet (planned, see above).
+- Only SSX (USA) is supported, with or without its last title update (0.0.3.2).
 - Render sizes above 1200×640 aren't available: they break the game's own render buffers. Use the
   resolution scale instead.
 - Online features (RiderNet, global events) don't work, because EA's servers are gone.

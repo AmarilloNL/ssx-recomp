@@ -500,6 +500,9 @@ class InstallerForm : Form {
   // DLC packages from the player's own console, copied to Documents\ssx\dlc when the install
   // starts; the game installs them from there on its next start.
   readonly List<string> dlcFiles = new List<string>();
+  // The game's title update package, if picked: build-ssx.ps1 builds the game from it (and keeps
+  // doing so on later updates).
+  string titleUpdateFile;
   Label dlcHint;
 
   Label installTitle, installStatus, percentLabel, elapsedLabel;
@@ -524,7 +527,7 @@ class InstallerForm : Form {
   public InstallerForm() {
     Text = "SSX PC Port Setup";
     AutoScaleMode = AutoScaleMode.None;
-    ClientSize = new Size(Th.D(900), Th.D(640));
+    ClientSize = new Size(Th.D(900), Th.D(660));
     FormBorderStyle = FormBorderStyle.FixedSingle;
     MaximizeBox = false;
     StartPosition = FormStartPosition.CenterScreen;
@@ -600,18 +603,27 @@ class InstallerForm : Form {
     folderField.Box.Text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "SSX-PC");
 
     int dlcY = Th.D(292), addW = Th.D(112);
-    p.Controls.Add(Th.Label("DLC from your own console (optional)", Th.Semi(10f), Th.Text, x, dlcY + Th.D(8),
-                            w - addW - Th.D(10), Th.D(24)));
-    var addDlc = new FlatButton("Add DLC...", false) { Bounds = new Rectangle(x + w - addW, dlcY, addW, Th.D(36)) };
+    string caption = "DLC and title update (optional)";
+    var captionFont = Th.Semi(10f);
+    int captionW = TextRenderer.MeasureText(caption, captionFont).Width;
+    p.Controls.Add(Th.Label(caption, captionFont, Th.Text, x, dlcY + Th.D(8), captionW, Th.D(24)));
+    var where = new LinkLabel { Text = "Where do I find these?", Font = Th.F(9.5f, FontStyle.Regular), BackColor = Th.Bg,
+                                LinkColor = Th.Accent, ActiveLinkColor = Th.Accent, AutoSize = true,
+                                Location = new Point(x + captionW + Th.D(8), dlcY + Th.D(9)) };
+    where.LinkClicked += delegate { Process.Start(RepoUrl + "#adding-dlc"); };
+    p.Controls.Add(where);
+    var addDlc = new FlatButton("Add files...", false) { Bounds = new Rectangle(x + w - addW, dlcY, addW, Th.D(36)) };
     addDlc.Click += BrowseDlc;
     p.Controls.Add(addDlc);
-    // Two lines: five package names don't fit on one.
-    dlcHint = Th.Label("", Th.F(9.5f, FontStyle.Regular), Th.Faint, x + Th.D(2), dlcY + Th.D(40), w, Th.D(40));
+    // Three lines: the help text, or up to six package names and what happens with them.
+    dlcHint = Th.Label("", Th.F(9.5f, FontStyle.Regular), Th.Faint, x + Th.D(2), dlcY + Th.D(40), w, Th.D(60));
     dlcHint.AutoEllipsis = true;
     p.Controls.Add(dlcHint);
-    SetHint(dlcHint, "Mt. Eddie, the Presell Pack and the other packs, copied off your Xbox 360.", Th.Faint);
+    SetHint(dlcHint, "Copied off your own Xbox 360 with a tool like FATXplorer or Velocity. In " +
+                     "Content\\0000000000000000\\4541096D, the DLC (long-named files) is in 00000002 and the title " +
+                     "update (tu00000002_00000000) in 000B0000. Add them once: later updates keep them.", Th.Faint);
 
-    ownCheck.Bounds = new Rectangle(x, Th.D(380), w, Th.D(40));
+    ownCheck.Bounds = new Rectangle(x, Th.D(400), w, Th.D(40));
     ownCheck.CheckedChanged += delegate { UpdateFooter(); };
     p.Controls.Add(ownCheck);
     UpdateHints();
@@ -803,33 +815,57 @@ class InstallerForm : Form {
   }
 
   void BrowseDlc(object sender, EventArgs e) {
-    using (var dialog = new OpenFileDialog { Title = "Select SSX DLC packages from your own Xbox 360",
+    using (var dialog = new OpenFileDialog { Title = "Select SSX DLC and title update packages from your own Xbox 360",
                                              Filter = "Xbox 360 content packages (*.*)|*.*", Multiselect = true }) {
       if (dialog.ShowDialog(this) != DialogResult.OK) return;
-      dlcFiles.Clear();
-      var names = new List<string>();
-      string rejected = null;
+      // Picks add up: on the console the DLC and the title update are in different folders.
+      var files = new List<string>(dlcFiles);
+      if (titleUpdateFile != null) files.Add(titleUpdateFile);
       foreach (string file in dialog.FileNames) {
-        string problem, name = ReadDlcName(file, out problem);
-        if (name != null) {
+        if (!files.Exists(f => string.Equals(Path.GetFileName(f), Path.GetFileName(file),
+                                             StringComparison.OrdinalIgnoreCase))) files.Add(file);
+      }
+      dlcFiles.Clear();
+      titleUpdateFile = null;
+      var names = new List<string>();
+      string rejected = null, olderUpdate = null;
+      foreach (string file in files) {
+        bool isUpdate;
+        string problem, name = ReadPackageName(file, out isUpdate, out problem);
+        if (name == null) {
+          if (rejected == null) rejected = Path.GetFileName(file) + " is " + problem;
+        } else if (isUpdate) {
+          // ponytail: SSX has two title updates and only their size tells them apart here (0.0.3.2
+          // ~9 MB, 0.0.1.2 ~1 MB, contained in 0.0.3.2); the builder checks the files' SHA-256.
+          if (new FileInfo(file).Length > 4 << 20) titleUpdateFile = file;
+          else olderUpdate = file;
+        } else {
           dlcFiles.Add(file);
           names.Add(name.Replace("SSX™ ", ""));
-        } else if (rejected == null) {
-          rejected = Path.GetFileName(file) + " is " + problem;
         }
       }
+      if (titleUpdateFile != null) names.Insert(0, "Title update");
+      else if (olderUpdate != null && rejected == null) {
+        rejected = Path.GetFileName(olderUpdate) + " is an older title update: add tu00000002_00000000 (about 9 MB)";
+      }
       if (rejected != null) {
-        SetHint(dlcHint, (names.Count > 0 ? names.Count + " added. Skipped: " : "Skipped: ") + rejected + ".", Th.Warn);
+        SetHint(dlcHint, (names.Count > 0 ? string.Join(", ", names.ToArray()) + " added. Skipped: " : "Skipped: ") +
+                         rejected + ".", Th.Warn);
       } else {
-        SetHint(dlcHint, string.Join(", ", names.ToArray()) + ": copied to Documents\\ssx\\dlc when you install.",
+        SetHint(dlcHint, string.Join(", ", names.ToArray()) +
+                         (titleUpdateFile != null ? ": the game is built with the title update" +
+                                                    (dlcFiles.Count > 0 ? ", the DLC goes to Documents\\ssx\\dlc." : ".")
+                                                  : ": copied to Documents\\ssx\\dlc when you install.") +
+                         " Files in another folder? Click Add files... again.",
                 Th.Good);
       }
     }
   }
 
-  // The name of an SSX DLC package (an Xbox 360 STFS package for title 4541096D with
-  // marketplace content), or null and the reason it isn't one.
-  static string ReadDlcName(string path, out string problem) {
+  // The name of an SSX DLC or title update package (an Xbox 360 STFS package for title 4541096D
+  // with marketplace or title update content), or null and the reason it isn't one.
+  static string ReadPackageName(string path, out bool isUpdate, out string problem) {
+    isUpdate = false;
     problem = "not an Xbox 360 content package";
     var h = new byte[0x491];  // up to the end of the first display name
     try {
@@ -846,8 +882,8 @@ class InstallerForm : Form {
     if (magic != "LIVE" && magic != "PIRS" && magic != "CON ") return null;
     uint type = BE32(h, 0x344), title = BE32(h, 0x360);
     if (title != 0x4541096D) { problem = "not for SSX"; return null; }
-    if (type == 0x000B0000) { problem = "a title update (not supported yet)"; return null; }
-    if (type != 0x00000002) { problem = "not DLC"; return null; }
+    isUpdate = type == 0x000B0000;
+    if (type != 0x00000002 && !isUpdate) { problem = "not DLC or a title update"; return null; }
     string name = Encoding.BigEndianUnicode.GetString(h, 0x411, 0x80).Split('\0')[0].Trim();
     return name.Length > 0 ? name : Path.GetFileName(path);
   }
@@ -865,6 +901,7 @@ class InstallerForm : Form {
   void StartBuild() {
     string iso = isoField.Box.Text.Trim(), folder = folderField.Box.Text.Trim();
     string[] dlc = dlcFiles.ToArray();
+    string titleUpdate = titleUpdateFile;
     lock (sync) { stage = 0; stageFrac = 0; pendingLog.Length = 0; }
     running = true;
     failed = cancelled = false;
@@ -878,7 +915,7 @@ class InstallerForm : Form {
     clock = Stopwatch.StartNew();
     ShowPage(2);
     timer.Start();
-    var worker = new Thread(delegate() { CopyDlc(dlc); RunBuild(iso, folder); });
+    var worker = new Thread(delegate() { CopyDlc(dlc); RunBuild(iso, folder, titleUpdate); });
     worker.IsBackground = true;
     worker.Start();
   }
@@ -903,7 +940,7 @@ class InstallerForm : Form {
     }
   }
 
-  void RunBuild(string iso, string folder) {
+  void RunBuild(string iso, string folder, string titleUpdate) {
     try {
       string source = Path.Combine(folder, "source");
       OnLine("==> Downloading the SSX PC port source (no game files)");
@@ -916,7 +953,8 @@ class InstallerForm : Form {
 
       var info = new ProcessStartInfo("powershell.exe",
           "-NoProfile -ExecutionPolicy Bypass -File \"" + Path.Combine(source, "scripts\\build-ssx.ps1") +
-          "\" -Iso \"" + iso + "\" -NoPause");
+          "\" -Iso \"" + iso + "\"" + (titleUpdate != null ? " -TitleUpdate \"" + titleUpdate + "\"" : "") +
+          " -NoPause");
       info.UseShellExecute = false;
       info.CreateNoWindow = true;
       info.RedirectStandardOutput = true;

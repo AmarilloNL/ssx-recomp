@@ -1,0 +1,23 @@
+diff --git a/src/system/user_module.cpp b/src/system/user_module.cpp
+index 171546f..e22e510 100644
+--- a/src/system/user_module.cpp
++++ b/src/system/user_module.cpp
+@@ -102,8 +102,16 @@ X_STATUS UserModule::LoadFromFile(const std::string_view path) {
+     return result;
+   }
+ 
+-  // Search for sibling XEX patch file
+-  auto patch_entry = kernel_state_->file_system()->ResolvePath(path_ + "p");
++  // Search for sibling XEX patch file, else for one on update: (a title update's
++  // default.xexp, mounted there with its data while the game runs from a disc image).
++  auto* vfs = kernel_state_->file_system();
++  auto patch_entry = vfs->ResolvePath(path_ + "p");
++  std::string update_target;
++  if (!patch_entry && vfs->FindSymbolicLink("update:", update_target)) {
++    size_t slash = path_.find_last_of("\\/");
++    patch_entry = vfs->ResolvePath("update:\\" +
++                                   path_.substr(slash == std::string::npos ? 0 : slash + 1) + "p");
++  }
+   if (patch_entry) {
+     auto patch_path = patch_entry->absolute_path();
+ 

@@ -464,3 +464,23 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   supported yet), shows the packages' own names, and copies them to Documents\ssx\dlc (the same
   FOLDERID_Documents the game uses) when the install starts, skipping files already there with
   the same size. Window 40 px taller for the extra row.
+- 2026-11-10 (branch title-update): title update 0.0.3.2 (tu00000002_00000000, STFS content type
+  000B0000; contains default.xexp and patch0.big). The game is recompiled from the patched
+  executable: codegen and the runtime both load game:\default.xex and apply a default.xexp next
+  to it, and patch 0015 also looks for it on update: (where the update's data is mounted while
+  the game runs from the ISO). CMake picks the version from game-dump/files/default.xexp:
+  ssx_config.toml keeps the shared settings, ssx_config_v0.0.0.2.toml / ssx_config_v0.0.3.2.toml
+  the per-version function list and mid-asm hook, copied to game-dump/ssx_version.toml (included
+  by the manifest); SSX_TITLE_UPDATE selects the updated guest addresses of the hooked functions
+  (src/ssx_guest.h). Functions moved by the update were matched by their code; missing ones found
+  from an image dump (scripts/find_missing_funcs.py). build-ssx.ps1 -TitleUpdate reads the
+  package (PowerShell STFS reader), checks both files' SHA-256 (the older 0.0.1.2 update is
+  refused with a pointer to 0.0.3.2), and keeps it for later builds until -NoTitleUpdate;
+  package.ps1 puts the files in dist\SSX\update, which the game checks at start. Installer:
+  "Add files..." takes DLC and the title update. Verified: boot from the ISO with the update
+  applied, 144 fps, Whitehorn race at 2x, saves load both ways, level 15 riders and their gear in
+  the store (user, with a level 15 save). SDK package sdk-10 (0001-0015).
+  Installer, after the user's test run: picks add up across Add files... clicks (DLC and title
+  update are in different console folders), the older update (~1 MB) is refused at once, a help
+  text names the console folders, and a "Where do I find these?" link opens the README; window
+  20 px taller.

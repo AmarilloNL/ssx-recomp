@@ -38,6 +38,13 @@ DLC (optional, not included - you need it from your own Xbox 360)
   Check: Mt. Eddie shows on the world map, and logs\ssx_*.log has a line
   "DLC: installed ...". The files in the dlc folder can be deleted afterwards.
 
+Title update (optional, not included - you need it from your own Xbox 360)
+  SSX's last update (file tu00000002_00000000, ~9 MB) lets riders reach level 15.
+  On the console it is in Content\0000000000000000\4541096D\000B0000\.
+  Run SSX-Installer.exe again and add it with "Add files...": the game is
+  rebuilt with it (the "update" folder next to ssx.exe). Saves work with and
+  without it.
+
 Saves, DLC and shader cache live in Documents\ssx.
 If a setting stops the game from starting, delete ssx.toml next to ssx.exe
 to go back to the defaults (you will be asked for the game once more).

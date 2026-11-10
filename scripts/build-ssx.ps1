@@ -5,9 +5,11 @@
 # default.xex inside your ISO, and the game data is read from your ISO at runtime.
 #
 # Usage: SSX-Installer.exe runs this. Manually:
-#   powershell -ExecutionPolicy Bypass -File scripts\build-ssx.ps1 [-Iso path] [-NoPause]
+#   powershell -ExecutionPolicy Bypass -File scripts\build-ssx.ps1 [-Iso path] [-TitleUpdate path] [-NoPause]
+# -TitleUpdate: the game's last title update (v0.0.3.2) from your own console, an Xbox 360
+#   package file. Once added, later builds keep using it; -NoTitleUpdate goes back to the disc version.
 # -NoPause: don't wait for Enter at the end (when driven by the installer).
-param([string]$Iso, [switch]$NoPause)
+param([string]$Iso, [string]$TitleUpdate, [switch]$NoTitleUpdate, [switch]$NoPause)
 
 $ErrorActionPreference = 'Continue'
 $root = (Resolve-Path "$PSScriptRoot\..").Path
@@ -17,9 +19,14 @@ Start-Transcript -Path $log -Force | Out-Null
 # The recompilation config (function addresses, patches) matches exactly this default.xex:
 # SSX (USA) for Xbox 360, title 4541096D, media ID 55ABAB6C, version 0.0.0.2.
 $ExpectedXexSha256 = 'F509845401D65A6791C5D28A3E9636A6558DA204F3851028B0B369A44A4B68EA'
-# ReXGlue SDK commit bd833a2ab69d305f99ddf57418fc38ffec8af93d + patches 0001-0012, Release.
-$SdkPackage = 'sdk-9'
-$SdkPackageUrl = "https://github.com/AmarilloNL/ssx-recomp/releases/download/$SdkPackage/rexglue-sdk-ssx-9.zip"
+# The game's last title update, version 0.0.3.2 (from 0.0.0.2): its patch and data files.
+$ExpectedXexpSha256 = 'C0F52BEE35602A0FE2AEF8E39D2856C2063BDA6B9F6E7F12A4B4EAA75C4B27A2'
+$ExpectedPatch0Sha256 = 'AA087BCA90D458FAA865B388AFD969510A6138E3C32E633E4E84B3181CBEC752'
+# An earlier update (0.0.1.2), which 0.0.3.2 contains.
+$OlderXexpSha256 = '3ED16A2D3590277EF6277BD726AF7C035AB6303D624C12F01000F9A4F1D14344'
+# ReXGlue SDK commit bd833a2ab69d305f99ddf57418fc38ffec8af93d + patches 0001-0015, Release.
+$SdkPackage = 'sdk-10'
+$SdkPackageUrl = "https://github.com/AmarilloNL/ssx-recomp/releases/download/$SdkPackage/rexglue-sdk-ssx-10.zip"
 
 function Step($text) { Write-Host ""; Write-Host "==> $text" -ForegroundColor Cyan }
 function Fail($text) {
@@ -125,6 +132,101 @@ if ($hash -ne $ExpectedXexSha256) {
           "default.xex SHA-256 was $hash")
 }
 Write-Host "SSX (USA) default.xex verified." -ForegroundColor Green
+
+# ---------------------------------------------------------------- 1b. the title update (optional)
+# An Xbox 360 STFS package holding default.xexp (a patch for default.xex) and patch0.big (data).
+# With default.xexp next to default.xex the game is recompiled from the patched executable
+# (CMakeLists.txt), and package.ps1 puts both files in dist\SSX\update for the game to load.
+# Minimal STFS reader, plain PowerShell like the disc reader above. Read-only packages store a
+# file's blocks one after another; a hash table block follows every 170 data blocks.
+function Get-StfsBlockOffset([long]$HeaderSize, [int]$Shift, [long]$Index) {
+    $block = $Index; $base = 0xAA
+    for ($i = 0; $i -lt 3; $i++) {
+        $block += [Math]::Floor(($Index + $base) / $base) * [Math]::Pow(2, $Shift)
+        if ($Index -lt $base) { break }
+        $base *= 0xAA
+    }
+    return (($HeaderSize + 0xFFF) -band -bnot [long]0xFFF) + $block * 4096
+}
+function Export-StfsFile([string]$Package, [string]$Name, [string]$OutPath) {
+    $f = [IO.File]::OpenRead($Package)
+    try {
+        $h = New-Object byte[] 0x1000
+        if ($f.Read($h, 0, $h.Length) -lt $h.Length) { return $false }
+        $magic = [Text.Encoding]::ASCII.GetString($h, 0, 4)
+        if ($magic -ne 'LIVE' -and $magic -ne 'PIRS' -and $magic -ne 'CON ') { return $false }
+        $headerSize = ([long]$h[0x340] -shl 24) + ([long]$h[0x341] -shl 16) + ([long]$h[0x342] -shl 8) + $h[0x343]
+        $shift = if (((($headerSize + 0xFFF) -band 0xB000) -eq 0xB000) -or ($h[0x37B] -band 1)) { 0 } else { 1 }
+        $tableBlocks = [BitConverter]::ToUInt16($h, 0x37C)
+        # (Bytes are cast before shifting: [byte] -shl 8 is 0 in PowerShell.)
+        $tableStart = $h[0x37E] + ([int]$h[0x37F] -shl 8) + ([int]$h[0x380] -shl 16)
+        $block = New-Object byte[] 4096
+        for ($t = 0; $t -lt $tableBlocks; $t++) {
+            $f.Position = Get-StfsBlockOffset $headerSize $shift ($tableStart + $t)
+            [void]$f.Read($block, 0, 4096)
+            for ($e = 0; $e -lt 64; $e++) {
+                $o = $e * 64
+                $nameLength = $block[$o + 0x28] -band 0x3F
+                if ($nameLength -eq 0 -or ($block[$o + 0x28] -band 0x80)) { continue }
+                if ([Text.Encoding]::ASCII.GetString($block, $o, $nameLength) -ne $Name) { continue }
+                $start = $block[$o + 0x2F] + ([int]$block[$o + 0x30] -shl 8) + ([int]$block[$o + 0x31] -shl 16)
+                $remaining = ([long]$block[$o + 0x34] -shl 24) + ([long]$block[$o + 0x35] -shl 16) +
+                             ([long]$block[$o + 0x36] -shl 8) + $block[$o + 0x37]
+                $out = [IO.File]::Create($OutPath)
+                try {
+                    for ($k = 0; $remaining -gt 0; $k++) {
+                        $f.Position = Get-StfsBlockOffset $headerSize $shift ($start + $k)
+                        $n = $f.Read($block, 0, [int][Math]::Min(4096, $remaining))
+                        if ($n -le 0) { return $false }
+                        $out.Write($block, 0, $n); $remaining -= $n
+                    }
+                } finally { $out.Dispose() }
+                return $true
+            }
+        }
+        return $false
+    } finally { $f.Dispose() }
+}
+$xexp = "$root\game-dump\files\default.xexp"
+$updateDir = "$root\game-dump\update"
+if ($NoTitleUpdate) {
+    Remove-Item $xexp, $updateDir -Recurse -Force -ErrorAction SilentlyContinue
+} elseif ($TitleUpdate) {
+    Step "Check the title update"
+    if (-not (Test-Path $TitleUpdate)) { Fail "Title update not found: $TitleUpdate" }
+    Write-Host "Using $TitleUpdate"
+    Remove-Item $updateDir -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force $updateDir | Out-Null
+    try {
+        $hasXexp = Export-StfsFile $TitleUpdate 'default.xexp' "$updateDir\default.xexp"
+        $hasPatch0 = Export-StfsFile $TitleUpdate 'patch0.big' "$updateDir\patch0.big"
+    } catch { Fail "Could not read the title update: $($_.Exception.GetBaseException().Message)" }
+    if (-not $hasXexp) { Fail "That file isn't an SSX title update (it has no default.xexp)." }
+    $xexpHash = (Get-FileHash "$updateDir\default.xexp" -Algorithm SHA256).Hash
+    if ($xexpHash -eq $OlderXexpSha256) {
+        Remove-Item $updateDir -Recurse -Force
+        Fail ("This is an older SSX title update (0.0.1.2, about 1 MB). Use the latest one (0.0.3.2, about 9 MB, " +
+              "file name tu00000002_00000000 on the console); it already contains this one.")
+    }
+    if ($xexpHash -ne $ExpectedXexpSha256 -or -not $hasPatch0 -or
+        (Get-FileHash "$updateDir\patch0.big" -Algorithm SHA256).Hash -ne $ExpectedPatch0Sha256) {
+        Remove-Item $updateDir -Recurse -Force
+        Fail ("This title update isn't the supported one.`nSupported: SSX title update 0.0.3.2 " +
+              "(title 4541096D).`ndefault.xexp SHA-256 was $xexpHash")
+    }
+    Copy-Item "$updateDir\default.xexp" $xexp -Force
+    Write-Host "SSX title update 0.0.3.2 verified." -ForegroundColor Green
+}
+$gameVersion = if (Test-Path $xexp) { '0.0.3.2' } else { '0.0.0.2' }
+if ($gameVersion -eq '0.0.3.2' -and -not (Test-Path "$updateDir\patch0.big")) {
+    Fail "The title update's files are incomplete. Run the installer again and add the title update."
+}
+Write-Host ("Building the game version $gameVersion" + $(if ($gameVersion -eq '0.0.3.2') { ' (with the title update).' } else { ' (the disc release).' }))
+# Code generated for the other version is removed, so it is generated again from scratch.
+$versionConfig = "$root\game-dump\ssx_version.toml"
+if ((Test-Path $versionConfig) -and -not (Select-String -Path $versionConfig -SimpleMatch "v$gameVersion " -Quiet)) {
+    Remove-Item "$root\generated\default" -Recurse -Force -ErrorAction SilentlyContinue
+}
 
 # ---------------------------------------------------------------- 2. build tools
 # winget when it's there, otherwise each tool's official download.

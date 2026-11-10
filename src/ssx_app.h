@@ -51,6 +51,17 @@ class SsxApp : public rex::ReXApp {
       return std::nullopt;
     }
     rex::PathConfig paths = defaults;
+#ifdef SSX_TITLE_UPDATE
+    // Built for the title update: the runtime applies its default.xexp from update: to the
+    // disc's default.xex as it loads (the data must match the recompiled code), and the game
+    // reads patch0.big from update:.
+    auto update = SsxLocateUpdate(rex::filesystem::GetExecutableFolder());
+    if (!update) {
+      app_context().QuitFromUIThread();
+      return std::nullopt;
+    }
+    paths.update_data_root = *update;
+#endif
     if (std::filesystem::is_directory(*game)) {
       paths.game_data_root = *game;
     } else {

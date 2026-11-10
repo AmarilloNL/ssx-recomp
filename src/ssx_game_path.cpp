@@ -94,3 +94,16 @@ std::optional<fs::path> SsxLocateGame(const fs::path& exe_dir, const fs::path& c
   SsxSaveConfig(config_path);
   return found;
 }
+
+std::optional<fs::path> SsxLocateUpdate(const fs::path& exe_dir) {
+  fs::path folder = exe_dir / "update";
+  std::error_code ec;
+  if (fs::exists(folder / "default.xexp", ec) && fs::exists(folder / "patch0.big", ec)) {
+    return folder;
+  }
+  MessageBoxW(nullptr,
+              L"This SSX build is made for the title update, but the update's files are missing "
+              L"from the \"update\" folder next to ssx.exe. Run SSX-Installer.exe again to fix it.",
+              L"SSX", MB_OK | MB_ICONERROR);
+  return std::nullopt;
+}
