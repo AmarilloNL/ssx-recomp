@@ -1,0 +1,51 @@
+diff --git a/src/gpu/renderer.cpp b/src/gpu/renderer.cpp
+index 8899441..da1cc90 100644
+--- a/src/gpu/renderer.cpp
++++ b/src/gpu/renderer.cpp
+@@ -10464,10 +10464,42 @@ void DrawImpl(uint32_t initiator, uint32_t dmaBase, uint32_t dmaSize)
+         static LiveSwitch noAliasedFill("REGPU_NO_ALIASED_DEPTH_FILL");
+         const uint32_t depthControl = gpureg::Get(RB_DEPTHCONTROL);
+         if (!noAliasedFill && (gpureg::Get(RB_MODECONTROL) & 7) == 5 && (depthControl & 7) == 7 && ((depthControl >> 4) & 7) == 7 &&
+-            (gpureg::Get(RB_STENCILREFMASK) & 0xFF) == 0xFF && ((gpureg::Get(RB_COLOR_INFO) ^ gpureg::Get(RB_DEPTH_INFO)) & 0xFFF) == 0)
+-        {
+-            const float white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+-            C().list->ClearRenderTargetView(C().rtv, white, 1, &hostScissor);
++            ((gpureg::Get(RB_COLOR_INFO) ^ gpureg::Get(RB_DEPTH_INFO)) & 0xFFF) == 0)
++        {
++            // Any depth and stencil, for a screen-space rectangle (the console's clear of a 1x colour
++            // target: its 4x-aligned part is filled this way through a 4x view, the D24S8 word being the
++            // clear colour): a k_8_8_8_8 pixel reads the word as A = depth's high byte, R, G = its middle
++            // and low bytes, B = the stencil. SSX fills its snow trail volume's slices so while loading
++            // (depth 0.748, stencil 7F: grey with alpha BF, the flat trail height): left black with alpha 0
++            // the tracks started from a height of 0 left of column 80 (noise, a seam of tilted normals).
++            // The depth is the first vertex's z (three floats at the start of the vertex; no viewport
++            // transform). REGPU_ALIASED_DEPTH_FILL_WHITE=1: white for stencil FF only, as before.
++            // ponytail: the whole scissor is filled, not the rectangle (a fill always came with the rest
++            // of the surface cleared to the same colour); cut to the rectangle if a title fills a part.
++            static LiveSwitch whiteOnly("REGPU_ALIASED_DEPTH_FILL_WHITE");
++            const uint32_t stencil = gpureg::Get(RB_STENCILREFMASK) & 0xFF;
++            float fill[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
++            bool known = stencil == 0xFF;
++            if (!whiteOnly && (initiator & 0x3F) == 8 && (gpureg::Get(PA_CL_VTE_CNTL) & 0x30) == 0 && ((gpureg::Get(RB_COLOR_INFO) >> 16) & 0xF) == 0 &&
++                ((gpureg::Get(RB_DEPTH_INFO) >> 16) & 1) == 0)
++            {
++                const uint32_t d0 = gpureg::Get(gpureg::FetchConstants), d1 = gpureg::Get(gpureg::FetchConstants + 1);
++                uint32_t zBits = *GuestPtr<uint32_t>(GpuPhysToGuest(d0 & 0xFFFFFFFC) + 8);
++                if ((d1 & 3) == 2)
++                    zBits = __builtin_bswap32(zBits);
++                const float z = std::bit_cast<float>(zBits);
++                if (z >= 0.0f && z <= 1.0f)
++                {
++                    const uint32_t d = uint32_t(double(z) * 16777215.0);
++                    fill[0] = float((d >> 8) & 0xFF) / 255.0f;
++                    fill[1] = float(d & 0xFF) / 255.0f;
++                    fill[2] = float(stencil) / 255.0f;
++                    fill[3] = float(d >> 16) / 255.0f;
++                    known = true;
++                }
++            }
++            if (known)
++                C().list->ClearRenderTargetView(C().rtv, fill, 1, &hostScissor);
+         }
+     }
+     {
