@@ -1,0 +1,281 @@
+diff --git a/src/gpu/renderer.cpp b/src/gpu/renderer.cpp
+index 9dc1b15..8899441 100644
+--- a/src/gpu/renderer.cpp
++++ b/src/gpu/renderer.cpp
+@@ -386,18 +386,23 @@ struct CachedTexture
+     uint32_t width = 0, height = 0;
+     DXGI_FORMAT format = DXGI_FORMAT_R8G8B8A8_UNORM; // cubes: matches their faces
+     bool native = false; // block-compressed on the GPU: the shader applies the fetch swizzle
+-    // 3D textures: guest address, depth and the first of their per-slice render-target views
+-    // (g_volumeRtvs), which resolves into their slices draw through (ResolveIntoVolumes).
+-    uint32_t address = 0, depth = 0, rtvFirst = ~0u;
++    // 3D textures: guest address and depth, for the slices resolved into them (ResolveIntoVolumes).
++    uint32_t address = 0, depth = 0;
+ };
+ 
+-// Render-target views of 3D texture slices, created with their volume and never rewritten.
+-struct VolumeRtvs
++// Slices resolved into 3D textures, kept by destination (base << 3 | slice; under g_textureMutex): a
++// volume decoded from guest memory gets them again (ReplayVolumeSlices), also the ones resolved before
++// the title first sampled it. SSX clears its trail volume's 256 slices with resolves while loading;
++// dropped, the volume started as the zeros in memory and the snow around a rider took its normals from
++// them (a flat, lighter rectangle that followed the rider).
++// ponytail: entries are never freed (16 MB for SSX's 256 slices of 128x128); drop them with their
++// memory's reuse if a title moves its volumes around.
++struct VolumeSlice
+ {
+-    static constexpr UINT kCount = 4096;
+-    ComPtr<ID3D12DescriptorHeap> heap;
+-    UINT stride = 0, next = 0;
+-} g_volumeRtvs;
++    ComPtr<ID3D12Resource> texture; // RGBA8, the volume's width x height
++    uint32_t width = 0, height = 0;
++};
++std::unordered_map<uint64_t, VolumeSlice> g_volumeSliceStore;
+ 
+ // A resolve destination backed by a host texture: fetches of this guest
+ // address read the copy of the render target instead of guest memory.
+@@ -4619,6 +4624,46 @@ void LogVolumeActivity()
+         Log("3D textures: %u decoded from memory, %u slices resolved into them (600 frames)", decodes, slices);
+ }
+ 
++// Copies a kept slice into slice z of a volume that is in the COPY_DEST state.
++void CopyVolumeSlice(CachedTexture& v, uint32_t z, const VolumeSlice& slice)
++{
++    D3D12_RESOURCE_BARRIER b{};
++    b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
++    b.Transition.pResource = slice.texture.Get();
++    b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
++    b.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
++    b.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
++    C().list->ResourceBarrier(1, &b);
++    D3D12_TEXTURE_COPY_LOCATION dst{}, src{};
++    dst.pResource = v.resource.Get();
++    dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
++    src.pResource = slice.texture.Get();
++    src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
++    C().list->CopyTextureRegion(&dst, 0, 0, z, &src, nullptr);
++    std::swap(b.Transition.StateBefore, b.Transition.StateAfter);
++    C().list->ResourceBarrier(1, &b);
++    g_volumeSlices++;
++}
++
++// The slice of a volume a resolve destination is (8 slices to a group of the destination base), or ~0u.
++uint32_t VolumeSliceIndex(const CachedTexture& v, uint32_t destBase, uint32_t slice, const VolumeSlice& kept)
++{
++    // ponytail: 32-bit texels only (RGBA8 volumes); others keep the memory path.
++    if (!v.resource || v.format != DXGI_FORMAT_R8G8B8A8_UNORM || destBase < v.address || kept.width != v.width || kept.height != v.height)
++        return ~0u;
++    const uint32_t groupBytes = v.width * v.height * 4 * 8, offset = destBase - v.address;
++    const uint32_t z = offset / groupBytes * 8 + slice;
++    return offset % groupBytes || z >= v.depth ? ~0u : z;
++}
++
++// Every kept slice of a volume (in the COPY_DEST state), after it was decoded from guest memory.
++void ReplayVolumeSlices(CachedTexture& v)
++{
++    for (const auto& [key, kept] : g_volumeSliceStore)
++        if (const uint32_t z = VolumeSliceIndex(v, uint32_t(key >> 3), uint32_t(key & 7), kept); z != ~0u)
++            CopyVolumeSlice(v, z, kept);
++}
++
+ // A 3D texture, decoded on the CPU (DecodeTexture3D) and uploaded as RGBA8 when its contents change.
+ ID3D12Resource* GetVolumeTexture(const TextureFetch& fetch, DXGI_FORMAT& format)
+ {
+@@ -4654,7 +4699,6 @@ ID3D12Resource* GetVolumeTexture(const TextureFetch& fetch, DXGI_FORMAT& format)
+         td.MipLevels = 1;
+         td.SampleDesc.Count = 1;
+         td.Format = format;
+-        td.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET; // (resolves into its slices)
+         if (cached.resource)
+             Frame().garbage.push_back(std::move(cached.resource));
+         Check(g_r.device->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &td,
+@@ -4666,28 +4710,6 @@ ID3D12Resource* GetVolumeTexture(const TextureFetch& fetch, DXGI_FORMAT& format)
+         cached.format = format;
+         cached.address = fetch.Address();
+         cached.depth = d;
+-        cached.rtvFirst = ~0u;
+-        if (!g_volumeRtvs.heap)
+-        {
+-            D3D12_DESCRIPTOR_HEAP_DESC hd{ D3D12_DESCRIPTOR_HEAP_TYPE_RTV, VolumeRtvs::kCount, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, 0 };
+-            Check(g_r.device->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&g_volumeRtvs.heap)), "CreateDescriptorHeap(3D slices)");
+-            g_volumeRtvs.stride = g_r.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+-        }
+-        // ponytail: views are never freed; a title recreating many volumes runs out and its later
+-        // ones keep the memory path only.
+-        if (g_volumeRtvs.next + d <= VolumeRtvs::kCount)
+-        {
+-            cached.rtvFirst = g_volumeRtvs.next;
+-            g_volumeRtvs.next += d;
+-            for (uint32_t z = 0; z < d; z++)
+-            {
+-                D3D12_RENDER_TARGET_VIEW_DESC rd{};
+-                rd.Format = format;
+-                rd.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE3D;
+-                rd.Texture3D = { 0, z, 1 };
+-                g_r.device->CreateRenderTargetView(cached.resource.Get(), &rd, Cpu(g_volumeRtvs.heap.Get(), cached.rtvFirst + z, g_volumeRtvs.stride));
+-            }
+-        }
+     }
+     std::vector<uint8_t> rgba;
+     if (!DecodeTexture3D(fetch, rgba))
+@@ -4719,6 +4741,7 @@ ID3D12Resource* GetVolumeTexture(const TextureFetch& fetch, DXGI_FORMAT& format)
+     src.PlacedFootprint.Offset = offset;
+     src.PlacedFootprint.Footprint = { format, w, h, d, rowPitch };
+     C().list->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
++    ReplayVolumeSlices(cached);
+     std::swap(b.Transition.StateBefore, b.Transition.StateAfter);
+     C().list->ResourceBarrier(1, &b);
+     cached.contentHash = hash;
+@@ -6229,70 +6252,99 @@ void BlitResolve(bool depth, uint32_t base, uint32_t width, uint32_t height, DXG
+ 
+ // A resolve into a 3D texture (RB_COPY_DEST_INFO bit 3, the slice in bits 4-6 of an 8-slice group at the
+ // destination base): the console writes the slice into the volume's memory, which the title then samples
+-// as a 3D texture. Volumes are decoded from guest memory here, so the resolved image is drawn into the slice
+-// of every cached volume at that address instead (averaged down to the volume's size). SSX's snow trails: a
+-// simulation resolves into slices of a 128x128x256 trail volume every frame, and without this the snow
+-// showed no tracks. REGPU_NO_RESOLVE_TO_3D=1: off.
++// as a 3D texture. Volumes are decoded from guest memory here, so the resolved image is kept as a slice
++// (g_volumeSliceStore, averaged down to the destination's size) and copied into every cached volume at
++// that address; a volume decoded later gets it then. SSX's snow trails: a simulation resolves into slices
++// of a 128x128x256 trail volume every frame, and without this the snow showed no tracks.
++// REGPU_NO_RESOLVE_TO_3D=1: off.
+ void ResolveIntoVolumes(uint32_t destBase, uint32_t slice, uint32_t srcBase, bool swapRB)
+ {
+     static LiveSwitch off("REGPU_NO_RESOLVE_TO_3D");
+     if (off)
+         return;
+     const auto found = g_r.resolved.find(srcBase);
+-    if (found == g_r.resolved.end() || !found->second.resource)
++    if (found == g_r.resolved.end() || !found->second.resource || !found->second.width || !found->second.height)
+         return;
+     ResolvedTexture& src = found->second;
+     std::lock_guard<std::recursive_mutex> lock{ g_textureMutex };
+-    for (auto& [key, v] : g_r.volumes)
++    FrameResources& f = Frame();
++    if (f.descriptorsUsed >= kDescriptorsPerFrame)
++        return;
++    VolumeSlice& kept = g_volumeSliceStore[uint64_t(destBase) << 3 | slice];
++    if (!kept.texture || kept.width != src.width || kept.height != src.height)
+     {
+-        // ponytail: 32-bit texels only (RGBA8 volumes); others keep the memory path.
+-        if (!v.resource || v.rtvFirst == ~0u || v.format != DXGI_FORMAT_R8G8B8A8_UNORM || destBase < v.address)
+-            continue;
+-        const uint32_t groupBytes = v.width * v.height * 4 * 8, offset = destBase - v.address;
+-        const uint32_t z = offset / groupBytes * 8 + slice;
+-        if (offset % groupBytes || z >= v.depth)
+-            continue;
+-        FrameResources& f = Frame();
+-        if (f.descriptorsUsed >= kDescriptorsPerFrame)
++        D3D12_HEAP_PROPERTIES hp{};
++        hp.Type = D3D12_HEAP_TYPE_DEFAULT;
++        D3D12_RESOURCE_DESC td{};
++        td.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
++        td.Width = src.width;
++        td.Height = src.height;
++        td.DepthOrArraySize = 1;
++        td.MipLevels = 1;
++        td.SampleDesc.Count = 1;
++        td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
++        td.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
++        if (kept.texture)
++            f.garbage.push_back(std::move(kept.texture));
++        if (FAILED(g_r.device->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &td,
++                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&kept.texture))))
++        {
++            g_volumeSliceStore.erase(uint64_t(destBase) << 3 | slice);
+             return;
+-        const UINT slot = f.descriptorBase + f.descriptorsUsed++;
+-        D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
+-        srv.Format = src.resource->GetDesc().Format;
+-        srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+-        srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+-        srv.Texture2D.MipLevels = 1;
+-        g_r.device->CreateShaderResourceView(src.resource.Get(), &srv, Cpu(g_r.srvHeap.Get(), slot, g_r.srvStride));
+-        D3D12_RESOURCE_BARRIER b{};
+-        b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+-        b.Transition.pResource = v.resource.Get();
+-        b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+-        b.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+-        b.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+-        C().list->ResourceBarrier(1, &b);
+-        const D3D12_CPU_DESCRIPTOR_HANDLE rtv = Cpu(g_volumeRtvs.heap.Get(), v.rtvFirst + z, g_volumeRtvs.stride);
+-        C().list->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+-        C().list->SetGraphicsRootSignature(g_r.blitRootSignature.Get());
+-        C().list->SetPipelineState(g_r.colorBlit8.Get());
+-        C().list->SetGraphicsRootDescriptorTable(0, Gpu(g_r.srvHeap.Get(), slot, g_r.srvStride));
+-        const uint32_t blockX = std::max(1u, src.hostWidth / v.width), blockY = std::max(1u, src.hostHeight / v.height);
+-        // Stored as the copy holds it: a volume is decoded with its fetch's swizzle applied, which undoes the
+-        // copy's red/blue swap (SSX's trail normals came out sideways, dark, when stored swapped).
+-        static LiveSwitch swapped("REGPU_RESOLVE_TO_3D_SWAPPED"); // A/B: stored swapped, as in memory
+-        const uint32_t constants[9] = { std::bit_cast<uint32_t>(1.0f), uint32_t(swapRB && swapped), 0, 0, 0, 0, blockX, blockY, 0 };
+-        C().list->SetGraphicsRoot32BitConstants(1, 9, constants, 0);
+-        const D3D12_VIEWPORT vp{ 0, 0, float(v.width), float(v.height), 0, 1 };
+-        const D3D12_RECT sc{ 0, 0, LONG(v.width), LONG(v.height) };
+-        C().list->RSSetViewports(1, &vp);
+-        C().list->RSSetScissorRects(1, &sc);
+-        C().list->DrawInstanced(3, 1, 0, 0);
+-        g_volumeSlices++;
+-        LogVolumeActivity();
+-        std::swap(b.Transition.StateBefore, b.Transition.StateAfter);
+-        C().list->ResourceBarrier(1, &b);
+-        C().list->OMSetRenderTargets(1, &C().rtv, FALSE, &C().dsv);
+-        C().list->SetGraphicsRootSignature(g_r.rootSignature.Get());
+-        g_drawState.Invalidate();
++        }
++        CountCreate("3D slice");
++        kept.width = src.width;
++        kept.height = src.height;
+     }
++    const UINT slot = f.descriptorBase + f.descriptorsUsed++;
++    D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
++    srv.Format = src.resource->GetDesc().Format;
++    srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
++    srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
++    srv.Texture2D.MipLevels = 1;
++    g_r.device->CreateShaderResourceView(src.resource.Get(), &srv, Cpu(g_r.srvHeap.Get(), slot, g_r.srvStride));
++    D3D12_RESOURCE_BARRIER b{};
++    b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
++    b.Transition.pResource = kept.texture.Get();
++    b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
++    b.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
++    b.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
++    C().list->ResourceBarrier(1, &b);
++    const auto rtv = g_r.blitRtvHeap->GetCPUDescriptorHandleForHeapStart();
++    C().list->CreateRenderTargetView(g_r.device, kept.texture.Get(), rtv); // in order with the recorded commands
++    C().list->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
++    C().list->SetGraphicsRootSignature(g_r.blitRootSignature.Get());
++    C().list->SetPipelineState(g_r.colorBlit8.Get());
++    C().list->SetGraphicsRootDescriptorTable(0, Gpu(g_r.srvHeap.Get(), slot, g_r.srvStride));
++    const uint32_t blockX = std::max(1u, src.hostWidth / kept.width), blockY = std::max(1u, src.hostHeight / kept.height);
++    // Stored as the copy holds it: a volume is decoded with its fetch's swizzle applied, which undoes the
++    // copy's red/blue swap (SSX's trail normals came out sideways, dark, when stored swapped).
++    static LiveSwitch swapped("REGPU_RESOLVE_TO_3D_SWAPPED"); // A/B: stored swapped, as in memory
++    const uint32_t constants[9] = { std::bit_cast<uint32_t>(1.0f), uint32_t(swapRB && swapped), 0, 0, 0, 0, blockX, blockY, 0 };
++    C().list->SetGraphicsRoot32BitConstants(1, 9, constants, 0);
++    const D3D12_VIEWPORT vp{ 0, 0, float(kept.width), float(kept.height), 0, 1 };
++    const D3D12_RECT sc{ 0, 0, LONG(kept.width), LONG(kept.height) };
++    C().list->RSSetViewports(1, &vp);
++    C().list->RSSetScissorRects(1, &sc);
++    C().list->DrawInstanced(3, 1, 0, 0);
++    std::swap(b.Transition.StateBefore, b.Transition.StateAfter);
++    C().list->ResourceBarrier(1, &b);
++    for (auto& [key, v] : g_r.volumes)
++        if (const uint32_t z = VolumeSliceIndex(v, destBase, slice, kept); z != ~0u)
++        {
++            D3D12_RESOURCE_BARRIER vb = b;
++            vb.Transition.pResource = v.resource.Get();
++            vb.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
++            vb.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
++            C().list->ResourceBarrier(1, &vb);
++            CopyVolumeSlice(v, z, kept);
++            std::swap(vb.Transition.StateBefore, vb.Transition.StateAfter);
++            C().list->ResourceBarrier(1, &vb);
++        }
++    LogVolumeActivity();
++    C().list->OMSetRenderTargets(1, &C().rtv, FALSE, &C().dsv);
++    C().list->SetGraphicsRootSignature(g_r.rootSignature.Get());
++    g_drawState.Invalidate();
+ }
+ 
+ // EDRAM resolve: copy a rectangle of the render target to the destination
