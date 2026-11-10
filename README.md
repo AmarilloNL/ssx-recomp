@@ -270,7 +270,9 @@ recompiled Xbox 360 games. SSX loads it as a ReXGlue GPU plugin (`regpu-plugin/`
 - **Use it:** F1 > Graphics > Renderer > ReGPU, then restart. Switching back works the same way.
 - **What differs:** resolution scale draws at 1280x720 times the scale (2x is 2560x1440), the frame
   rate isn't locked at 3x, and the FSR, CAS and FXAA options belong to the standard renderer.
-- **Known issues:** a stretched strip at the right edge in some races.
+- **Known issues:** snow trails are softer than with the standard renderer (footprints and a smear
+  instead of two sharp board lines), and a thin light line can show at the right edge of the screen.
+  Riding costs about 12% of the frame rate for the trails (2x: about 180 fps instead of 205).
 
 <a id="roadmap"></a>
 

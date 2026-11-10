@@ -324,11 +324,13 @@ X_STATUS ReGpuGraphicsSystem::SetupGuestGpu(rex::runtime::FunctionDispatcher* di
     SetDefaultSwitch("REGPU_EARLY_FENCES");
     SetDefaultSwitch("REGPU_DRAW_THREAD");
     SetDefaultSwitch("REGPU_LEAN_FETCH");
-    // SSX's text comes from a 1 MB font atlas (1024x1024 k_8) the game fills glyph by glyph as new
-    // text appears. Checked by samples, new glyphs went unnoticed: a region name on the globe was
-    // drawn from old glyphs, a dark smudge, until the atlas changed somewhere sampled.
+    // Textures SSX updates a little at a time on the CPU, which sampled change checks miss:
+    // - its text comes from a 1 MB font atlas (1024x1024 k_8) filled glyph by glyph as new text
+    //   appears (a region name on the globe was drawn from old glyphs, a dark smudge);
+    // - the snow surface finds its trail tiles in the 128x128x256 trail volume through a 3.2 MB
+    //   1268x1280 k_16 table (stale, the snow showed no tracks).
     if (!std::getenv("REGPU_DENSE_HASH_KB"))
-        _putenv_s("REGPU_DENSE_HASH_KB", "1024");
+        _putenv_s("REGPU_DENSE_HASH_KB", "4096");
 
     regpu::Start();
     started_ = true;
