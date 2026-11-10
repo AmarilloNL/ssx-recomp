@@ -1,0 +1,19 @@
+diff --git a/src/gpu/texture.cpp b/src/gpu/texture.cpp
+index 92c52dd..1aabc1d 100644
+--- a/src/gpu/texture.cpp
++++ b/src/gpu/texture.cpp
+@@ -287,6 +287,14 @@ TextureFetch ReadTextureFetch(uint32_t slot)
+     TextureFetch f;
+     for (int i = 0; i < 6; i++)
+         f.dwords[i] = gpureg::Get(gpureg::FetchConstants + slot * 6 + i);
++    // A texture fetch whose constant says type 0 ("invalid") but is otherwise a sane texture: the
++    // hardware samples it anyway. Titles do bind such constants (SSX: two per frame, its distant
++    // backdrop's 2048x2048 texture and a full-screen pass's 512x512 one), and unbound they sampled
++    // white (white haze around rails, bands in the sky). Xenia's gpu_allow_invalid_fetch_constants.
++    // REGPU_INVALID_FETCH_AS_TEXTURE=1: sampled as textures (off: unbound, as before).
++    static LiveSwitch invalidAsTexture("REGPU_INVALID_FETCH_AS_TEXTURE");
++    if (f.Type() == 0 && invalidAsTexture && f.Address() != 0)
++        f.dwords[0] = (f.dwords[0] & ~3u) | 2u;
+     // A 1D texture (dimension 0: a 24-bit width in dword 2, no height) is the same memory as a 2D
+     // texture one row high, which is how it is bound (the translator samples a 1D fetch at the
+     // row's centre). Wider than a 2D texture can be, it stays 1D and is not bound (white, as before).

@@ -334,6 +334,10 @@ X_STATUS ReGpuGraphicsSystem::SetupGuestGpu(rex::runtime::FunctionDispatcher* di
     //   appears (a region name on the globe was drawn from old glyphs, a dark smudge);
     // - the snow surface finds its trail tiles in the 128x128x256 trail volume through a 3.2 MB
     //   1268x1280 k_16 table (stale, the snow showed no tracks).
+    // SSX binds two texture fetch constants a frame with type 0 ("invalid") but sane contents (its
+    // backdrop and a full-screen pass): sampled, as on the console (the standard renderer's
+    // gpu_allow_invalid_fetch_constants, src/ssx_app.h).
+    SetDefaultSwitch("REGPU_INVALID_FETCH_AS_TEXTURE");
     // (Only the font atlas with the trails off: regpu_snow_trails.)
     const bool trails = REXCVAR_GET(regpu_snow_trails);
     if (!std::getenv("REGPU_DENSE_HASH_KB"))
