@@ -1,0 +1,2 @@
+# Patches apply onto LF sources (ReGPU zips): keep them LF on every checkout.
+*.patch text eol=lf
