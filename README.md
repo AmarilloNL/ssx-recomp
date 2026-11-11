@@ -53,7 +53,7 @@ code runs natively, and its Xbox 360 graphics are translated to Direct3D 12.
 | 🪪 **Your name & picture** | instead of "User" and an empty square (settings → **Profile**) |
 | 💿 **Runs from your ISO** | saves stay in `Documents\ssx` |
 | 📦 **DLC support** | Mt. Eddie, Japan and the other packs, from your own console ([how](#adding-dlc)) |
-| 📈 **Title update** | the game's last update: riders up to level 15 and the gear for it, from your own console ([how](#title-update)) |
+| 📈 **Title update** | the game's last update: the gear for levels 11 to 15, from your own console ([how](#title-update)) |
 
 <a id="installing"></a>
 
@@ -235,8 +235,10 @@ check that you copied the long-named package file, not a folder or an archive.
 
 ### 📈 The title update
 
-SSX's last title update (version 0.0.3.2) lets riders reach **level 15** (the disc stops at 10)
-and adds the gear for levels 11 to 15 to the store. With it, the game is built from the updated
+SSX's last title update (version 0.0.3.2) adds the gear for levels 11 to 15 to the store, and
+riders above level 10 from an existing save work. A new rider still stops at level 10: the
+higher level cap came from EA's servers, which are offline ([issue #4](https://github.com/AmarilloNL/ssx-recomp/issues/4)).
+With it, the game is built from the updated
 version of its own code, so everything in this port (frame rates, resolution scale, DLC, your name
 and picture) works the same.
 
@@ -283,7 +285,7 @@ The game is playable and is being tested by playing through the whole World Tour
   in bright races): the game's automatic exposure measured the screen's brightness wrong when
   scaled
 - ✅ All five DLC packs work, and the installer can add them for you (**Add files...**)
-- ✅ The title update (0.0.3.2) from your own console: riders up to level 15 and the gear for it
+- ✅ The title update (0.0.3.2) from your own console: the gear for levels 11 to 15
 
 **👀 Known issues**
 - A peak label on the world map was once seen drawn as a solid box (Africa). Not reproduced
