@@ -279,8 +279,10 @@ was used online on a console after mid-2012 (its riders can be above level 10).
 Loading such a save in the port once does the same as step 2: the port keeps its update aside
 (`Documents\ssx\tuning\update.bin`) and gives it to saves that have none.
 
-With it, a level 10 rider with enough XP (7,500,000) gets an offer on the rider screen to buy
-access to level 11 for credits, and so on up to 15, as on the console.
+With it, a level 10 rider is offered access to level 11 on the rider screen, for 1,000,000
+credits. After buying it the rider moves up at the end of the next event, as soon as they have the
+XP for it (a full XP bar at level 10 is enough). The same goes for every level up to 15, as on the
+console.
 
 <a id="regpu"></a>
 

@@ -51,8 +51,9 @@ Levels 11 to 15 (optional, needs the title update)
   and keeps inside your save. The servers are offline, so a new save has
   none. The port takes it from any SSX save that has one (a save used online
   on a console after mid-2012): put that save file ("ssxvprofile ...") in
-  Documents\ssx\tuning and start the game. A level 10 rider with enough XP
-  is then offered access to level 11 on the rider screen, up to level 15.
+  Documents\ssx\tuning and start the game. A level 10 rider is then offered
+  access to level 11 on the rider screen (it costs credits), and so on up to
+  level 15.
 
 Saves, DLC and shader cache live in Documents\ssx.
 If a setting stops the game from starting, delete ssx.toml next to ssx.exe
