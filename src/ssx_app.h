@@ -39,6 +39,7 @@
 #include "ssx_restart.h"
 #include "ssx_settings.h"
 #include "ssx_settings_dialog.h"
+#include "ssx_tuning.h"
 
 class SsxApp : public rex::ReXApp {
  public:
@@ -141,6 +142,7 @@ class SsxApp : public rex::ReXApp {
     // GPU cvars only exist once the plugin has loaded, hence here.
     rex::cvar::SetFlagByName("gpu_allow_invalid_fetch_constants", "true");
     InstallDroppedDlc(runtime(), user_data_root());
+    SsxSetTuningDir(user_data_root() / "tuning");
 
     window()->SetTitle("SSX");
     rex::ui::ImGuiDrawer* drawer = imgui_drawer();
