@@ -38,7 +38,9 @@ DLC (optional, not included - you need it from your own Xbox 360)
   "DLC: installed ...". The files in the dlc folder can be deleted afterwards.
 
 Title update (optional, not included - you need it from your own Xbox 360)
-  SSX's last update (~9 MB) lets riders reach level 15. On the console it is
+  SSX's last update (~9 MB) adds the gear for levels 11 to 15. (A new rider
+  still stops at level 10: the higher level cap came from EA's servers,
+  which are offline.) On the console it is
   in Content\0000000000000000\4541096D\000B0000\ (if there are two files, use
   the larger one).
   Run SSX-Installer.exe again and add it with "Add files...": the game is
