@@ -263,26 +263,22 @@ you if you picked the older one. Running the installer again later keeps it; you
 ### 🎚️ Levels 11 to 15
 
 The level cap of 10 was raised by EA through *tuning updates*: small files the game downloaded
-when you signed in, and which it keeps inside your save. EA's servers are offline, so a new save
-never gets one and its riders stop at level 10, title update or not.
+when you signed in. EA's servers are offline, so a new save never gets one and its riders would
+stop at level 10, title update or not.
 
-The port can't include that file, but it can take it from any SSX save that has it: a save that
-was used online on a console after mid-2012 (its riders can be above level 10).
+The port takes care of that itself. With the [title update](#title-update) installed, it makes the
+game's level tables as long as EA's last tuning update did: the XP for each level, the price of
+access to it, the gear slots, and the stat ranges of the gear. There is nothing to set up, and no
+file from EA is involved.
 
-1. Install the [title update](#title-update).
-2. Put that save file in `Documents\ssx\tuning` (the folder is made the first time the game
-   starts). The file is the one called `ssxvprofile ...`: on the console's storage under
-   `Content\<your profile>\4541096D\00000001\`, in this port under
-   `Documents\ssx\B13EBABEBABEBABE\4541096D\00000001\`.
-3. Start the game. Your own save gets the tuning update and keeps it from then on.
+A level 10 rider is offered access to level 11 on the rider screen, for 1,000,000 credits. After
+buying it the rider moves up at the end of the next event, as soon as they have the XP for it (a
+full XP bar at level 10 is enough). The same goes for every level up to 15, as on the console.
 
-Loading such a save in the port once does the same as step 2: the port keeps its update aside
-(`Documents\ssx\tuning\update.bin`) and gives it to saves that have none.
-
-With it, a level 10 rider is offered access to level 11 on the rider screen, for 1,000,000
-credits. After buying it the rider moves up at the end of the next event, as soon as they have the
-XP for it (a full XP bar at level 10 is enough). The same goes for every level up to 15, as on the
-console.
+A save from a console that was online after mid-2012 carries EA's tuning update itself, and the
+game keeps using it. The port also keeps such an update aside (`Documents\ssx\tuning\update.bin`)
+and gives it to your other saves; a save file put in `Documents\ssx\tuning` is picked up the same
+way.
 
 <a id="roadmap"></a>
 
@@ -312,8 +308,7 @@ The game is playable and is being tested by playing through the whole World Tour
   scaled
 - ✅ All five DLC packs work, and the installer can add them for you (**Add files...**)
 - ✅ The title update (0.0.3.2) from your own console: the gear for levels 11 to 15
-- ✅ Levels 11 to 15 without EA's servers: the port takes the game's tuning update from a save
-  that has it ([how](#level-15))
+- ✅ Levels 11 to 15 without EA's servers ([how it works](#level-15))
 
 **👀 Known issues**
 - A peak label on the world map was once seen drawn as a solid box (Africa). Not reproduced

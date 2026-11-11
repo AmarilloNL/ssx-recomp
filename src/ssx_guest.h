@@ -30,6 +30,9 @@
 // The tuning update check's step that picks the server's version or the save's (title update only).
 #define SSX_FN_TUNING_PICK sub_824F6FA0
 #define SSX_FN_TUNING_PICK_IMP __imp__sub_824F6FA0
+// Loads a database file pair (.vlt + .bin) and builds its collections (title update only).
+#define SSX_FN_LOAD_DATABASE sub_8312AB50
+#define SSX_FN_LOAD_DATABASE_IMP __imp__sub_8312AB50
 
 // Vtable of the main loop's periodic task.
 #define SSX_VTABLE_MAIN_LOOP_TASK SSX_GUEST(0x82007738u, 0x82007840u)
