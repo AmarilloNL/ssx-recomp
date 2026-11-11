@@ -27,5 +27,9 @@
 #define SSX_FN_RENDER_SIZE SSX_GUEST(sub_82FB6120, sub_82F91568)
 #define SSX_FN_RENDER_SIZE_IMP SSX_GUEST(__imp__sub_82FB6120, __imp__sub_82F91568)
 
+// The tuning update check's step that picks the server's version or the save's (title update only).
+#define SSX_FN_TUNING_PICK sub_824F6FA0
+#define SSX_FN_TUNING_PICK_IMP __imp__sub_824F6FA0
+
 // Vtable of the main loop's periodic task.
 #define SSX_VTABLE_MAIN_LOOP_TASK SSX_GUEST(0x82007738u, 0x82007840u)

@@ -38,14 +38,22 @@ DLC (optional, not included - you need it from your own Xbox 360)
   "DLC: installed ...". The files in the dlc folder can be deleted afterwards.
 
 Title update (optional, not included - you need it from your own Xbox 360)
-  SSX's last update (~9 MB) adds the gear for levels 11 to 15. (A new rider
-  still stops at level 10: the higher level cap came from EA's servers,
-  which are offline.) On the console it is
+  SSX's last update (~9 MB) adds the gear for levels 11 to 15. On the
+  console it is
   in Content\0000000000000000\4541096D\000B0000\ (if there are two files, use
   the larger one).
   Run SSX-Installer.exe again and add it with "Add files...": the game is
   rebuilt with it (the "update" folder next to ssx.exe). Saves work with and
   without it.
+
+Levels 11 to 15 (optional, needs the title update)
+  EA raised the level cap of 10 with a "tuning update" the game downloaded
+  and keeps inside your save. The servers are offline, so a new save has
+  none. The port takes it from any SSX save that has one (a save used online
+  on a console after mid-2012): put that save file ("ssxvprofile ...") in
+  Documents\ssx\tuning and start the game. A level 10 rider is then offered
+  access to level 11 on the rider screen (it costs credits), and so on up to
+  level 15.
 
 Saves, DLC and shader cache live in Documents\ssx.
 If a setting stops the game from starting, delete ssx.toml next to ssx.exe
