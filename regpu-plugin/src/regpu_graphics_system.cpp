@@ -35,9 +35,12 @@
 
 // The settings of ReXGlue's own renderer that mean the same here (SSX's F1 menu shows them).
 REXCVAR_DEFINE_INT32(resolution_scale, 1, "GPU",
-                     "Resolution scale: ReGPU draws at 1280x720 times this (2: 2560x1440, 3: 3840x2160)")
+                     "The standard renderer's resolution scale (kept for ssx.toml; ReGPU uses regpu_resolution)")
     .range(1, 3)
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+REXCVAR_DEFINE_STRING(regpu_resolution, "screen", "GPU",
+                      "ReGPU's drawing resolution: screen (the monitor the game is on) or WIDTHxHEIGHT, "
+                      "fitted to 16:9; changes while the game runs (resolution_scale is not used by ReGPU)");
 REXCVAR_DEFINE_INT32(anisotropic_override, 3, "GPU",
                      "Texture filtering: -1 the game's, 0 off, 1-5 1x-16x anisotropic")
     .range(-1, 5);
@@ -83,11 +86,59 @@ uint32_t TargetFps()
     return uint32_t(std::clamp(fps, 30, 360));
 }
 
-// The F1 menu's frame rate and texture filtering, applied while the game runs.
+// The drawing resolution (regpu_resolution): "screen" is the display mode of the monitor the game
+// window is on (its real pixels, whatever the Windows scaling), else WIDTHxHEIGHT; 1280x720 if neither.
+HWND g_window = nullptr;
+void DrawingSize(uint32_t& width, uint32_t& height)
+{
+    width = 1280;
+    height = 720;
+    const std::string v = REXCVAR_GET(regpu_resolution);
+    if (v == "screen")
+    {
+        MONITORINFOEXW info = {};
+        info.cbSize = sizeof(info);
+        DEVMODEW mode = {};
+        mode.dmSize = sizeof(mode);
+        if (GetMonitorInfoW(MonitorFromWindow(g_window, MONITOR_DEFAULTTOPRIMARY), &info) &&
+            EnumDisplaySettingsW(info.szDevice, ENUM_CURRENT_SETTINGS, &mode))
+        {
+            width = mode.dmPelsWidth;
+            height = mode.dmPelsHeight;
+        }
+    }
+    else
+    {
+        std::sscanf(v.c_str(), "%ux%u", &width, &height);
+    }
+    // ponytail: the largest 16:9 size inside it, as the old 1x-3x scales were. SSX's scene doesn't take
+    // ReGPU's wider-view path (its surfaces aren't 1280 wide), so 2560x1080 drew the 16:9 picture
+    // stretched; real ultrawide needs that path made to work for SSX.
+    if (uint64_t(width) * 9 > uint64_t(height) * 16)
+        width = height * 16 / 9;
+    else
+        height = width * 9 / 16;
+    width = std::clamp<uint32_t>(width & ~1u, 640, 7680);
+    height = std::clamp<uint32_t>(height & ~1u, 360, 4320);
+}
+
+// The F1 menu's resolution, frame rate and texture filtering, applied while the game runs.
 void FollowSettings()
 {
     static uint32_t lastFps = 0;
     static int32_t lastAniso = -2;
+    static uint64_t lastSize = 0;
+    uint32_t width, height;
+    DrawingSize(width, height);
+    if (const uint64_t size = uint64_t(width) << 32 | height; size != lastSize)
+    {
+        if (lastSize)
+        {
+            regpu::SetOutputSize(width, height);
+            REXLOG_INFO("ReGPU: drawing at {}x{}", width, height);
+        }
+        lastSize = size;
+    }
     if (const uint32_t fps = TargetFps(); fps != lastFps)
     {
         regpu::SetFrameLimit(fps, false);
@@ -274,12 +325,15 @@ X_STATUS ReGpuGraphicsSystem::SetupGuestGpu(rex::runtime::FunctionDispatcher* di
     FillHost();
 
     regpu::Config& config = regpu::GetConfig();
-    // The drawing size: the console's 1280x720 times resolution_scale, or SSX_REGPU_RES=WxH.
-    const uint32_t scale = uint32_t(std::clamp(REXCVAR_GET(resolution_scale), 1, 3));
-    config.width = 1280 * scale;
-    config.height = 720 * scale;
+    // Present into ReXGlue's game window (it keeps input, focus, closing and fullscreen).
+    if (auto* runtime = rex::Runtime::instance(); runtime && runtime->display_window())
+        config.hostWindow = runtime->display_window()->GetNativeWindowHandle();
+    g_window = static_cast<HWND>(config.hostWindow);
+    // The drawing size (regpu_resolution, or SSX_REGPU_RES=WxH for a test).
+    DrawingSize(config.width, config.height);
     if (const char* res = std::getenv("SSX_REGPU_RES"))
         std::sscanf(res, "%ux%u", &config.width, &config.height);
+    REXLOG_INFO("ReGPU: drawing at {}x{}", config.width, config.height);
     // SSX_REGPU_UPSCALER=fsr1 with SSX_REGPU_QUALITY=0-4 (native, quality, balanced, performance, ultra).
     if (const char* up = std::getenv("SSX_REGPU_UPSCALER"); up && std::string(up) == "fsr1")
         config.upscaler = regpu::Config::Upscaler::Fsr1;
@@ -288,9 +342,6 @@ X_STATUS ReGpuGraphicsSystem::SetupGuestGpu(rex::runtime::FunctionDispatcher* di
     config.vsync = false;
     config.maxFps = TargetFps();
     config.windowTitle = L"SSX (ReGPU)";
-    // Present into ReXGlue's game window (it keeps input, focus, closing and fullscreen).
-    if (auto* runtime = rex::Runtime::instance(); runtime && runtime->display_window())
-        config.hostWindow = runtime->display_window()->GetNativeWindowHandle();
     // ReXGlue calls InitializeShaderStorage after this, so the cache root comes from its setting.
     if (cacheRoot_.empty())
         if (const std::string root = rex::cvar::GetFlagByName("cache_root"); !root.empty())

@@ -311,8 +311,11 @@ recompiled Xbox 360 games. SSX loads it as a ReXGlue GPU plugin (`regpu-plugin/`
 - **Build it:** `scripts\build-ssx.ps1 -ReGpu` (or `scripts\build-regpu.ps1` after a normal build).
   Needs Git and Python 3 on top of the usual tools.
 - **Use it:** F1 > Graphics > Renderer > ReGPU, then restart. Switching back works the same way.
-- **What differs:** resolution scale draws at 1280x720 times the scale (2x is 2560x1440), the frame
-  rate isn't locked at 3x, and the FSR, CAS and FXAA options belong to the standard renderer.
+- **What differs:** instead of a resolution scale, F1 > Graphics > Resolution picks the drawing size:
+  *Match my screen* (the default), 720p, 1080p, 1440p or 4K, changed while the game runs (any other
+  16:9 size can go in `ssx.toml` as `regpu_resolution = "WIDTHxHEIGHT"`). Ultrawide screens get a
+  16:9 picture for now. The frame rate isn't locked at high resolutions, and the FSR, CAS and FXAA
+  options belong to the standard renderer.
 - **Known issues:** none known at the moment. If something looks different from the standard
   renderer, a screenshot helps a lot (F12 saves one with the renderer's own debug data).
 

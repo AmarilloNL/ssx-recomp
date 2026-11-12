@@ -55,10 +55,12 @@ const Choice kFramerates3x[] = {{"30 fps  (original)", "30"}, {"40 fps", "40"}, 
 const Choice kScales[] = {{"1x  (fastest)", "1"},
                           {"2x  (sharp, recommended)", "2"},
                           {"3x  (about 4K, 60 fps at most)", "3"}};
-// ReGPU draws at 1280 x 720 times the scale and holds high frame rates at 3x.
-const Choice kScalesReGpu[] = {{"1x  (1280 x 720)", "1"},
-                               {"2x  (2560 x 1440, sharp)", "2"},
-                               {"3x  (3840 x 2160, about 4K)", "3"}};
+// ReGPU draws at any size (regpu_resolution in the plugin), changed while the game runs.
+const Choice kResolutionsReGpu[] = {{"Match my screen", "screen"},
+                                    {"1280 x 720", "1280x720"},
+                                    {"1920 x 1080  (1080p)", "1920x1080"},
+                                    {"2560 x 1440  (1440p)", "2560x1440"},
+                                    {"3840 x 2160  (4K)", "3840x2160"}};
 const Choice kRenderers[] = {{"Standard", "standard"}, {"ReGPU  (experimental)", "regpu"}};
 const Choice kUpscaling[] = {{"Bilinear  (soft)", "bilinear"},
                              {"AMD CAS  (sharpen)", "cas"},
@@ -383,9 +385,11 @@ void SsxSettingsDialog::DrawGraphicsTab() {
                         "looks wrong."
                       : "Standard, or ReGPU: a newer renderer, faster at 2x and 3x (experimental).");
   Combo("##renderer", "ssx_renderer", kRenderers, std::size(kRenderers));
-  Row("Resolution scale", "N x N times as many pixels: sharper, but heavier on the GPU.");
   if (SsxUsingReGpu()) {
-    Combo("##scale", "resolution_scale", kScalesReGpu, std::size(kScalesReGpu));
+    Row("Resolution", "How many pixels the game is drawn with: higher is sharper, but heavier on the GPU.");
+    Combo("##resolution", "regpu_resolution", kResolutionsReGpu, std::size(kResolutionsReGpu));
+  } else {
+    Row("Resolution scale", "N x N times as many pixels: sharper, but heavier on the GPU.");
   }
   bool heavy = !SsxUsingReGpu() && std::atoi(rex::cvar::GetFlagByName("resolution_scale").c_str()) >= 3;
   if (!SsxUsingReGpu() && Combo("##scale", "resolution_scale", kScales, std::size(kScales)) && !heavy &&
