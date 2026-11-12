@@ -314,10 +314,12 @@ class Player {
     song_changed_ = true;
   }
 
+  // One decoder thread for the whole run (a detached std::thread is no longer joinable, so that
+  // can't tell whether it was started: every playlist started another, and they played together).
   void EnsureThread() {
-    if (thread_.joinable()) return;
-    thread_ = std::thread([this] { Run(); });
-    thread_.detach();
+    if (thread_started_) return;
+    thread_started_ = true;
+    std::thread([this] { Run(); }).detach();
   }
 
   void Run() {
@@ -369,7 +371,7 @@ class Player {
 
   std::mutex mutex_;
   std::condition_variable wake_;
-  std::thread thread_;
+  bool thread_started_ = false;
   Playlist playlist_;
   std::vector<size_t> order_;
   size_t position_ = 0;
