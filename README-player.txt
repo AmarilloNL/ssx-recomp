@@ -47,8 +47,9 @@ Title update (optional, not included - you need it from your own Xbox 360)
   without it.
 
 Levels 11 to 15 (needs the title update)
-  EA raised the level cap of 10 through its servers, which are offline. With
-  the title update installed the port raises it itself, nothing to set up:
+  EA raised the level cap of 10 through its servers, which the port can't
+  reach (they go through Xbox Live). With the title update installed the
+  port raises it itself, nothing to set up:
   a level 10 rider is offered access to level 11 on the rider screen (it
   costs credits), and so on up to level 15.
 
