@@ -25,7 +25,7 @@ using System.Windows.Forms;
 
 [assembly: AssemblyTitle("SSX PC Port Setup")]
 [assembly: AssemblyProduct("SSX PC Port Setup")]
-[assembly: AssemblyFileVersion("1.2.0.0")]
+[assembly: AssemblyFileVersion("1.3.0.0")]
 
 static class Program {
   [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
@@ -581,7 +581,7 @@ class InstallerForm : Form {
       Items = new[] { "Up to 300 fps, or match your monitor's refresh rate",
                       "Sharper rendering, 2x resolution scale and AMD FSR upscaling",
                       "Settings menu in game: F1, or Back + Start on a controller",
-                      "Keyboard and controller support, and DLC from your own console" },
+                      "Keyboard and controller, DLC from your console, and your own music" },
       Bounds = new Rectangle(x, Th.D(122), w, Th.D(120)) });
     var card = new Card {
       Title = "You need your own copy of the game",
