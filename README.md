@@ -262,9 +262,9 @@ you if you picked the older one. Running the installer again later keeps it; you
 
 ### 🎚️ Levels 11 to 15
 
-The level cap of 10 was raised by EA through *tuning updates*: small files the game downloaded
-when you signed in. EA's servers are offline, so a new save never gets one and its riders would
-stop at level 10, title update or not.
+The level cap of 10 was raised by EA through *tuning updates*: small files the game downloads
+when you sign in to EA's servers. The port can't reach those servers (they go through Xbox Live),
+so a new save never gets one and its riders would stop at level 10, title update or not.
 
 The port takes care of that itself. With the [title update](#title-update) installed, it makes the
 game's level tables as long as EA's last tuning update did: the XP for each level, the price of
@@ -275,8 +275,8 @@ A level 10 rider is offered access to level 11 on the rider screen, for 1,000,00
 buying it the rider moves up at the end of the next event, as soon as they have the XP for it (a
 full XP bar at level 10 is enough). The same goes for every level up to 15, as on the console.
 
-A save from a console that was online after mid-2012 carries EA's tuning update itself, and the
-game keeps using it. The port also keeps such an update aside (`Documents\ssx\tuning\update.bin`)
+A save from a console that has been online since mid-2012 carries EA's tuning update itself, and
+the game keeps using it. The port also keeps such an update aside (`Documents\ssx\tuning\update.bin`)
 and gives it to your other saves; a save file put in `Documents\ssx\tuning` is picked up the same
 way.
 
@@ -333,7 +333,9 @@ The game is playable and is being tested by playing through the whole World Tour
 - Only SSX (USA) is supported, with or without its last title update (0.0.3.2).
 - Render sizes above 1200×640 aren't available: they break the game's own render buffers. Use the
   resolution scale instead.
-- Online features (RiderNet, global events) don't work, because EA's servers are gone.
+- Online features (RiderNet, global events, online races) don't work: they go through Xbox Live,
+  which the port can't sign in to. EA's SSX servers themselves are still running for the consoles
+  (on Xbox 360 with fewer features than on PS3).
 
 > [!TIP]
 > **Found a bug?** [Open an issue](../../issues/new) with a screenshot, where it happened (region,
