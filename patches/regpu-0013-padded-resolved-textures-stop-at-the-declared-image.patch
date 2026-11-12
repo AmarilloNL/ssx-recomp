@@ -1,8 +1,8 @@
 diff --git a/src/gpu/hlsl.cpp b/src/gpu/hlsl.cpp
-index d7ddfc1..26bc7f8 100644
+index d7ddfc1..ae1a2d9 100644
 --- a/src/gpu/hlsl.cpp
 +++ b/src/gpu/hlsl.cpp
-@@ -295,6 +295,27 @@ float2 Mirror(float2 uv, uint info)
+@@ -295,6 +295,26 @@ float2 Mirror(float2 uv, uint info)
      return uv;
  }
  
@@ -12,44 +12,43 @@ index d7ddfc1..26bc7f8 100644
 +// declared image's last texel. Sampled up to the texture's edge, SSX's 300x160 blur images (304 columns
 +// copied, the last four a strip of the full-size scene) drew a light line down the right of the screen,
 +// and the speed blur spread it into stripes. A negative share: scaled only, as before (A/B).
-+float2 PaddedCoord(uint slot, float2 uv, float2 texelSize)
-+{
-+    const float2 pad = tbias[slot].zw;
-+    if (pad.x == 0.0) return uv;
-+    if (pad.x > 0.0)
-+    {
-+        const uint info = tinfo[slot].x;
-+        const bool wraps = (info & 3u) == 0u || (info & 3u) == 3u;
-+        const float2 lo = 0.5 / texelSize, hi = 1.0 - lo;
-+        if (pad.x < 1.0) uv.x = clamp(wraps && ((info >> 18) & 1u) == 0u ? frac(uv.x) : uv.x, lo.x, hi.x);
-+        if (pad.y < 1.0) uv.y = clamp(wraps && ((info >> 19) & 1u) == 0u ? frac(uv.y) : uv.y, lo.y, hi.y);
++// A macro without branches, not a function: as a function with branches it halved the frame rate
++// of SSX's rides (every fetch of every pixel passes here).
++#define REGPU_PADDED_COORD(slot, uv, texelSize) \
++    { \
++        const float2 pad_ = tbias[slot].zw; \
++        const uint info_ = tinfo[slot].x; \
++        const bool wraps_ = (info_ & 3u) == 0u || (info_ & 3u) == 3u; \
++        const float2 lo_ = 0.5 / (texelSize); \
++        const float2 inside_ = float2((wraps_ && ((info_ >> 18) & 1u) == 0u) ? frac((uv).x) : (uv).x, \
++                                      (wraps_ && ((info_ >> 19) & 1u) == 0u) ? frac((uv).y) : (uv).y); \
++        uv = (pad_ > 0.0 && pad_ < 1.0) ? clamp(inside_, lo_, 1.0 - lo_) : (uv); \
++        uv *= (pad_.x != 0.0) ? abs(pad_) : float2(1.0, 1.0); \
 +    }
-+    return uv * abs(pad);
-+}
 +
  float4 TFetchRaw(uint slot, float3 coord, bool denorm, bool vertexStage, float bias, float2 texel)
  {
      uint index = asuint(tbias[slot].y);
-@@ -332,7 +353,7 @@ float4 TFetchRaw(uint slot, float3 coord, bool denorm, bool vertexStage, float b
+@@ -332,7 +352,7 @@ float4 TFetchRaw(uint slot, float3 coord, bool denorm, bool vertexStage, float b
      // the edge texels' centres; the sampler wraps.
      if ((tinfo[slot].x >> 18) & 1u) uv.x = clamp(uv.x, 0.5 / texelSize.x, 1.0 - 0.5 / texelSize.x);
      if ((tinfo[slot].x >> 19) & 1u) uv.y = clamp(uv.y, 0.5 / texelSize.y, 1.0 - 0.5 / texelSize.y);
 -    if (tbias[slot].z > 0.0) uv *= tbias[slot].zw; // declared image inside a wider resolved texture (renderer.cpp)
-+    uv = PaddedCoord(slot, uv, texelSize);
++    REGPU_PADDED_COORD(slot, uv, texelSize)
      uint mode = FetchMode(tinfo[slot].x & 3u);
      // Vertex shaders read data tables this way (PGR4's riders: bone matrices, three texels a bone):
      // the fetch constant's filter applies, point sampling exactly one texel. Always linear here,
-@@ -1090,7 +1111,7 @@ float4 TFetch2D(uint slot, float3 coord, bool denorm, float bias, float2 texel)
+@@ -1090,7 +1110,7 @@ float4 TFetch2D(uint slot, float3 coord, bool denorm, float bias, float2 texel)
          return ((info >> 17) & 1u) ? float4(1, 1, 1, 1) : float4(0, 0, 0, 0);
      if ((info >> 18) & 1u) uv.x = clamp(uv.x, 0.5 / texelSize.x, 1.0 - 0.5 / texelSize.x);
      if ((info >> 19) & 1u) uv.y = clamp(uv.y, 0.5 / texelSize.y, 1.0 - 0.5 / texelSize.y);
 -    if (tbias[slot].z > 0.0) uv *= tbias[slot].zw;
-+    uv = PaddedCoord(slot, uv, texelSize);
++    REGPU_PADDED_COORD(slot, uv, texelSize)
      // Sampler index: the filter mode (1-3 its own sampler), else the anisotropy (s4-s7), else s0.
      const uint mode = info & 3u, aniso = (info >> 20) & 7u;
      const uint s = mode != 0u ? mode : (aniso >= 1u && aniso <= 4u ? aniso + 3u : 0u);
 diff --git a/src/gpu/renderer.cpp b/src/gpu/renderer.cpp
-index db313da..497c45a 100644
+index db313da..960d35b 100644
 --- a/src/gpu/renderer.cpp
 +++ b/src/gpu/renderer.cpp
 @@ -10359,6 +10359,14 @@ void DrawImpl(uint32_t initiator, uint32_t dmaBase, uint32_t dmaSize)
@@ -57,7 +56,7 @@ index db313da..497c45a 100644
              tb[2] = std::min(1.0f, float(fetch.Width()) / float(resolvedPtr->width));
              tb[3] = std::min(1.0f, float(fetch.Height()) / float(resolvedPtr->height));
 +            // REGPU_NO_PADDED_CLAMP=1: the coordinate is only scaled, not held inside the declared image
-+            // (hlsl.cpp, PaddedCoord), as before (A/B).
++            // (hlsl.cpp, REGPU_PADDED_COORD), as before (A/B).
 +            static LiveSwitch noPaddedClamp("REGPU_NO_PADDED_CLAMP");
 +            if (noPaddedClamp)
 +            {
