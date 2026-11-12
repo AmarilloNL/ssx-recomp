@@ -1,0 +1,203 @@
+diff --git a/src/gpu/hlsl.cpp b/src/gpu/hlsl.cpp
+index ae1a2d9..aec57fe 100644
+--- a/src/gpu/hlsl.cpp
++++ b/src/gpu/hlsl.cpp
+@@ -22,6 +22,7 @@ cbuffer VSConstants : register(b0)
+     float4 vscale;    // PA_CL_VPORT_X/Y/ZSCALE
+     float4 voffset;   // PA_CL_VPORT_X/Y/ZOFFSET
+     uint4 vte;        // x PA_CL_VTE_CNTL
++    float4 vucp[6];   // user clip planes (PA_CL_UCP_n), zero when off; read by clip variants (renderer.cpp)
+     // Vertex fetch k of this shader (see VFetchK): x fetch constant | format << 8 | signed << 14
+     // | normalized << 15 | round << 16, y stride, z offset (dwords), w dest swizzle | exp << 16.
+     uint4 vfl[32];
+diff --git a/src/gpu/renderer.cpp b/src/gpu/renderer.cpp
+index 960d35b..ee7cbcd 100644
+--- a/src/gpu/renderer.cpp
++++ b/src/gpu/renderer.cpp
+@@ -370,6 +370,8 @@ struct CompiledShader
+     TranslatedShader info;
+     const CompiledShader* hlslSource = nullptr; // canonical variants: the shader whose code (and HLSL) this reuses
+     mutable const CompiledShader* motion = nullptr; // its motion-vector variant, once looked up
++    mutable const CompiledShader* clip = nullptr; // its user clip plane variant, once looked up
++    bool userClip = false; // this is a user clip plane variant (or a motion variant of one)
+     uint32_t tag = 0; // the game's mark for this shader (Host::rewriteShader), passed to Host::onDraw
+     bool IsReady() const { return state.load(std::memory_order_acquire) == Ready; }
+ };
+@@ -3974,22 +3976,72 @@ std::string MotionVariant(const std::string& hlsl, bool pixel)
+     return h;
+ }
+ 
+-// The motion-vector variant of a shader (compiled on first use; nullptr if it cannot be made).
+-std::unordered_map<uint64_t, std::unique_ptr<CompiledShader>> g_motionShaders;
+-const CompiledShader* MotionShaderLookup(const CompiledShader& base);
++// User clip plane variant of a vertex shader: each vertex's distance to the planes (vucp, filled per
++// draw in DrawImpl) as clip distances. Only draws with planes on use it (UserClipOn); the outputs cost
++// every other draw ~4% of the frame. Empty when the text is not in the expected shape.
++std::string ClipVariant(const std::string& hlsl, bool pixel)
++{
++    std::string h = hlsl;
++    const std::string out = "    float2 pcoord : TEXCOORD16; // point sprite coordinate\n";
++    const std::string at = "    float2 size = float2(vinfo.zw);\n";
++    const size_t o = h.find(out);
++    if (pixel || o == std::string::npos)
++        return {};
++    h.insert(o + out.size(), "    float4 clip0 : SV_ClipDistance0; // planes 0-3, negative is cut away\n"
++                             "    float2 clip1 : SV_ClipDistance1; // and 4-5\n");
++    const size_t a = h.find(at);
++    if (a == std::string::npos)
++        return {};
++    // The clip-space position, with any divide by w the shader asked for undone (as Xenia does).
++    h.insert(a, "    {\n"
++                "        float4 cp = r.pos;\n"
++                "        if (vte.x & (1u << 8)) cp.xy *= cp.w;\n"
++                "        if (vte.x & (1u << 9)) cp.z *= cp.w;\n"
++                "        r.clip0 = float4(dot(cp, vucp[0]), dot(cp, vucp[1]), dot(cp, vucp[2]), dot(cp, vucp[3]));\n"
++                "        r.clip1 = float2(dot(cp, vucp[4]), dot(cp, vucp[5]));\n"
++                "    }\n");
++    return h;
++}
++
++// User clip planes: PA_CL_CLIP_CNTL bits 0-5 enable PA_CL_UCP_n (registers 0x2388 + 4n, x y z w in clip
++// space), unless CLIP_DISABLE (bit 16). SSX cuts the snow ribbon along its rails with plane 0; without
++// it the whole ribbon stood around every rail as a white band. REGPU_NO_USER_CLIP=1: none, as before.
++// ponytail: UCP_CULL_ONLY_ENA (bit 17: whole primitives culled, none clipped) is left off, as before; a
++// cull distance output if a title needs it.
++bool UserClipOn()
++{
++    static LiveSwitch noUserClip("REGPU_NO_USER_CLIP");
++    const uint32_t c = gpureg::Get(0x2204 /* PA_CL_CLIP_CNTL */);
++    return !noUserClip && (c & 0x3F) && !((c >> 16) & 1) && !((c >> 17) & 1);
++}
++
++// A text variant of a shader (compiled on first use; nullptr if it cannot be made), cached per source.
++using VariantMap = std::unordered_map<uint64_t, std::unique_ptr<CompiledShader>>;
++const CompiledShader* VariantLookup(const CompiledShader& base, VariantMap& map, std::string (*make)(const std::string&, bool),
++    const char* what);
++const CompiledShader* Variant(const CompiledShader& base, const CompiledShader*& slot, VariantMap& map,
++    std::string (*make)(const std::string&, bool), const char* what)
++{
++    if (slot && slot->state.load(std::memory_order_acquire) != CompiledShader::Pending)
++        return slot->state.load(std::memory_order_acquire) == CompiledShader::Failed ? nullptr : slot;
++    slot = VariantLookup(base, map, make, what);
++    return slot;
++}
++VariantMap g_motionShaders, g_clipShaders;
+ const CompiledShader* MotionShader(const CompiledShader& base)
+ {
+-    if (base.motion && base.motion->state.load(std::memory_order_acquire) != CompiledShader::Pending)
+-        return base.motion->state.load(std::memory_order_acquire) == CompiledShader::Failed ? nullptr : base.motion;
+-    const CompiledShader* m = MotionShaderLookup(base);
+-    base.motion = m;
+-    return m;
++    return Variant(base, base.motion, g_motionShaders, MotionVariant, "motion-vector");
++}
++const CompiledShader* ClipShader(const CompiledShader& base)
++{
++    return Variant(base, base.clip, g_clipShaders, ClipVariant, "user clip plane");
+ }
+ 
+-const CompiledShader* MotionShaderLookup(const CompiledShader& base)
++const CompiledShader* VariantLookup(const CompiledShader& base, VariantMap& map, std::string (*make)(const std::string&, bool),
++    const char* what)
+ {
+     const CompiledShader& source = base.hlslSource ? *base.hlslSource : base;
+-    auto [it, inserted] = g_motionShaders.try_emplace(source.cacheKey);
++    auto [it, inserted] = map.try_emplace(source.cacheKey);
+     if (!inserted)
+         return it->second->state.load(std::memory_order_acquire) == CompiledShader::Failed ? nullptr : it->second.get();
+     it->second = std::make_unique<CompiledShader>();
+@@ -3997,10 +4049,11 @@ const CompiledShader* MotionShaderLookup(const CompiledShader& base)
+     cs.hash = source.hash;
+     cs.pixel = source.pixel;
+     cs.info = source.info;
+-    cs.info.hlsl = MotionVariant(source.info.hlsl, source.pixel);
++    cs.userClip = source.userClip || make == ClipVariant;
++    cs.info.hlsl = make(source.info.hlsl, source.pixel);
+     if (cs.info.hlsl.empty())
+     {
+-        LOG_ONCE("upscale: no motion-vector variant for %s %016llx", source.pixel ? "ps" : "vs", (unsigned long long)source.hash);
++        LOG_ONCE("no %s variant for %s %016llx", what, source.pixel ? "ps" : "vs", (unsigned long long)source.hash);
+         cs.state = CompiledShader::Failed;
+         return nullptr;
+     }
+@@ -4400,7 +4453,7 @@ std::shared_ptr<PipelineEntry> EnsurePipeline(const CompiledShader& vs, const Co
+     pd.RTVFormats[0] = kColorFormat;
+     pd.DSVFormat = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
+     pd.SampleDesc.Count = g_msaa;
+-    const bool motion = key.flags & 4; // motion-vector variants: a second target for the motion
++    const bool motion = key.flags & 0x400; // motion-vector variants: a second target for the motion
+     if (motion)
+     {
+         pd.pRootSignature = g_r.motionRootSignature.Get();
+@@ -4414,7 +4467,7 @@ std::shared_ptr<PipelineEntry> EnsurePipeline(const CompiledShader& vs, const Co
+     }
+     auto entry = std::make_shared<PipelineEntry>();
+     g_r.pipelines[key] = entry;
+-    if (!motion && !IsPsEditAlias(key.ps) && !IsPsEditAlias(key.vs)) // the manifest rebuilds pipelines from the base shaders (not live edits)
++    if (!motion && !vs.userClip && !IsPsEditAlias(key.ps) && !IsPsEditAlias(key.vs)) // the manifest rebuilds pipelines from the base shaders (not live edits or variants)
+     {
+         g_manifest.RecordShader(false, key.vs, vs.ucodeBE);
+         g_manifest.RecordShader(true, key.ps, ps.ucodeBE);
+@@ -4566,7 +4619,9 @@ ID3D12PipelineState* GetPipeline(const CompiledShader& vs, const CompiledShader&
+         key.flags |= 0x200;
+     }
+     if (motion)
+-        key.flags |= 4;
++        key.flags |= 0x400; // (bit 2 is "no depth clip", MakePipelineKey)
++    if (vs.userClip)
++        key.flags |= 0x800;
+     if (stripCut)
+         key.flags |= 0x100; // strips restart at index 0xFFFF (DrawImpl)
+     thread_local std::unordered_map<PipelineKey, ID3D12PipelineState*, PipelineKeyHash> ready; // (pipelines are never removed)
+@@ -9752,7 +9807,9 @@ void DrawImpl(uint32_t initiator, uint32_t dmaBase, uint32_t dmaSize)
+     const bool cullable = (initiator & 0x3F) != 8 && (initiator & 0x3F) != 1;
+     const bool wantMotion = g_temporal && g_scenePhase && edramMode == 4 && WidePass();
+     g_plainRectDraw = (initiator & 0x3F) == 8 && !ps.info.usedTextureSlots && !vs.info.usedTextureSlots;
+-    const CompiledShader* mvs = wantMotion ? MotionShader(vs) : nullptr;
++    const CompiledShader* cvs = UserClipOn() ? ClipShader(vs) : nullptr;
++    const CompiledShader& dvs = cvs && cvs->IsReady() ? *cvs : vs;
++    const CompiledShader* mvs = wantMotion ? MotionShader(dvs) : nullptr;
+     const CompiledShader* mps = wantMotion ? MotionShader(ps) : nullptr;
+     bool motion = mvs && mps && mvs->IsReady() && mps->IsReady();
+     D3D12_GPU_VIRTUAL_ADDRESS motionPrevious = 0; // last frame's vertex constants of this draw (b2)
+@@ -9760,7 +9817,7 @@ void DrawImpl(uint32_t initiator, uint32_t dmaBase, uint32_t dmaSize)
+     if (!pso)
+     {
+         motion = false;
+-        pso = GetPipeline(vs, ps, edramMode == 5, cullable, false, stripCut && directIndex);
++        pso = GetPipeline(dvs, ps, edramMode == 5, cullable, false, stripCut && directIndex);
+     }
+     if (!pso)
+     {
+@@ -9815,6 +9872,7 @@ void DrawImpl(uint32_t initiator, uint32_t dmaBase, uint32_t dmaSize)
+         float point[4];
+         float vscale[4], voffset[4];
+         uint32_t vte[4];
++        float vucp[6][4];    // user clip planes (hlsl.cpp vucp), zero when off
+         uint32_t vfl[32][4]; // vertex fetch layout of the bound shader
+         float vuser[4][4];   // the game's per-draw constants (Host::onDraw; hlsl.cpp vuser), zero by default
+         float vdepth[4];     // x: the polygon offset's constant part (hlsl.cpp vdepth)
+@@ -10070,6 +10128,14 @@ void DrawImpl(uint32_t initiator, uint32_t dmaBase, uint32_t dmaSize)
+     vc->voffset[2] = RegFloat(PA_CL_VPORT_ZOFFSET);
+     vc->vte[0] = gpureg::Get(PA_CL_VTE_CNTL);
+     vc->vte[1] = vc->vte[2] = vc->vte[3] = 0;
++    // User clip planes (UserClipOn, read by the clip variants): the enabled ones, zero (nothing cut) for the rest.
++    {
++        const bool planesOn = UserClipOn();
++        const uint32_t clipCntl = gpureg::Get(0x2204 /* PA_CL_CLIP_CNTL */);
++        for (uint32_t i = 0; i < 6; i++)
++            for (uint32_t k = 0; k < 4; k++)
++                vc->vucp[i][k] = planesOn && ((clipCntl >> i) & 1) ? RegFloat(0x2388 + i * 4 + k) : 0.0f;
++    }
+     // Flags for the screen-space position code (hlsl.cpp), in bits the register doesn't use:
+     // bit 31 REGPU_OLD_CLEAR_SHIFT (A/B: half-pixel shift before the MSAA-view scale); bit 30 snaps a
+     // texture-less screen-space draw's edges to whole guest pixels on an upscaled surface. The console
+@@ -10912,7 +10978,7 @@ void DrawImpl(uint32_t initiator, uint32_t dmaBase, uint32_t dmaSize)
+     // passed). From pgr4-native's occlusion pairs. REGPU_NO_OCCLUSION_COVERAGE=1: not drawn (Total = ZPass).
+     static LiveSwitch noCoverage("REGPU_NO_OCCLUSION_COVERAGE");
+     ID3D12PipelineState* coveragePso = g_occlusionOpen && !noCoverage && !motion && g_occlusionCount + 2 <= kOcclusionPerFrame
+-        ? GetPipeline(vs, ps, edramMode == 5, cullable, false, stripCut && directIndex, true) : nullptr;
++        ? GetPipeline(dvs, ps, edramMode == 5, cullable, false, stripCut && directIndex, true) : nullptr;
+     {
+         const auto t0 = g_perfTiming ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+         const D3D_PRIMITIVE_TOPOLOGY topology = indexedCount && prim == 6 ? D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP : D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
