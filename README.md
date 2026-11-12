@@ -53,6 +53,7 @@ code runs natively, and its Xbox 360 graphics are translated to Direct3D 12.
 | 🪪 **Your name & picture** | instead of "User" and an empty square (settings → **Profile**) |
 | 💿 **Runs from your ISO** | saves stay in `Documents\ssx` |
 | 📦 **DLC support** | Mt. Eddie, Japan and the other packs, from your own console ([how](#adding-dlc)) |
+| 🎵 **Your own music** | your music folders as playlists in the game's Music menu, remixed live as you ride ([how](#your-music)) |
 | 📈 **Title update** | the game's last update: the gear for levels 11 to 15, and [riders up to level 15](#level-15), from your own console ([how](#title-update)) |
 
 <a id="installing"></a>
@@ -279,6 +280,24 @@ A save from a console that has been online since mid-2012 carries EA's tuning up
 the game keeps using it. The port also keeps such an update aside (`Documents\ssx\tuning\update.bin`)
 and gives it to your other saves; a save file put in `Documents\ssx\tuning` is picked up the same
 way.
+
+<a id="your-music"></a>
+
+## 🎵 Your own music
+
+SSX can play your own music instead of its soundtrack, and remixes it live as you ride, like on
+the console:
+
+1. Put your music in `Documents\ssx\music`, one folder per playlist: for example
+   `music\Chill\` and `music\Punk\`. The folder name is the playlist's name; songs in subfolders
+   count too. In races the game shuffles them. Music files right in `music\` form a playlist called
+   *Music*. MP3, M4A/AAC, WMA, FLAC and WAV work.
+2. In the game, press **Back** on the main screen, then **Music → Personalize Your Music**.
+3. For race, trick, survive and menu music, pick **Playlist** and then one of your folders.
+   (The game's own text says to create a playlist on the Xbox 360 console: a folder is that here.)
+
+The game's Audio Settings have a volume for your music and a **Remix** switch.
+New folders show up the next time you open the playlist list; no restart needed.
 
 <a id="roadmap"></a>
 

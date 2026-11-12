@@ -39,6 +39,7 @@ set(SSX_SOURCES
     src/ssx_restart.cpp
     src/ssx_profile.cpp
     src/ssx_tuning.cpp
+    src/ssx_music.cpp
 )
 
 if(WIN32)
@@ -48,6 +49,10 @@ else()
 endif()
 
 rexglue_setup_target(ssx GPU_PLUGINS xenos)
+if(WIN32)
+    # Your own music (src/ssx_music.cpp): Media Foundation decodes it.
+    target_link_libraries(ssx PRIVATE mfplat mfreadwrite mfuuid)
+endif()
 if(SSX_GAME_VERSION STREQUAL "0.0.3.2")
     target_compile_definitions(ssx PRIVATE SSX_TITLE_UPDATE=1)
 endif()

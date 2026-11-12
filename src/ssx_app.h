@@ -27,6 +27,7 @@
 #include "ssx_restart.h"
 #include "ssx_settings.h"
 #include "ssx_settings_dialog.h"
+#include "ssx_music.h"
 #include "ssx_tuning.h"
 
 class SsxApp : public rex::ReXApp {
@@ -122,6 +123,7 @@ class SsxApp : public rex::ReXApp {
     rex::cvar::SetFlagByName("gpu_allow_invalid_fetch_constants", "true");
     InstallDroppedDlc(runtime(), user_data_root());
     SsxSetTuningDir(user_data_root() / "tuning");
+    SsxSetMusicDir(user_data_root() / "music");
 
     window()->SetTitle("SSX");
     settings_ = std::make_unique<SsxSettingsDialog>(
