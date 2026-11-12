@@ -53,6 +53,12 @@ Levels 11 to 15 (needs the title update)
   a level 10 rider is offered access to level 11 on the rider screen (it
   costs credits), and so on up to level 15.
 
+Your own music
+  Put your music in Documents\ssx\music, one folder per playlist (MP3, M4A,
+  WMA, FLAC, WAV). In the game: Back on the main screen > Music >
+  Personalize Your Music, pick "Playlist" and one of your folders for race,
+  trick, survive or menu music. The game remixes it as you ride.
+
 Saves, DLC and shader cache live in Documents\ssx.
 If a setting stops the game from starting, delete ssx.toml next to ssx.exe
 to go back to the defaults (you will be asked for the game once more).
