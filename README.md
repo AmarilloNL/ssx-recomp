@@ -2,7 +2,7 @@
 
 # 🏂 SSX (2012) — Native PC Port
 
-**EA's SSX, running natively on Windows — up to 300 fps, sharper, no emulator.**
+**EA's SSX, running natively on Windows — up to 300 fps, up to 4K, no emulator.**
 
 [![Latest release](https://img.shields.io/github/v/release/AmarilloNL/ssx-recomp?style=for-the-badge&label=installer&color=0aa5e6)](../../releases/latest)
 [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4?style=for-the-badge&logo=windows11&logoColor=white)](#installing)
@@ -133,7 +133,7 @@ the file for you.
 <a id="frame-rate-lock"></a>
 
 > [!WARNING]
-> **3× is limited by the graphics card; we recommend 2×.** It draws about 4K (3600×1920), and
+> **Standard renderer: 3× is limited by the graphics card; we recommend 2×** (or [ReGPU](#regpu), the default). It draws about 4K (3600×1920), and
 > every pixel goes through the emulation of the Xbox 360's graphics chip. The settings menu warns
 > you when you pick it.
 >
