@@ -162,6 +162,15 @@ void SsxApplyStartupSettings() {
     REXLOG_WARN("resolution_scale above 3 is not supported in SSX; using 3");
     rex::cvar::SetFlagByName("resolution_scale", "3");
   }
+#ifndef _WIN32
+  // Note: 1x only on Linux. The scaled-resolve fixes (patches 0003-0014) are Direct3D 12 only;
+  // at 2x on Vulkan the frame rate sank and the GPU hung (NVIDIA Xid 39, GTX 1080) after a few
+  // minutes of riding. Port those fixes before offering 2x here.
+  if (rex::string::from_string<int32_t>(rex::cvar::GetFlagByName("resolution_scale"), 1) != 1) {
+    REXLOG_WARN("resolution_scale above 1 is not supported on Linux yet; using 1");
+    rex::cvar::SetFlagByName("resolution_scale", "1");
+  }
+#endif
 
   ApplyVolume(REXCVAR_GET(ssx_volume));
   rex::cvar::RegisterChangeCallback("ssx_volume", [](std::string_view, std::string_view value) {

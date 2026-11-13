@@ -136,9 +136,9 @@ again.
   haven't been tested yet: reports are welcome.
 - Where this README says `Documents\ssx`, Linux uses **`~/.local/share/ssx`** (saves, `dlc`,
   `music`). Your own music needs `ffmpeg`.
-- Not on Linux yet: the gamer picture, FSR upscaling (the image is scaled bilinear) and *match
-  display* as frame rate (it uses 60). The 2× and 3× resolution scales haven't been tested on
-  Linux; 1× is the safe choice.
+- Not on Linux yet: the 2× and 3× resolution scales (Linux runs at 1×: 2× made the graphics
+  driver hang after a few minutes in testing), the gamer picture, FSR upscaling (the image is
+  scaled bilinear) and *match display* as frame rate (it uses 60).
 - The first minutes can stutter briefly while the graphics driver prepares the game's shaders.
   They're kept for the next start.
 - If something goes wrong, attach `build-ssx-linux.log` from the repository folder to an issue.

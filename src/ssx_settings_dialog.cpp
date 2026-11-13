@@ -430,6 +430,7 @@ void SsxSettingsDialog::DrawDisplayTab() {
 
 void SsxSettingsDialog::DrawGraphicsTab() {
   if (!BeginRows("##graphics")) return;
+#ifdef _WIN32  // Linux: 1x only, scaled bilinear (ssx_settings.cpp)
   Row("Resolution scale", "N x N times as many pixels: sharper, but heavier on the GPU.");
   bool heavy = std::atoi(rex::cvar::GetFlagByName("resolution_scale").c_str()) >= 3;
   if (Combo("##scale", "resolution_scale", kScales, std::size(kScales)) && !heavy &&
@@ -443,7 +444,6 @@ void SsxSettingsDialog::DrawGraphicsTab() {
   }
   DrawScaleWarning();
 
-#ifdef _WIN32  // Linux scales bilinear only (ssx_settings.cpp)
   Row("Upscaling", "How the image is scaled to your screen. FSR is sharpest at 1x.");
   Combo("##upscaling", "present_effect", kUpscaling, std::size(kUpscaling));
 #endif
