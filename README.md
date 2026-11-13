@@ -10,7 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge)](LICENSE)
 <a href="https://playported.com/ports/1191-ssx/"><img src="https://playported.com/badge.svg" alt="Listed on PlayPorted" height="28"></a>
 
-[**⬇️ Download**](../../releases/latest) · [🎬 Gameplay](#gameplay) · [✨ Features](#features) · [🛠️ Install](#installing) · [🎮 Controls](#playing) · [📦 DLC & update](#adding-dlc) · [🗺️ Roadmap](#roadmap)
+[**⬇️ Download**](../../releases/latest) · [🎬 Gameplay](#gameplay) · [✨ Features](#features) · [🛠️ Install](#installing) · [🐧 Linux](#linux) · [🎮 Controls](#playing) · [📦 DLC & update](#adding-dlc) · [🗺️ Roadmap](#roadmap)
 
 </div>
 
@@ -110,6 +110,38 @@ these exact executables. Some ISOs named "World" contain this same release; the 
 the file for you.
 
 </details>
+
+<a id="linux"></a>
+
+### 🐧 Linux
+
+There's a native Linux version too (Vulkan, no Wine or Proton needed). It's built the same way,
+with a script instead of the installer:
+
+```sh
+git clone https://github.com/AmarilloNL/ssx-recomp.git
+cd ssx-recomp
+./scripts/build-ssx-linux.sh --iso ~/Games/SSX.iso
+```
+
+Add `--title-update <file>` for [the title update](#title-update) (once; later builds keep it,
+`--no-title-update` goes back). The script installs the missing build tools with your package manager
+(it asks for your password through `sudo`), builds the recompiler SDK and the game, and adds **SSX**
+to your app menu. The game ends up in `dist/SSX`. **To update:** `git pull`, then run the script
+again.
+
+- Needs about **15 GB** free during the build and **20–60 minutes** the first time.
+- Tested on **CachyOS** (Arch based, KDE Plasma on Wayland) with an NVIDIA GTX 1080 and an Xbox
+  controller. Debian/Ubuntu (`apt`) and Fedora (`dnf`) get their packages installed too, but
+  haven't been tested yet: reports are welcome.
+- Where this README says `Documents\ssx`, Linux uses **`~/.local/share/ssx`** (saves, `dlc`,
+  `music`). Your own music needs `ffmpeg`.
+- Not on Linux yet: the gamer picture, FSR upscaling (the image is scaled bilinear) and *match
+  display* as frame rate (it uses 60). The 2× and 3× resolution scales haven't been tested on
+  Linux; 1× is the safe choice.
+- The first minutes can stutter briefly while the graphics driver prepares the game's shaders.
+  They're kept for the next start.
+- If something goes wrong, attach `build-ssx-linux.log` from the repository folder to an issue.
 
 <a id="playing"></a>
 
