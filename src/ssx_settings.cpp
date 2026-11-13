@@ -14,9 +14,11 @@
 #include <set>
 #include <string>
 
+#ifdef _WIN32
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#endif
 
 #include <rex/audio/downmix.h>
 #include <rex/cvar.h>
@@ -53,11 +55,16 @@ int32_t SsxTargetFps() {
   if (scale >= 3) return std::clamp(REXCVAR_GET(ssx_framerate_3x), 30, 60);
   int32_t fps = REXCVAR_GET(ssx_framerate);
   if (fps == 0) {  // match the main display
+#ifndef _WIN32
+    // Note: 60 on Linux; ask the windowing layer for the refresh rate if players want more.
+    fps = 60;
+#else
     DEVMODEW mode = {};
     mode.dmSize = sizeof(mode);
     fps = EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &mode) && mode.dmDisplayFrequency > 1
               ? int32_t(mode.dmDisplayFrequency)
               : 60;
+#endif
   }
   return std::clamp(fps, 30, 360);
 }
@@ -98,14 +105,25 @@ void SsxApplyStartupSettings() {
   if (rex::cvar::GetFlagSource("render_target_path_d3d12") == rex::cvar::Source::kDefault) {
     rex::cvar::SetFlagByName("render_target_path_d3d12", "rov");
   }
+  // Vulkan (Linux) the same way: its render-target path sends the game's picture to the screen
+  // from the wrong surface after some draws (blank screen in races; SDK issue #508), FSI doesn't.
+  if (rex::cvar::GetFlagSource("render_target_path_vulkan") == rex::cvar::Source::kDefault) {
+    rex::cvar::SetFlagByName("render_target_path_vulkan", "fsi");
+  }
   if (REXCVAR_GET(ssx_render_resolution) == "720p") {  // replaced by high, see sub_82FB6120
     rex::cvar::SetFlagByName("ssx_render_resolution", "high");
   }
   // FSR 1 upscales the game's output to the window much more sharply than bilinear,
   // at almost no cost.
+#ifdef _WIN32
   if (rex::cvar::GetFlagSource("present_effect") == rex::cvar::Source::kDefault) {
     rex::cvar::SetFlagByName("present_effect", "fsr");
   }
+#else
+  // Note: the Vulkan renderer's FSR/CAS output comes out almost black (max 1 of 255), so
+  // Linux always scales bilinear; fix that pass in the SDK if sharper scaling is wanted there.
+  rex::cvar::SetFlagByName("present_effect", "bilinear");
+#endif
   // With ROV the GPU thread otherwise runs screen-space vertex shaders on the CPU;
   // SSX is bound by that thread, and letting the host GPU do it measured +12% in races.
   if (rex::cvar::GetFlagSource("execute_unclipped_draw_vs_on_cpu_for_psi_render_backend") ==

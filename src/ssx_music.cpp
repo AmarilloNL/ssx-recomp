@@ -8,7 +8,7 @@
 // Here the port is the media player for those requests. Every folder in <user data>/music is a
 // playlist (named after the folder, its songs in name order, subfolders included), and music files
 // right in that folder form one more, "Music". Songs are decoded with Windows' Media Foundation (MP3,
-// AAC/M4A, WMA, FLAC, WAV) to 48 kHz stereo and handed to the game's capture callback in steps of 256
+// AAC/M4A, WMA, FLAC, WAV; on Linux by the system's ffmpeg) to 48 kHz stereo and handed to the game's capture callback in steps of 256
 // frames, once per audio frame of the game.
 //
 // The game's requests (media player app 0xFA): XamCreateEnumeratorHandle with messages 0x70026/27
@@ -30,10 +30,15 @@
 #include <thread>
 #include <vector>
 
+#ifdef _WIN32
 #include <windows.h>
 #include <mfapi.h>
 #include <mfidl.h>
 #include <mfreadwrite.h>
+#else
+#include <cstdio>
+#include <cwctype>
+#endif
 
 #include <rex/logging.h>
 #include <rex/system/kernel_state.h>
@@ -115,6 +120,59 @@ std::vector<Playlist> ScanPlaylists() {
   return playlists;
 }
 
+#ifndef _WIN32
+// ---- Decoding (ffmpeg, Linux) -------------------------------------------------------------------------
+
+// One song, decoded by the system's ffmpeg program to 48 kHz stereo float.
+// Note: needs ffmpeg installed (most desktops have it); link libavformat if that's a problem.
+class Decoder {
+ public:
+  bool Open(const std::filesystem::path& path) {
+    Close();
+    std::string quoted = "'";
+    for (char c : path.string()) quoted += c == '\'' ? std::string("'\\''") : std::string(1, c);
+    quoted += "'";
+    pipe_ = popen(("ffmpeg -nostdin -v error -i " + quoted + " -vn -f f32le -ac 2 -ar 48000 - 2>/dev/null").c_str(), "r");
+    if (!pipe_) return false;
+    std::vector<float> first;
+    if (!Read(first) || first.empty()) {  // not a song ffmpeg can read (or no ffmpeg)
+      Close();
+      return false;
+    }
+    pending_ = std::move(first);
+    return true;
+  }
+
+  void Close() {
+    if (pipe_) pclose(pipe_);
+    pipe_ = nullptr;
+    pending_.clear();
+  }
+
+  void LogFormat() const { REXLOG_INFO("Music:   decoded by ffmpeg to 48000 Hz stereo"); }
+
+  // Appends up to about 100 ms of 48 kHz stereo frames to `out`. False at the end of the song.
+  bool Read(std::vector<float>& out) {
+    if (!pending_.empty()) {
+      out.insert(out.end(), pending_.begin(), pending_.end());
+      pending_.clear();
+      return true;
+    }
+    if (!pipe_) return false;
+    float buffer[4800 * 2];
+    size_t got = std::fread(buffer, sizeof(float), std::size(buffer), pipe_);
+    got -= got % 2;
+    out.insert(out.end(), buffer, buffer + got);
+    return got > 0;
+  }
+
+  ~Decoder() { Close(); }
+
+ private:
+  FILE* pipe_ = nullptr;
+  std::vector<float> pending_;
+};
+#else
 // ---- Decoding (Media Foundation) ---------------------------------------------------------------------
 
 template <typename T>
@@ -206,7 +264,7 @@ class Decoder {
       }
       return;
     }
-    // ponytail: linear resampling (only when Media Foundation won't resample); a windowed-sinc
+    // Note: linear resampling (only when Media Foundation won't resample); a windowed-sinc
     // resampler if anyone hears the difference.
     const double step = double(rate_) / kRate;
     for (size_t i = 0; i < frames; ++i) {
@@ -232,6 +290,7 @@ class Decoder {
   float previous_l_ = 0, previous_r_ = 0;
   bool have_previous_ = false;
 };
+#endif
 
 // ---- The player --------------------------------------------------------------------------------------
 
@@ -323,8 +382,10 @@ class Player {
   }
 
   void Run() {
+#ifdef _WIN32
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     MFStartup(MF_VERSION, MFSTARTUP_LITE);
+#endif
     Decoder decoder;
     std::vector<float> chunk;
     std::unique_lock lock(mutex_);

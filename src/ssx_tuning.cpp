@@ -25,6 +25,11 @@
 #include <string_view>
 #include <vector>
 
+#ifndef _WIN32
+#include <sys/uio.h>
+#include <unistd.h>
+#endif
+
 #include <fmt/format.h>
 
 #include <rex/hook.h>
@@ -67,7 +72,7 @@ struct Tuning {
 
 // The newest tuning update in the files of the tuning folder: our own copy, or a profile save that
 // carries one (the version is the 32-bit number right before the archive in both).
-// ponytail: reads each file as plain bytes. A save still inside its Xbox 360 package is found too as
+// Note: reads each file as plain bytes. A save still inside its Xbox 360 package is found too as
 // long as the archive isn't split by one of the package's hash blocks (a single-file save package
 // keeps it whole); unpack the package properly if one ever isn't found.
 Tuning FindTuning() {
@@ -149,13 +154,34 @@ const std::vector<LevelTable>& LevelTables() {
 
 constexpr uint32_t kDiscLevels = 10;
 
+// Copies `size` bytes of this process's memory; false if any of it can't be read. On Linux the runtime
+// can report guest memory as committed and readable while the host page behind it isn't (reading it
+// raised SIGBUS in the heap scan, now and then), so the hook's reads of the game's heap go through here.
+bool CopyHost(void* dst, const void* src, size_t size) {
+#ifdef _WIN32
+  std::memcpy(dst, src, size);
+  return true;
+#else
+  iovec local{dst, size}, remote{const_cast<void*>(src), size};
+  return process_vm_readv(getpid(), &local, 1, &remote, 1, 0) == ssize_t(size);
+#endif
+}
+
 // Whether `size` bytes at a guest address can be read.
 bool Readable(rex::memory::Memory* memory, uint32_t address, uint32_t size) {
   rex::memory::BaseHeap* heap = address ? memory->LookupHeap(address) : nullptr;
   rex::memory::HeapAllocationInfo info{};
-  return heap && heap->QueryRegionInfo(address, &info) && (info.state & rex::memory::kMemoryAllocationCommit) &&
-         (info.protect & rex::memory::kMemoryProtectRead) &&
-         uint64_t(address) + size <= uint64_t(info.base_address) + info.region_size;
+  if (!heap || !heap->QueryRegionInfo(address, &info) || !(info.state & rex::memory::kMemoryAllocationCommit) ||
+      !(info.protect & rex::memory::kMemoryProtectRead) ||
+      uint64_t(address) + size > uint64_t(info.base_address) + info.region_size) {
+    return false;
+  }
+#ifdef _WIN32
+  return true;
+#else
+  std::vector<uint8_t> probe(size);
+  return CopyHost(probe.data(), memory->TranslateVirtual<const uint8_t*>(address), size);
+#endif
 }
 
 // The array a table's node points at, if it is the disc's: ten entries of the table's size.
@@ -171,7 +197,7 @@ const uint8_t* DiscArray(rex::memory::Memory* memory, const uint8_t* node, const
 
 // The XP table's nodes that still point at the disc's array: the key, then a pointer to ten 32-bit
 // values that start with 6,000. (Normally one: the collection the database just built.)
-// ponytail: a scan of the game's heap after each load of the database (a few hundred MB, about a
+// Note: a scan of the game's heap after each load of the database (a few hundred MB, about a
 // tenth of a second, during loading). Take the node table from the game's collection object instead
 // if that ever shows.
 std::vector<uint8_t*> FindXpNodes(rex::memory::Memory* memory, bool* longer_seen) {
@@ -190,16 +216,27 @@ std::vector<uint8_t*> FindXpNodes(rex::memory::Memory* memory, bool* longer_seen
       }
       if ((info.state & rex::memory::kMemoryAllocationCommit) && (info.protect & rex::memory::kMemoryProtectRead)) {
         uint8_t* region = memory->TranslateVirtual<uint8_t*>(info.base_address);
-        for (uint32_t at = 0; at + 12 <= info.region_size; at += 4) {
-          if (std::memcmp(region + at, key, 4) != 0) continue;
-          const uint8_t* array = DiscArray(memory, region + at, xp);
-          if (array && Be32(array + 8) == 6000) {
-            found.push_back(region + at);
-          } else if (uint32_t longer = Be32(region + at + 4); !(longer & 1) && Readable(memory, longer, 16)) {
-            // A table that is long already: a tuning update's, or one we made longer before.
-            const uint8_t* other = memory->TranslateVirtual<const uint8_t*>(longer);
-            if (Be16(other + 2) > kDiscLevels && Be16(other + 4) == xp.entry_bytes && Be32(other + 8) == 6000) {
-              *longer_seen = true;
+        // A megabyte at a time, from a copy (CopyHost), plus the 12 bytes a node at its end needs.
+        // Note: a megabyte with one unreadable page is skipped whole; per page if a table is ever
+        // missed because of that.
+        constexpr uint32_t kChunk = 1u << 20;
+        std::vector<uint8_t> chunk(kChunk + 12);
+        for (uint32_t offset = 0; offset + 12 <= info.region_size; offset += kChunk) {
+          uint32_t n = std::min<uint32_t>(kChunk + 12, info.region_size - offset);
+          if (!CopyHost(chunk.data(), region + offset, n)) continue;
+          for (uint32_t at = 0; at < kChunk && at + 12 <= n; at += 4) {
+            const uint8_t* copy = chunk.data() + at;
+            if (std::memcmp(copy, key, 4) != 0) continue;
+            uint8_t* node = region + offset + at;
+            const uint8_t* array = DiscArray(memory, copy, xp);
+            if (array && Be32(array + 8) == 6000) {
+              found.push_back(node);
+            } else if (uint32_t longer = Be32(copy + 4); !(longer & 1) && Readable(memory, longer, 16)) {
+              // A table that is long already: a tuning update's, or one we made longer before.
+              const uint8_t* other = memory->TranslateVirtual<const uint8_t*>(longer);
+              if (Be16(other + 2) > kDiscLevels && Be16(other + 4) == xp.entry_bytes && Be32(other + 8) == 6000) {
+                *longer_seen = true;
+              }
             }
           }
         }
@@ -249,8 +286,7 @@ void ExtendLevelTables() {
       for (int step = -256; step <= 256 && !found; ++step) {
         uint8_t* node = xp_node + step * 12;
         uint32_t address = memory->HostToGuestVirtual(node);
-        if (Readable(memory, address, 12) && Be32(node) == table.key && DiscArray(memory, node, table)) found = node;
-      }
+        if (Readable(memory, address, 12) && Be32(node) == table.key && DiscArray(memory, node, table)) found = node;      }
       if (!found) break;
       nodes.push_back(found);
     }
