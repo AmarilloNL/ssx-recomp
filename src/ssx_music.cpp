@@ -21,11 +21,13 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstring>
 #include <deque>
 #include <mutex>
 #include <random>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -267,15 +269,25 @@ class Player {
   }
   void Pause() {
     std::lock_guard lock(mutex_);
-    if (state_ == kPlaying) {
-      state_ = kPaused;
-      REXLOG_INFO("Music: paused");
+    if (state_ != kPlaying) return;
+    // Restarting an event from the pause menu: the game resumes, then 2-3 s later either stops
+    // the music or pauses it again (timing). After a stop it starts the playlist again with the
+    // run; after a pause it leaves it alone for good (the player paused their own music, as far as
+    // it knows), so the music never came back. A pause that soon after a resume is that restart.
+    if (std::chrono::steady_clock::now() - resumed_at_ < std::chrono::seconds(6)) {
+      state_ = kIdle;
+      pcm_.clear();
+      REXLOG_INFO("Music: stopped (paused right after resuming: an event restarting)");
+      return;
     }
+    state_ = kPaused;
+    REXLOG_INFO("Music: paused");
   }
   void Resume() {
     std::lock_guard lock(mutex_);
     if (state_ == kPaused) {
       state_ = kPlaying;
+      resumed_at_ = std::chrono::steady_clock::now();
       REXLOG_INFO("Music: resumed");
     }
     wake_.notify_all();
@@ -380,6 +392,7 @@ class Player {
   bool shuffle_ = false, no_repeat_ = false;
   std::atomic<State> state_{kIdle};
   std::deque<float> pcm_;
+  std::chrono::steady_clock::time_point resumed_at_{};
 };
 
 Player player;
@@ -442,10 +455,24 @@ bool HandleRequest(uint8_t* base, uint32_t message, uint32_t buffer) {
       if (buffer) {
         capture_callback = REX_LOAD_U32(buffer + 4);
         capture_context = REX_LOAD_U32(buffer + 8);
+        REXLOG_INFO("Music: the game {} the music (callback {:08X}, flags {:08X})",
+                    capture_callback.load() ? "captures" : "stops capturing", capture_callback.load(),
+                    REX_LOAD_U32(buffer + 12));
       }
       return true;
-    default:
+    default: {
+      // Requests the port doesn't answer go to the runtime; logged once each, to see what the game
+      // asks the media player for.
+      static std::mutex seen_mutex;
+      static std::set<uint32_t> seen;
+      std::lock_guard lock(seen_mutex);
+      if (seen.insert(message).second) {
+        REXLOG_INFO("Music: request {:08X} not handled here (buffer {:08X}: {:08X} {:08X} {:08X})", message, buffer,
+                    buffer ? REX_LOAD_U32(buffer) : 0, buffer ? REX_LOAD_U32(buffer + 4) : 0,
+                    buffer ? REX_LOAD_U32(buffer + 8) : 0);
+      }
       return false;
+    }
   }
 }
 
