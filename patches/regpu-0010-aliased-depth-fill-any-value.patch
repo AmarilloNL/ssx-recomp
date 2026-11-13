@@ -20,7 +20,7 @@ index 8899441..da1cc90 100644
 +            // the tracks started from a height of 0 left of column 80 (noise, a seam of tilted normals).
 +            // The depth is the first vertex's z (three floats at the start of the vertex; no viewport
 +            // transform). REGPU_ALIASED_DEPTH_FILL_WHITE=1: white for stencil FF only, as before.
-+            // ponytail: the whole scissor is filled, not the rectangle (a fill always came with the rest
++            // Note: the whole scissor is filled, not the rectangle (a fill always came with the rest
 +            // of the surface cleared to the same colour); cut to the rectangle if a title fills a part.
 +            static LiveSwitch whiteOnly("REGPU_ALIASED_DEPTH_FILL_WHITE");
 +            const uint32_t stencil = gpureg::Get(RB_STENCILREFMASK) & 0xFF;

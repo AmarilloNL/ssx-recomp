@@ -60,7 +60,7 @@ index 960d35b..ee7cbcd 100644
 +// User clip planes: PA_CL_CLIP_CNTL bits 0-5 enable PA_CL_UCP_n (registers 0x2388 + 4n, x y z w in clip
 +// space), unless CLIP_DISABLE (bit 16). SSX cuts the snow ribbon along its rails with plane 0; without
 +// it the whole ribbon stood around every rail as a white band. REGPU_NO_USER_CLIP=1: none, as before.
-+// ponytail: UCP_CULL_ONLY_ENA (bit 17: whole primitives culled, none clipped) is left off, as before; a
++// Note: UCP_CULL_ONLY_ENA (bit 17: whole primitives culled, none clipped) is left off, as before; a
 +// cull distance output if a title needs it.
 +bool UserClipOn()
 +{

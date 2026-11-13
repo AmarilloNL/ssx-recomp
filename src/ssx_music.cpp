@@ -206,7 +206,7 @@ class Decoder {
       }
       return;
     }
-    // ponytail: linear resampling (only when Media Foundation won't resample); a windowed-sinc
+    // Note: linear resampling (only when Media Foundation won't resample); a windowed-sinc
     // resampler if anyone hears the difference.
     const double step = double(rate_) / kRate;
     for (size_t i = 0; i < frames; ++i) {

@@ -63,7 +63,7 @@ index a5f1ab4..1c67bdd 100644
 +            Check(g_r.device->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&g_volumeRtvs.heap)), "CreateDescriptorHeap(3D slices)");
 +            g_volumeRtvs.stride = g_r.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 +        }
-+        // ponytail: views are never freed; a title recreating many volumes runs out and its later
++        // Note: views are never freed; a title recreating many volumes runs out and its later
 +        // ones keep the memory path only.
 +        if (g_volumeRtvs.next + d <= VolumeRtvs::kCount)
 +        {
@@ -109,7 +109,7 @@ index a5f1ab4..1c67bdd 100644
 +    std::lock_guard<std::recursive_mutex> lock{ g_textureMutex };
 +    for (auto& [key, v] : g_r.volumes)
 +    {
-+        // ponytail: 32-bit texels only (RGBA8 volumes); others keep the memory path.
++        // Note: 32-bit texels only (RGBA8 volumes); others keep the memory path.
 +        if (!v.resource || v.rtvFirst == ~0u || v.format != DXGI_FORMAT_R8G8B8A8_UNORM || destBase < v.address)
 +            continue;
 +        const uint32_t groupBytes = v.width * v.height * 4 * 8, offset = destBase - v.address;
