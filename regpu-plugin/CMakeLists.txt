@@ -21,4 +21,14 @@ add_library(rexgpu-regpu SHARED
     src/overlay.cpp
     src/regpu_graphics_system.cpp
     src/stack_dump.cpp)
-target_link_libraries(rexgpu-regpu PRIVATE regpu rex::runtime dbghelp)
+if(WIN32)
+    target_link_libraries(rexgpu-regpu PRIVATE regpu rex::runtime dbghelp)
+else()
+    # Linux: librexgpu-regpu.so; the window's Vulkan surface comes from linux_surface.cpp, and
+    # libdxcompiler.so is shipped next to the game ($ORIGIN).
+    target_sources(rexgpu-regpu PRIVATE src/linux_surface.cpp)
+    # SDL's headers (its functions are in ReXGlue's runtime library).
+    target_include_directories(rexgpu-regpu PRIVATE "${SSX_REXGLUE_SOURCE}/thirdparty/sdl3/include")
+    target_link_libraries(rexgpu-regpu PRIVATE regpu rex::runtime)
+    set_target_properties(rexgpu-regpu PROPERTIES BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")
+endif()

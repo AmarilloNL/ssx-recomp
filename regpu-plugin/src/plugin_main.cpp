@@ -17,16 +17,16 @@ extern "C" REX_GPU_PLUGIN_EXPORT rex::system::IGraphicsSystem* rex_gpu_create(
     if (abi_version != rex::system::kGpuPluginAbiVersion || !info ||
         info->struct_size < sizeof(rex::system::GpuCreateInfo))
         return nullptr;
-    // ReGPU is Direct3D 12 only.
+    // ReGPU is Direct3D 12 (on Linux through vkd3d, on Vulkan).
     std::string_view backend = info->backend ? info->backend : "any";
-    if (backend != "any" && backend != "d3d12")
+    if (backend != "any" && backend != "d3d12" && backend != "vulkan")
         return nullptr;
     return new glue2gpu::ReGpuGraphicsSystem();
 }
 
 // SSX's app draws ReXGlue's ImGui overlays (its F1 menu) through this drawer; callback runs on the
 // presenting thread once per frame, to build the next overlay frame.
-extern "C" __declspec(dllexport) rex::ui::ImmediateDrawer* ssx_regpu_overlay(void (*callback)(void*), void* context)
+extern "C" REX_GPU_PLUGIN_EXPORT rex::ui::ImmediateDrawer* ssx_regpu_overlay(void (*callback)(void*), void* context)
 {
     glue2gpu::SetOverlayFrameCallback(callback, context);
     return glue2gpu::OverlayImmediateDrawer();

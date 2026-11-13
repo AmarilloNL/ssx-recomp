@@ -188,8 +188,12 @@ bool Compile(const char* entry, const char* target, ComPtr<ID3DBlob>& out)
 {
     using Fn = decltype(&D3DCompile);
     static Fn compile = [] {
+#ifdef _WIN32
         HMODULE m = LoadLibraryW(L"d3dcompiler_47.dll");
         return m ? reinterpret_cast<Fn>(GetProcAddress(m, "D3DCompile")) : nullptr;
+#else
+        return &D3DCompile; // ReGPU's: DXC (src/platform/linux)
+#endif
     }();
     ComPtr<ID3DBlob> errors;
     if (!compile || FAILED(compile(kShader, sizeof(kShader) - 1, "overlay", nullptr, nullptr, entry, target, 0, 0, &out, &errors)))

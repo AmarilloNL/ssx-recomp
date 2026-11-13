@@ -2,6 +2,7 @@
 // ReXGlue's GPU plugin interface. Adapted from Glue2GPU's Forza Horizon plugin
 // (https://github.com/zer0ducksgiven/Glue2GPU, MIT, see ../LICENSE); the Forza-specific parts are left out.
 #include "regpu_graphics_system.h"
+#include "linux_surface.h"
 #include "overlay.h"
 #include "stack_dump.h"
 
@@ -75,20 +76,28 @@ int32_t FlagInt(const char* name, int32_t fallback)
 uint32_t TargetFps()
 {
     int32_t fps = FlagInt("ssx_framerate", 60);
+#ifndef _WIN32
+    if (fps == 0)
+        fps = 60; // (as the game's own setting on Linux, src/ssx_settings.cpp)
+#endif
     if (fps == 0)
     {
+#ifdef _WIN32
         DEVMODEW mode = {};
         mode.dmSize = sizeof(mode);
         fps = EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &mode) && mode.dmDisplayFrequency > 1
                   ? int32_t(mode.dmDisplayFrequency)
                   : 60;
+#endif
     }
     return uint32_t(std::clamp(fps, 30, 360));
 }
 
 // The drawing resolution (regpu_resolution): "screen" is the display mode of the monitor the game
 // window is on (its real pixels, whatever the Windows scaling), else WIDTHxHEIGHT; 1280x720 if neither.
+#ifdef _WIN32
 HWND g_window = nullptr;
+#endif
 void DrawingSize(uint32_t& width, uint32_t& height)
 {
     width = 1280;
@@ -96,6 +105,15 @@ void DrawingSize(uint32_t& width, uint32_t& height)
     const std::string v = REXCVAR_GET(regpu_resolution);
     if (v == "screen")
     {
+#ifndef _WIN32
+        // Linux: the game window's pixels (the screen's when fullscreen).
+        if (auto* runtime = rex::Runtime::instance(); runtime && runtime->display_window() &&
+            runtime->display_window()->GetActualPhysicalWidth())
+        {
+            width = runtime->display_window()->GetActualPhysicalWidth();
+            height = runtime->display_window()->GetActualPhysicalHeight();
+        }
+#else
         MONITORINFOEXW info = {};
         info.cbSize = sizeof(info);
         DEVMODEW mode = {};
@@ -106,12 +124,13 @@ void DrawingSize(uint32_t& width, uint32_t& height)
             width = mode.dmPelsWidth;
             height = mode.dmPelsHeight;
         }
+#endif
     }
     else
     {
         std::sscanf(v.c_str(), "%ux%u", &width, &height);
     }
-    // ponytail: the largest 16:9 size inside it, as the old 1x-3x scales were. SSX's scene doesn't take
+    // Note: the largest 16:9 size inside it, as the old 1x-3x scales were. SSX's scene doesn't take
     // ReGPU's wider-view path (its surfaces aren't 1280 wide), so 2560x1080 drew the 16:9 picture
     // stretched; real ultrawide needs that path made to work for SSX.
     if (uint64_t(width) * 9 > uint64_t(height) * 16)
@@ -152,7 +171,20 @@ void FollowSettings()
 }
 
 // The window title shows the frame rate. Set from a thread of its own, as WM_SETTEXT waits for the
-// window's thread.
+// window's thread. The same thread applies the F1 settings (FollowSettings).
+#ifndef _WIN32
+// Linux: the settings only (the title stays the game's).
+void StartTitleFps(void*)
+{
+    std::thread([] {
+        while (g_running)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            FollowSettings();
+        }
+    }).detach();
+}
+#else
 void StartTitleFps(HWND hwnd)
 {
     if (!hwnd)
@@ -175,6 +207,7 @@ void StartTitleFps(HWND hwnd)
         }
     }).detach();
 }
+#endif
 
 uint32_t Alloc(bool physical, uint32_t size, uint32_t align)
 {
@@ -326,9 +359,15 @@ X_STATUS ReGpuGraphicsSystem::SetupGuestGpu(rex::runtime::FunctionDispatcher* di
 
     regpu::Config& config = regpu::GetConfig();
     // Present into ReXGlue's game window (it keeps input, focus, closing and fullscreen).
+#ifdef _WIN32
     if (auto* runtime = rex::Runtime::instance(); runtime && runtime->display_window())
         config.hostWindow = runtime->display_window()->GetNativeWindowHandle();
     g_window = static_cast<HWND>(config.hostWindow);
+#else
+    // Linux: through Vulkan, on the window's Wayland or X11 surface.
+    if (auto* runtime = rex::Runtime::instance(); runtime && runtime->display_window())
+        UseWindowAsVulkanSurface(runtime->display_window(), config);
+#endif
     // The drawing size (regpu_resolution, or SSX_REGPU_RES=WxH for a test).
     DrawingSize(config.width, config.height);
     if (const char* res = std::getenv("SSX_REGPU_RES"))
@@ -389,7 +428,11 @@ X_STATUS ReGpuGraphicsSystem::SetupGuestGpu(rex::runtime::FunctionDispatcher* di
     regpu::Start();
     started_ = true;
     g_running = true;
+#ifdef _WIN32
     StartTitleFps(static_cast<HWND>(config.hostWindow));
+#else
+    StartTitleFps(nullptr);
+#endif
     std::thread(RefreshRateLoop).detach();
     REXLOG_INFO("regpu: started, drawing {}x{}, frame cap {}", config.width, config.height, config.maxFps);
     return X_STATUS_SUCCESS;

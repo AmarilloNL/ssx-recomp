@@ -1,6 +1,15 @@
 // Host::logThreadStacks: every thread's host stack, for ReGPU's hang reports.
 #include "stack_dump.h"
 
+#ifndef _WIN32
+// Note: Linux has no stack walker here yet (this one is dbghelp); the hang report says why only.
+#include <rex/logging.h>
+void glue2gpu::LogThreadStacks(const char* why)
+{
+    REXLOG_WARN("ReGPU: {} (thread stacks are logged on Windows only)", why ? why : "");
+}
+#else
+
 #include <cstdio>
 #include <mutex>
 #include <string>
@@ -159,3 +168,4 @@ void LogThreadStacks(const char* why)
         std::fclose(file);
 }
 } // namespace glue2gpu
+#endif
