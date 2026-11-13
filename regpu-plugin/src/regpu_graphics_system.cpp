@@ -422,6 +422,10 @@ X_STATUS ReGpuGraphicsSystem::SetupGuestGpu(rex::runtime::FunctionDispatcher* di
     // backdrop and a full-screen pass): sampled, as on the console (the standard renderer's
     // gpu_allow_invalid_fetch_constants, src/ssx_app.h).
     SetDefaultSwitch("REGPU_INVALID_FETCH_AS_TEXTURE");
+    // ReGPU's status box (shader compiles, pipeline warm-up) is for testing, not for players
+    // (SSX_REGPU_STATUS=1 shows it).
+    if (!std::getenv("SSX_REGPU_STATUS"))
+        SetDefaultSwitch("REGPU_NO_OVERLAY");
     if (!std::getenv("REGPU_DENSE_HASH_KB"))
         _putenv_s("REGPU_DENSE_HASH_KB", "4096");
 
