@@ -362,6 +362,8 @@ void SsxSettingsDialog::DrawDisplayTab() {
     Row("Frame rate", "Gameplay keeps real-time speed at any rate.");
     Combo("##framerate", "ssx_framerate", kFramerates, std::size(kFramerates));
   }
+  Row("VSync", "No tearing on screens without G-Sync/FreeSync, like handhelds. Applies after a restart.");
+  Checkbox("##vsync", "ssx_vsync");
   Row("Keep 16:9 aspect ratio", "Black bars instead of stretching on other window shapes.");
   Checkbox("##letterbox", "present_letterbox");
   Row("Show FPS counter", "In the top-left corner.");

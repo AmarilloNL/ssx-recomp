@@ -124,6 +124,9 @@ the file for you.
 > **1× + FSR** runs at very high frame rates and looks sharp. **2×** is noticeably sharper (about
 > 60% of the 1× frame rate). We recommend **2×**: 3× has a locked frame rate (see below). If a setting ever stops the game from starting, delete `ssx.toml` next to
 > `ssx.exe`.
+>
+> **Tearing** (a horizontal cut through the picture) on a screen without G-Sync/FreeSync, like
+> a handheld? Turn on **VSync** in **F1 → Display** and restart.
 
 <a id="frame-rate-lock"></a>
 
