@@ -43,6 +43,18 @@ REXCVAR_DEFINE_STRING(ssx_renderer, "standard", "SSX",
                       "Renderer: standard (ReXGlue's) or regpu (ReGPU, experimental) (restart)")
     .allowed({"standard", "regpu"})
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+// Off: frames are shown the moment they're done, which tears on screens without variable refresh
+// rate (G-Sync/FreeSync), e.g. handhelds. On: the screen shows the newest whole frame at each
+// refresh. The frame rate setting still sets the pace either way.
+REXCVAR_DEFINE_BOOL(ssx_vsync, false, "SSX", "VSync: no tearing on screens without G-Sync/FreeSync (restart)")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+namespace {
+// What ssx_vsync turns off. Only it sets them at runtime, and that isn't saved: turning VSync off
+// (even while it's active) restores them at the next start.
+constexpr const char* kTearingFlags[] = {"d3d12_allow_variable_refresh_rate_and_tearing",
+                                         "vulkan_allow_present_mode_immediate"};
+}  // namespace
 
 namespace {
 
@@ -94,6 +106,10 @@ void SsxSaveConfig(const std::filesystem::path& path) {
     }
     std::string value = entry.getter();
     if (value == entry.default_value) continue;
+    if (entry.source == rex::cvar::Source::kRuntime && std::find(std::begin(kTearingFlags), std::end(kTearingFlags),
+                                            entry.name) != std::end(kTearingFlags)) {
+      continue;
+    }
     if (entry.type == rex::cvar::FlagType::String) {
       std::string quoted = "\"";
       for (char c : value) {
@@ -162,6 +178,15 @@ void SsxApplyStartupSettings() {
   if (rex::string::from_string<int32_t>(rex::cvar::GetFlagByName("resolution_scale"), 1) > 3) {
     REXLOG_WARN("resolution_scale above 3 is not supported in SSX; using 3");
     rex::cvar::SetFlagByName("resolution_scale", "3");
+  }
+
+  // VSync (the presenters read these when the window's swap chain is made, after this).
+  // D3D12 then presents without the tearing flag, Vulkan in mailbox (or FIFO) mode.
+  if (REXCVAR_GET(ssx_vsync)) {
+    for (const char* flag : kTearingFlags) {
+      // Each build has only its own presenter's flag.
+      if (rex::cvar::SetFlagByName(flag, "false")) REXLOG_INFO("VSync: {} = false", flag);
+    }
   }
 
   ApplyVolume(REXCVAR_GET(ssx_volume));

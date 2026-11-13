@@ -370,6 +370,8 @@ void SsxSettingsDialog::DrawDisplayTab() {
     Combo("##framerate", "ssx_framerate", kFramerates, std::size(kFramerates));
   }
   if (!SsxUsingReGpu()) {  // (ReXGlue's presenter settings: not used by ReGPU)
+    Row("VSync", "No tearing on screens without G-Sync/FreeSync, like handhelds. Applies after a restart.");
+    Checkbox("##vsync", "ssx_vsync");
     Row("Keep 16:9 aspect ratio", "Black bars instead of stretching on other window shapes.");
     Checkbox("##letterbox", "present_letterbox");
   }
