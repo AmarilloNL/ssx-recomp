@@ -25,7 +25,7 @@ using System.Windows.Forms;
 
 [assembly: AssemblyTitle("SSX PC Port Setup")]
 [assembly: AssemblyProduct("SSX PC Port Setup")]
-[assembly: AssemblyFileVersion("1.3.0.0")]
+[assembly: AssemblyFileVersion("1.4.0.0")]
 
 static class Program {
   [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
