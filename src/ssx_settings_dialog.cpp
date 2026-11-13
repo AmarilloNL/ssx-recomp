@@ -57,11 +57,11 @@ const Choice kScales[] = {{"1x  (fastest)", "1"},
                           {"3x  (about 4K, 60 fps at most)", "3"}};
 // ReGPU draws at any size (regpu_resolution in the plugin), changed while the game runs.
 const Choice kResolutionsReGpu[] = {{"Match my screen", "screen"},
-                                    {"1280 x 720", "1280x720"},
+                                    {"1280 x 720  (720p)", "1280x720"},
                                     {"1920 x 1080  (1080p)", "1920x1080"},
-                                    {"2560 x 1440  (1440p)", "2560x1440"},
+                                    {"2560 x 1440  (1440p / 2K)", "2560x1440"},
                                     {"3840 x 2160  (4K)", "3840x2160"}};
-const Choice kRenderers[] = {{"Standard", "standard"}, {"ReGPU  (experimental)", "regpu"}};
+const Choice kRenderers[] = {{"ReGPU  (recommended)", "regpu"}, {"Standard", "standard"}};
 const Choice kUpscaling[] = {{"Bilinear  (soft)", "bilinear"},
                              {"AMD CAS  (sharpen)", "cas"},
                              {"AMD FSR 1  (upscale + sharpen)", "fsr"}};
@@ -383,9 +383,10 @@ void SsxSettingsDialog::DrawDisplayTab() {
 void SsxSettingsDialog::DrawGraphicsTab() {
   if (!BeginRows("##graphics")) return;
   Row("Renderer", SsxUsingReGpu()
-                      ? "ReGPU: a newer renderer, faster at 2x and 3x. Experimental: report anything that "
-                        "looks wrong."
-                      : "Standard, or ReGPU: a newer renderer, faster at 2x and 3x (experimental).");
+                      ? "ReGPU draws the game faster and sharper, up to 4K. If something looks wrong, "
+                        "Standard is the previous renderer (and please report it). Applies after a restart."
+                      : "We recommend ReGPU: faster and sharper, up to 4K. Standard is the previous "
+                        "renderer. Applies after a restart.");
   Combo("##renderer", "ssx_renderer", kRenderers, std::size(kRenderers));
   if (SsxUsingReGpu()) {
     Row("Resolution", "How many pixels the game is drawn with: higher is sharper, but heavier on the GPU.");

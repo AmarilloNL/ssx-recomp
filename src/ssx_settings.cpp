@@ -39,8 +39,8 @@ REXCVAR_DEFINE_STRING(ssx_render_resolution, "high", "SSX",
     .allowed({"original", "high", "720p"})  // 720p: older configs, now means high
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 REXCVAR_DEFINE_INT32(ssx_volume, 100, "SSX", "Master volume (0-100)").range(0, 100);
-REXCVAR_DEFINE_STRING(ssx_renderer, "standard", "SSX",
-                      "Renderer: standard (ReXGlue's) or regpu (ReGPU, experimental) (restart)")
+REXCVAR_DEFINE_STRING(ssx_renderer, "regpu", "SSX",
+                      "Renderer: regpu (ReGPU, the default) or standard (ReXGlue's) (restart)")
     .allowed({"standard", "regpu"})
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 // Off: frames are shown the moment they're done, which tears on screens without variable refresh

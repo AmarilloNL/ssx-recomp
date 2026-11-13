@@ -9,9 +9,9 @@
 # -TitleUpdate: the game's last title update (v0.0.3.2) from your own console, an Xbox 360
 #   package file. Once added, later builds keep using it; -NoTitleUpdate goes back to the disc version.
 # -NoPause: don't wait for Enter at the end (when driven by the installer).
-# -ReGpu: also build the experimental ReGPU renderer (scripts\build-regpu.ps1; needs Git and Python 3).
-#   F1 > Graphics > Renderer switches to it.
-param([string]$Iso, [string]$TitleUpdate, [switch]$NoTitleUpdate, [switch]$NoPause, [switch]$ReGpu)
+# -NoReGpu: leave out the ReGPU renderer (the default renderer; F1 > Graphics > Renderer also has
+#   the standard one). Developers build it from source with scripts\build-regpu.ps1.
+param([string]$Iso, [string]$TitleUpdate, [switch]$NoTitleUpdate, [switch]$NoPause, [switch]$NoReGpu)
 
 $ErrorActionPreference = 'Continue'
 $root = (Resolve-Path "$PSScriptRoot\..").Path
@@ -29,6 +29,9 @@ $OlderXexpSha256 = '3ED16A2D3590277EF6277BD726AF7C035AB6303D624C12F01000F9A4F1D1
 # ReXGlue SDK commit bd833a2ab69d305f99ddf57418fc38ffec8af93d + patches 0001-0015, Release.
 $SdkPackage = 'sdk-10'
 $SdkPackageUrl = "https://github.com/AmarilloNL/ssx-recomp/releases/download/$SdkPackage/rexglue-sdk-ssx-10.zip"
+# The ReGPU renderer, prebuilt against that SDK package by scripts\build-regpu-package.ps1 (no game code).
+$ReGpuPackage = 'regpu-1'
+$ReGpuPackageUrl = "https://github.com/AmarilloNL/ssx-recomp/releases/download/$ReGpuPackage/rexgpu-regpu-1.zip"
 
 function Step($text) { Write-Host ""; Write-Host "==> $text" -ForegroundColor Cyan }
 function Fail($text) {
@@ -385,9 +388,19 @@ if (Test-Path "$root\tools\rexglue-src\.ssx-ready") {
 Step "Recompiling SSX and building the PC version (this takes a while)"
 & "$root\scripts\package.ps1" -Preset ssx-player -Clang $clang
 if (-not (Test-Path "$root\dist\SSX\ssx.exe")) { Fail "The build failed." }
-if ($ReGpu) {
-    Step "Building the ReGPU renderer (experimental)"
-    try { & "$root\scripts\build-regpu.ps1" -Dist "$root\dist\SSX" } catch { Fail "Building ReGPU failed: $_" }
+# The ReGPU renderer next to ssx.exe (the game's default). Without it the game uses the standard
+# renderer, so a failed download isn't fatal.
+if (-not $NoReGpu) {
+    Step "Installing the ReGPU renderer"
+    $zip = "$env:TEMP\$ReGpuPackage.zip"
+    try {
+        Invoke-WebRequest $ReGpuPackageUrl -OutFile $zip -UseBasicParsing
+        Expand-Archive $zip "$root\dist\SSX" -Force
+        Remove-Item $zip
+        Write-Host "ReGPU renderer installed."
+    } catch {
+        Write-Host "Couldn't download the ReGPU renderer ($($_.Exception.Message)); the game will use the standard renderer." -ForegroundColor Yellow
+    }
 }
 
 # Point the game at the ISO so the first start needs no questions.

@@ -6,9 +6,12 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <memory>
+#include <thread>
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -121,6 +124,13 @@ class SsxApp : public rex::ReXApp {
     // standard renderer when its DLL is missing or doesn't load.
     if (config.gpu_plugin.empty()) {
       config.gpu_plugin = rex::cvar::GetFlagByName("ssx_renderer") == "regpu" ? "regpu" : "xenos";
+      // A start of ReGPU that crashed or was killed within 30 s (StartMarker): the standard renderer.
+      std::error_code ec;
+      if (config.gpu_plugin == "regpu" && std::filesystem::exists(StartMarker(), ec)) {
+        REXLOG_WARN("ReGPU didn't start last time; using the standard renderer");
+        config.gpu_plugin = "xenos";
+        std::filesystem::remove(StartMarker(), ec);
+      }
     }
     // Load the plugin now (ReXApp would right after this hook) so its cvars,
     // e.g. resolution_scale, exist for SsxApplyStartupSettings.
@@ -129,6 +139,13 @@ class SsxApp : public rex::ReXApp {
       REXLOG_WARN("ReGPU renderer not available; using the standard renderer");
       config.gpu_plugin = "xenos";
       config.graphics = rex::system::LoadGpuPlugin(config.gpu_plugin);
+    } else if (config.graphics && config.gpu_plugin == "regpu") {
+      std::ofstream(StartMarker()) << "ReGPU is starting (removed after 30 s or when the game closes)\n";
+      std::thread([] {
+        std::this_thread::sleep_for(std::chrono::seconds(30));
+        std::error_code ignored;
+        std::filesystem::remove(StartMarker(), ignored);
+      }).detach();
     }
     // Keyboard play on by default; an explicit choice in ssx.toml wins.
     if (rex::cvar::GetFlagSource("mnk_mode") == rex::cvar::Source::kDefault) {
@@ -169,7 +186,23 @@ class SsxApp : public rex::ReXApp {
     overlay_.reset();
   }
 
+  // A normal close (window, Alt+F4, F1's restart): the ReGPU start was fine. (ReXGlue exits the
+  // process right after closing, without OnShutdown.)
+  bool OnWindowCloseRequested() override {
+    std::error_code ignored;
+    std::filesystem::remove(StartMarker(), ignored);
+    return true;
+  }
+
  private:
+  // ReGPU is the default renderer, so a PC it can't start on must not crash on every start. This
+  // marker next to the exe exists while a ReGPU start is unproven: from loading the plugin until the
+  // game has run for 30 s or closes normally. Still there at the next start (a crash or a kill), the
+  // standard renderer is used that time; F1 can switch back.
+  static std::filesystem::path StartMarker() {
+    return rex::filesystem::GetExecutableFolder() / "regpu-starting.flag";
+  }
+
   // ReXGlue draws its overlays (the F1 menu) through the GPU plugin's presenter; the ReGPU plugin
   // has none, but draws them itself over each frame (regpu-plugin/src/overlay.h). The frame is
   // built on the UI thread once per presented frame.
