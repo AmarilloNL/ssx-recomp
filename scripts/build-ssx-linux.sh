@@ -26,6 +26,19 @@ OlderXexpSha256=3ed16a2d3590277ef6277bd726af7c035ab6303d624c12f01000f9a4f1d14344
 # The ReXGlue SDK is built here from this commit + the port's patches/ (no prebuilt Linux package).
 SdkRepo=https://github.com/rexglue/rexglue-sdk.git
 SdkCommit=bd833a2ab69d305f99ddf57418fc38ffec8af93d
+# The ReGPU renderer (as scripts/build-regpu.ps1 on Windows) and what it needs on Linux.
+ReGpuCommit=9171c2f7a0942f2fef963bcd6c69fe7e61054495      # rexglue-driver branch
+FfxCommit=7539ae8b6568ad29ed78a753404351daf3b5cca7        # AMD FSR SDK 2.4.0 (FSR 1 headers)
+FfxFiles=(api/internal/gpu/ffx_common_types.h api/internal/gpu/ffx_core.h api/internal/gpu/ffx_core_cpu.h
+          api/internal/gpu/ffx_core_gpu_common.h api/internal/gpu/ffx_core_gpu_common_half.h
+          api/internal/gpu/ffx_core_hlsl.h api/internal/gpu/ffx_core_portability.h
+          upscalers/fsr3/include/gpu/fsr1/ffx_fsr1.h)
+# Microsoft's DXC release: distro builds may be built with assertions (CachyOS's stops on ReGPU's shaders).
+DxcUrl=https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2609/linux_dxc_2026_09_28.x86_x64.tar.gz
+DxcSha256=96faadc7f5c282d2ffda49804beb4c3ee38127bc252b723234e3c5cdf7aa39a1
+# Direct3D 12 on Vulkan, built for Linux (native, not for Wine).
+Vkd3dProtonRepo=https://github.com/HansKristian-Work/vkd3d-proton.git
+Vkd3dProtonCommit=4522cc1a8b1347f1ab1b0f7b14a23ed9444d95d1 # v3.1
 
 step() { printf '\n\033[36m==> %s\033[0m\n' "$*"; }
 fail() { printf '\n\033[31mERROR: %s\033[0m\nDetails are in %s\n' "$*" "$log"; exit 1; }
@@ -51,7 +64,7 @@ echo "  and 20-60 minutes the first time."
 
 # ---------------------------------------------------------------- 1. build tools
 step "Checking build tools (missing ones are installed)"
-need_cmds=(git cmake ninja clang clang++ python3 pkg-config)
+need_cmds=(git cmake ninja clang clang++ python3 pkg-config curl)
 need_pkgs=(x11-xcb wayland-client vulkan)
 missing() {
   for c in "${need_cmds[@]}"; do command -v "$c" >/dev/null || return 0; done
@@ -61,7 +74,7 @@ missing() {
 if missing; then
   # Note: only the pacman list is tested (CachyOS); the apt and dnf lists follow SDL's Linux docs.
   if command -v pacman >/dev/null; then
-    cmd=(sudo pacman -S --needed --noconfirm git cmake ninja clang python pkgconf libx11 libxcb wayland
+    cmd=(sudo pacman -S --needed --noconfirm git cmake ninja clang python pkgconf curl libx11 libxcb wayland
          vulkan-headers vulkan-icd-loader ffmpeg)
   elif command -v apt-get >/dev/null; then
     cmd=(sudo apt-get install -y build-essential git cmake ninja-build clang python3 pkg-config
@@ -224,11 +237,11 @@ fi
 # ---------------------------------------------------------------- 3. ReXGlue SDK
 # Built from source + this project's patches (no game code). Rebuilt when the patches change.
 sdk="$root/tools/rexglue-sdk-ssx"
+src="$root/tools/rexglue-src-linux" # kept (without its build files): the ReGPU plugin needs its headers
 sdk_version=$(cat "$root"/patches/rexglue-*.patch | sha256sum | cut -c1-16)-$SdkCommit
-if [ "$(cat "$sdk/.version" 2>/dev/null)" != "$sdk_version" ]; then
-  step "Building the ReXGlue recompiler SDK (the longest step)"
-  src="$root/tools/rexglue-src-linux"
-  rm -rf "$src" "$sdk"
+# The SDK source at the pinned commit with the patches applied.
+fetch_sdk_source() {
+  rm -rf "$src"
   git init -q "$src" && git -C "$src" remote add origin "$SdkRepo" &&
     git -C "$src" fetch -q --depth 1 origin "$SdkCommit" && git -C "$src" checkout -q FETCH_HEAD &&
     git -C "$src" -c submodule.thirdparty/moltenvk.update=none submodule update --init --recursive --depth 1 --jobs 8 ||
@@ -237,6 +250,12 @@ if [ "$(cat "$sdk/.version" 2>/dev/null)" != "$sdk_version" ]; then
     echo "  applying $(basename "$p")"
     git -C "$src" apply --ignore-whitespace "$p" || fail "Applying $(basename "$p") failed."
   done
+  echo "$sdk_version" > "$src/.ssx-version"
+}
+if [ "$(cat "$sdk/.version" 2>/dev/null)" != "$sdk_version" ]; then
+  step "Building the ReXGlue recompiler SDK (the longest step)"
+  rm -rf "$sdk"
+  fetch_sdk_source
   # Don't register the SDK in the user's CMake package registry.
   python3 - "$src/cmake/rexglue_install.cmake" <<'PY'
 import sys
@@ -247,7 +266,7 @@ PY
   (cd "$src" && cmake --preset linux-amd64 && cmake --build --preset linux-amd64-release &&
    cmake --install out/build/linux-amd64 --config Release --prefix "$sdk") || fail "Building the SDK failed."
   echo "$sdk_version" > "$sdk/.version"
-  rm -rf "$src"
+  rm -rf "$src/out"
   # Codegen only re-runs when the game's inputs change, so code made by an older SDK's recompiler
   # (which may carry its bugs) is removed to be generated again.
   rm -rf "$root/generated/default"
@@ -271,11 +290,115 @@ echo "==> Compiling the PC version"
 # Codegen can rewrite the PCH mid-build; retry once.
 cmake --build "$build" || cmake --build "$build" || fail "The build failed."
 
+# ---------------------------------------------------------------- 5. ReGPU renderer
+# ReGPU, the faster renderer (F1 > Graphics > Renderer): ReGPU with this project's patches, Direct3D 12
+# on Vulkan through vkd3d-proton, shaders through DXC. Optional: when this step fails, the game is
+# built with the standard renderer only (it falls back to it by itself).
+regpu_error=
+build_regpu() {
+  local logs="$root/tools/regpu-build.log"
+  : > "$logs"
+  # Build tools: meson and glslang (vkd3d-proton), widl (its headers; Wine's or MinGW's).
+  local need=() widl
+  command -v meson >/dev/null || need+=(meson)
+  command -v glslangValidator >/dev/null || command -v glslang >/dev/null || need+=(glslang)
+  command -v widl >/dev/null || command -v x86_64-w64-mingw32-widl >/dev/null || need+=(widl)
+  if [ ${#need[@]} -gt 0 ]; then
+    local pkgs=() n
+    for n in "${need[@]}"; do
+      if command -v pacman >/dev/null; then pkgs+=("$([ $n = widl ] && echo mingw-w64-tools || echo $n)")
+      elif command -v apt-get >/dev/null; then pkgs+=("$([ $n = widl ] && echo mingw-w64-tools || ([ $n = glslang ] && echo glslang-tools) || echo $n)")
+      elif command -v dnf >/dev/null; then pkgs+=("$([ $n = widl ] && echo mingw64-tools || echo $n)")
+      fi
+    done
+    echo "  installing ${pkgs[*]} (your password is asked for by sudo)"
+    if command -v pacman >/dev/null; then sudo pacman -S --needed --noconfirm "${pkgs[@]}"
+    elif command -v apt-get >/dev/null; then sudo apt-get install -y "${pkgs[@]}"
+    elif command -v dnf >/dev/null; then sudo dnf install -y "${pkgs[@]}"
+    fi
+  fi
+  command -v meson >/dev/null && { command -v glslangValidator >/dev/null || command -v glslang >/dev/null; } ||
+    { regpu_error="meson and glslang are needed"; return 1; }
+  widl=$(command -v widl || command -v x86_64-w64-mingw32-widl) || { regpu_error="widl (Wine or MinGW tools) is needed"; return 1; }
+
+  # DXC (Microsoft's release, checked).
+  local dxc="$root/tools/dxc-1.9.2609"
+  if [ ! -f "$dxc/lib/libdxcompiler.so" ]; then
+    echo "  downloading DXC"
+    rm -rf "$dxc"; mkdir -p "$dxc"
+    curl -fsSL -o "$root/tools/dxc.tar.gz" "$DxcUrl" && [ "$(sha "$root/tools/dxc.tar.gz")" = "$DxcSha256" ] &&
+      tar -xzf "$root/tools/dxc.tar.gz" -C "$dxc" || { rm -rf "$dxc"; regpu_error="downloading DXC failed"; return 1; }
+    rm -f "$root/tools/dxc.tar.gz"
+  fi
+
+  # vkd3d-proton at the pinned commit, built natively. $ORIGIN: its libraries find each other next to the game.
+  local vkp="$root/tools/vkd3d-proton" vsrc="$root/tools/vkd3d-proton-src"
+  if [ "$(cat "$vkp/.version" 2>/dev/null)" != "$Vkd3dProtonCommit" ]; then
+    echo "  building vkd3d-proton"
+    rm -rf "$vkp" "$vsrc"
+    local native=()
+    if [ "$(basename "$widl")" != widl ]; then
+      printf "[binaries]\nwidl = '%s'\n" "$widl" > "$root/tools/vkd3d-proton-native.ini"
+      native=(--native-file "$root/tools/vkd3d-proton-native.ini")
+    fi
+    { git init -q "$vsrc" && git -C "$vsrc" remote add origin "$Vkd3dProtonRepo" &&
+      git -C "$vsrc" fetch -q --depth 1 origin "$Vkd3dProtonCommit" && git -C "$vsrc" checkout -q FETCH_HEAD &&
+      git -C "$vsrc" submodule update -q --init --recursive --depth 1 --jobs 8 &&
+      (cd "$vsrc" && LDFLAGS='-Wl,-rpath,$ORIGIN' meson setup build --buildtype release --prefix "$vkp" --libdir lib \
+         -Denable_tests=false "${native[@]}" && ninja -C build install); } >> "$logs" 2>&1 ||
+      { regpu_error="building vkd3d-proton failed (see $logs)"; return 1; }
+    echo "$Vkd3dProtonCommit" > "$vkp/.version"
+    rm -rf "$vsrc"
+  fi
+
+  # ReGPU at the pinned commit with this project's patches (reapplied when they change).
+  local regpu="$root/tools/regpu-${ReGpuCommit:0:7}" stamp p
+  stamp=$(for p in "$root"/patches/regpu-*.patch; do echo "$(basename "$p") $(sha "$p")"; done)
+  if [ "$(cat "$regpu/.ssx-patches" 2>/dev/null)" != "$stamp" ]; then
+    echo "  downloading ReGPU ${ReGpuCommit:0:7}"
+    rm -rf "$regpu"; mkdir -p "$regpu"
+    curl -fsSL "https://github.com/zer0ducksgiven/ReGPU/archive/$ReGpuCommit.tar.gz" | tar -xz --strip-components=1 -C "$regpu" ||
+      { regpu_error="downloading ReGPU failed"; return 1; }
+    for p in "$root"/patches/regpu-*.patch; do
+      # (tools/ is inside this repository: apply to the folder, not the repository)
+      (cd "$regpu" && GIT_CEILING_DIRECTORIES="$root/tools" git apply --whitespace=nowarn "$p") ||
+        { regpu_error="applying $(basename "$p") failed"; return 1; }
+    done
+    echo "$stamp" > "$regpu/.ssx-patches"
+  fi
+  local ffx="$root/tools/fidelityfx-${FfxCommit:0:7}/Kits/FidelityFX" f
+  for f in "${FfxFiles[@]}"; do
+    [ -f "$ffx/$f" ] && continue
+    mkdir -p "$(dirname "$ffx/$f")"
+    curl -fsSL -o "$ffx/$f" "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/$FfxCommit/Kits/FidelityFX/$f" ||
+      { regpu_error="downloading the FidelityFX headers failed"; return 1; }
+  done
+
+  # The plugin (regpu-plugin/), against the SDK and its source's headers.
+  [ "$(cat "$src/.ssx-version" 2>/dev/null)" = "$sdk_version" ] || fetch_sdk_source
+  echo "  building the plugin"
+  { cmake -S "$root/regpu-plugin" -B "$root/out/build/regpu-plugin" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_PREFIX_PATH="$sdk" -DSSX_REGPU_SOURCE="$regpu" \
+      -DSSX_REXGLUE_SOURCE="$src" -DREGPU_FFX="$ffx" -DREGPU_DXC_DIR="$dxc" -DREGPU_VKD3D_PROTON_DIR="$vkp" &&
+    cmake --build "$root/out/build/regpu-plugin"; } >> "$logs" 2>&1 ||
+    { regpu_error="building the ReGPU plugin failed (see $logs)"; return 1; }
+  regpu_files=("$root/out/build/regpu-plugin/librexgpu-regpu.so" "$dxc/lib/libdxcompiler.so" "$dxc/lib/libdxil.so"
+               "$vkp/lib/libvkd3d-proton-d3d12.so" "$vkp/lib/libvkd3d-proton-d3d12core.so")
+}
+step "Building the ReGPU renderer"
+regpu_files=()
+if build_regpu; then
+  echo "  ReGPU: OK"
+else
+  regpu_files=()
+  printf '\033[33m  ReGPU was not built: %s.\n  The game uses the standard renderer.\033[0m\n' "$regpu_error"
+fi
+
 dist="$root/dist/SSX"
 # Replace the program files only; the player's ssx.toml stays.
 mkdir -p "$dist"
 rm -rf "$dist/update" "$dist"/*.so*
-cp -f "$build/ssx" "$sdk"/lib/*.so "$root/installer/ssx.ico" "$dist/"
+cp -f "$build/ssx" "$sdk"/lib/*.so "$root/installer/ssx.ico" "${regpu_files[@]}" "$dist/"
 if [ "$game_version" = 0.0.3.2 ]; then
   mkdir -p "$dist/update" && cp -f "$update_dir/default.xexp" "$update_dir/patch0.big" "$dist/update/"
 fi

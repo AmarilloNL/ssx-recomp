@@ -126,8 +126,9 @@ cd ssx-recomp
 
 Add `--title-update <file>` for [the title update](#title-update) (once; later builds keep it,
 `--no-title-update` goes back). The script installs the missing build tools with your package manager
-(it asks for your password through `sudo`), builds the recompiler SDK and the game, and adds **SSX**
-to your app menu. The game ends up in `dist/SSX`. **To update:** `git pull`, then run the script
+(it asks for your password through `sudo`), builds the recompiler SDK, the game and the ReGPU renderer
+(with [vkd3d-proton](https://github.com/HansKristian-Work/vkd3d-proton) and Microsoft's DXC), and adds
+**SSX** to your app menu. The game ends up in `dist/SSX`. **To update:** `git pull`, then run the script
 again.
 
 - Needs about **15 GB** free during the build and **20–60 minutes** the first time.
@@ -136,10 +137,11 @@ again.
   haven't been tested yet: reports are welcome.
 - Where this README says `Documents\ssx`, Linux uses **`~/.local/share/ssx`** (saves, `dlc`,
   `music`). Your own music needs `ffmpeg`.
-- Not on Linux yet: the 2× and 3× resolution scales (Linux runs at 1×: 2× made the graphics
-  driver hang after a few minutes in testing), the gamer picture, FSR upscaling (the image is
-  scaled bilinear) and *match display* as frame rate (it uses 60).
-- The first minutes can stutter briefly while the graphics driver prepares the game's shaders.
+- The game uses **ReGPU**, as on Windows: it draws at your screen's resolution (F1 > Graphics >
+  Resolution). If ReGPU can't be built on your PC, the script says so and the game uses the standard
+  renderer, which runs at 1× on Linux (2× made the graphics driver hang in testing), scaled bilinear.
+- Not on Linux yet: the gamer picture and *match display* as frame rate (it uses 60).
+- The first ride in each new area can stutter briefly while the game's shaders are prepared.
   They're kept for the next start.
 - If something goes wrong, attach `build-ssx-linux.log` from the repository folder to an issue.
 
