@@ -14,8 +14,9 @@
 // The game's requests (media player app 0xFA): XamCreateEnumeratorHandle with messages 0x70026/27
 // lists the playlists (820-byte entries, the name in UTF-16 at +572; the rest is ours), 0x70025 starts
 // that listing, 0x7003B plays a playlist (the entry comes back), 0x7003D registers the capture
-// callback, 0x70009 asks the state, 0x70008 sets shuffle/repeat, 0x70003-0x70007 are stop, pause,
-// resume, next and previous. Everything else goes to the SDK as before.
+// callback, 0x70009 asks the state, 0x70008 sets shuffle/repeat, 0x70003-0x70007 are continue, stop,
+// pause, next and previous. The game stops the music when a run ends, pauses it while it holds the
+// music back (its buffer full, the pause menu) and continues it after. Everything else goes to the SDK.
 
 #include "ssx_music.h"
 
@@ -461,16 +462,16 @@ void Complete(PPCContext& ctx, uint32_t overlapped) {
 // A media player request with a buffer (StartIORequest / InProcessCall). True when handled here.
 bool HandleRequest(uint8_t* base, uint32_t message, uint32_t buffer) {
   switch (message) {
-    case 0x00070003:  // stop
+    case 0x00070003:  // continue
+      player.Resume();
+      Broadcast(player.state());
+      return true;
+    case 0x00070004:  // stop: client, flags
       player.Stop();
       Broadcast(kIdle);
       return true;
-    case 0x00070004:  // pause
+    case 0x00070005:  // pause
       player.Pause();
-      Broadcast(player.state());
-      return true;
-    case 0x00070005:  // resume
-      player.Resume();
       Broadcast(player.state());
       return true;
     case 0x00070006:  // next
