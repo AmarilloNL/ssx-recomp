@@ -140,7 +140,7 @@ again.
 - The game uses **ReGPU**, as on Windows: it draws at your screen's resolution (F1 > Graphics >
   Resolution). If ReGPU can't be built on your PC, the script says so and the game uses the standard
   renderer, which runs at 1× on Linux (2× made the graphics driver hang in testing), scaled bilinear.
-- Not on Linux yet: the gamer picture and *match display* as frame rate (it uses 60).
+- Not on Linux yet: the gamer picture.
 - The first ride in each new area can stutter briefly while the game's shaders are prepared.
   They're kept for the next start.
 - If something goes wrong, attach `build-ssx-linux.log` from the repository folder to an issue.

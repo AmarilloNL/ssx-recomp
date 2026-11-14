@@ -20,6 +20,8 @@
 #include <windows.h>
 #else
 #include <dlfcn.h>
+
+#include <SDL3/SDL_video.h>
 #endif
 
 #include <rex/audio/downmix.h>
@@ -89,8 +91,24 @@ int32_t SsxTargetFps() {
   int32_t fps = REXCVAR_GET(ssx_framerate);
   if (fps == 0) {  // match the main display
 #ifndef _WIN32
-    // Note: 60 on Linux; ask the windowing layer for the refresh rate if players want more.
-    fps = 60;
+    // The main display's refresh rate from SDL (the game window's library), looked up every 2 s:
+    // this runs every frame, and SDL has no display until the window is open.
+    static std::atomic<int32_t> display_hz{60};
+    static std::atomic<int64_t> next_check{0};
+    static bool logged = false;
+    const int64_t now = std::chrono::steady_clock::now().time_since_epoch().count();
+    if (now >= next_check.load(std::memory_order_relaxed)) {
+      next_check = now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::seconds(2)).count();
+      if (const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
+          mode && mode->refresh_rate > 1.0f) {
+        const int32_t hz = int32_t(mode->refresh_rate + 0.5f);
+        if (display_hz.exchange(hz) != hz || !logged) {
+          logged = true;
+          REXLOG_INFO("Display: {:.2f} Hz (frame rate \"match display\")", mode->refresh_rate);
+        }
+      }
+    }
+    fps = display_hz.load(std::memory_order_relaxed);
 #else
     DEVMODEW mode = {};
     mode.dmSize = sizeof(mode);

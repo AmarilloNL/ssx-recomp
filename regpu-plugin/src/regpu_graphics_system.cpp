@@ -18,6 +18,9 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#ifndef _WIN32
+#include <SDL3/SDL_video.h>
+#endif
 
 #include <rex/cvar.h>
 #include <rex/kernel/xboxkrnl/video.h>
@@ -76,13 +79,13 @@ int32_t FlagInt(const char* name, int32_t fallback)
 uint32_t TargetFps()
 {
     int32_t fps = FlagInt("ssx_framerate", 60);
-#ifndef _WIN32
-    if (fps == 0)
-        fps = 60; // (as the game's own setting on Linux, src/ssx_settings.cpp)
-#endif
     if (fps == 0)
     {
-#ifdef _WIN32
+#ifndef _WIN32
+        // The main display's refresh rate from SDL, as the game's own setting (src/ssx_settings.cpp).
+        const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
+        fps = mode && mode->refresh_rate > 1.0f ? int32_t(mode->refresh_rate + 0.5f) : 60;
+#else
         DEVMODEW mode = {};
         mode.dmSize = sizeof(mode);
         fps = EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &mode) && mode.dmDisplayFrequency > 1
