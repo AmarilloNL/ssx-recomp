@@ -408,11 +408,10 @@ in `tools/rexglue-src`.
 ---
 
 <div align="center">
-<sub>
 
-⚖️ Unofficial fan project, not affiliated with or endorsed by Electronic Arts. *SSX* is a trademark
-of Electronic Arts Inc. The code in this repository is released under the [MIT license](LICENSE)
-and contains no Electronic Arts code or assets.
+<sub>⚖️ Unofficial fan project, not affiliated with or endorsed by Electronic Arts.</sub><br>
+<sub><i>SSX</i> is a trademark of Electronic Arts Inc.</sub><br>
+<sub>The code in this repository is released under the <a href="LICENSE">MIT license</a></sub><br>
+<sub>and contains no Electronic Arts code or assets.</sub>
 
-</sub>
 </div>
