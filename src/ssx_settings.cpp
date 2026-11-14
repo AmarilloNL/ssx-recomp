@@ -110,6 +110,12 @@ void SsxApplyStartupSettings() {
   if (rex::cvar::GetFlagSource("render_target_path_vulkan") == rex::cvar::Source::kDefault) {
     rex::cvar::SetFlagByName("render_target_path_vulkan", "fsi");
   }
+  // Vulkan holds back every frame that still draws something with a shader being compiled in the
+  // background, so the first minutes on a fresh install froze for seconds at a time. Showing those
+  // frames (a moment of pop-in at worst) keeps the game moving.
+  if (rex::cvar::GetFlagSource("vulkan_async_skip_incomplete_frames") == rex::cvar::Source::kDefault) {
+    rex::cvar::SetFlagByName("vulkan_async_skip_incomplete_frames", "false");
+  }
   if (REXCVAR_GET(ssx_render_resolution) == "720p") {  // replaced by high, see sub_82FB6120
     rex::cvar::SetFlagByName("ssx_render_resolution", "high");
   }
