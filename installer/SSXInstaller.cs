@@ -24,8 +24,38 @@ using System.Threading;
 using System.Windows.Forms;
 
 [assembly: AssemblyTitle("SSX PC Port Setup")]
+[assembly: AssemblyDescription("Builds the SSX (2012) PC port from your own Xbox 360 disc image")]
 [assembly: AssemblyProduct("SSX PC Port Setup")]
-[assembly: AssemblyFileVersion("1.4.0.0")]
+[assembly: AssemblyCompany("AmarilloNL")]
+[assembly: AssemblyCopyright("Copyright (c) 2026 AmarilloNL, MIT License")]
+[assembly: AssemblyVersion("1.4.1.0")]
+[assembly: AssemblyFileVersion("1.4.1.0")]
+[assembly: AssemblyInformationalVersion("1.4.1")]
+
+// Windows shell link (.lnk) interfaces, for the desktop shortcut.
+[ComImport, Guid("00021401-0000-0000-C000-000000000046")] class ShellLink { }
+
+[ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("000214F9-0000-0000-C000-000000000046")]
+interface IShellLinkW {
+  void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder file, int max, IntPtr data, int flags);
+  void GetIDList(out IntPtr list);
+  void SetIDList(IntPtr list);
+  void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder name, int max);
+  void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string name);
+  void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder dir, int max);
+  void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string dir);
+  void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder args, int max);
+  void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string args);
+  void GetHotkey(out short hotkey);
+  void SetHotkey(short hotkey);
+  void GetShowCmd(out int cmd);
+  void SetShowCmd(int cmd);
+  void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int max, out int index);
+  void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string path, int index);
+  void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string path, int reserved);
+  void Resolve(IntPtr hwnd, int flags);
+  void SetPath([MarshalAs(UnmanagedType.LPWStr)] string file);
+}
 
 static class Program {
   [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
@@ -953,7 +983,7 @@ class InstallerForm : Form {
       File.Delete(zip);
 
       var info = new ProcessStartInfo("powershell.exe",
-          "-NoProfile -ExecutionPolicy Bypass -File \"" + Path.Combine(source, "scripts\\build-ssx.ps1") +
+          "-NoProfile -ExecutionPolicy RemoteSigned -File \"" + Path.Combine(source, "scripts\\build-ssx.ps1") +
           "\" -Iso \"" + iso + "\"" + (titleUpdate != null ? " -TitleUpdate \"" + titleUpdate + "\"" : "") +
           " -NoPause");
       info.UseShellExecute = false;
@@ -1113,16 +1143,13 @@ class InstallerForm : Form {
     try {
       string exe = GameExe(), dir = Path.GetDirectoryName(exe);
       string lnk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "SSX.lnk");
-      Type shellType = Type.GetTypeFromProgID("WScript.Shell");
-      object shell = Activator.CreateInstance(shellType);
-      object sc = shellType.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { lnk });
-      Type t = sc.GetType();
-      t.InvokeMember("TargetPath", BindingFlags.SetProperty, null, sc, new object[] { exe });
-      t.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, sc, new object[] { dir });
-      t.InvokeMember("Description", BindingFlags.SetProperty, null, sc, new object[] { "SSX (2012) PC port" });
+      var link = (IShellLinkW)new ShellLink();
+      link.SetPath(exe);
+      link.SetWorkingDirectory(dir);
+      link.SetDescription("SSX (2012) PC port");
       string ico = Path.Combine(dir, "ssx.ico");
-      if (File.Exists(ico)) t.InvokeMember("IconLocation", BindingFlags.SetProperty, null, sc, new object[] { ico });
-      t.InvokeMember("Save", BindingFlags.InvokeMethod, null, sc, null);
+      if (File.Exists(ico)) link.SetIconLocation(ico, 0);
+      ((System.Runtime.InteropServices.ComTypes.IPersistFile)link).Save(lnk, true);
     } catch (Exception) { }
   }
 
