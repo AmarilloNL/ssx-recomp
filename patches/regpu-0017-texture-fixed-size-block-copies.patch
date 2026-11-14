@@ -1,0 +1,129 @@
+diff --git a/src/gpu/texture.cpp b/src/gpu/texture.cpp
+index 7cbfe1e..3fdabad 100644
+--- a/src/gpu/texture.cpp
++++ b/src/gpu/texture.cpp
+@@ -383,6 +383,34 @@ void PackedMipOffset(const TextureFetch& fetch, uint32_t blockSize, uint32_t& xB
+         xBlocks = 16 / blockSize;
+ }
+ 
++namespace
++{
++// DecodeTexture's texel formats (one texel a block) with the block size fixed at compile time: the
++// copy and the swap become a few instructions (with the size at run time, a 1024x1024 k_8 atlas the
++// title updates often took ~15 ms to decode).
++template <uint32_t BlockBytes>
++void DecodeTexels(const TextureFetch& fetch, const uint8_t* source, uint8_t* rgba, uint32_t width, uint32_t height, uint32_t pitchBlocks,
++    uint32_t log2Bytes, uint32_t packX, uint32_t packY)
++{
++    const uint32_t format = fetch.Format(), endian = fetch.Endian();
++    const bool tiled = fetch.Tiled();
++    for (uint32_t y = 0; y < height; y++)
++    {
++        const int32_t rowOffset = tiled ? TiledOffset2DOuter(y + packY, pitchBlocks, log2Bytes) : 0;
++        uint8_t* out = rgba + size_t(y) * width * 4;
++        for (uint32_t x = 0; x < width; x++, out += 4)
++        {
++            const size_t offset = tiled ? size_t(TiledOffset2DInner(x + packX, y + packY, log2Bytes, rowOffset) >> log2Bytes) * BlockBytes
++                                        : (size_t(y + packY) * pitchBlocks + x + packX) * BlockBytes;
++            uint8_t block[BlockBytes];
++            memcpy(block, source + offset, BlockBytes);
++            Swap(block, BlockBytes, endian);
++            DecodeTexel(format, block, out);
++        }
++    }
++}
++} // namespace
++
+ bool DecodeTexture(const TextureFetch& fetch, const uint8_t* source, std::vector<uint8_t>& rgba)
+ {
+     FormatInfo info;
+@@ -404,7 +432,17 @@ bool DecodeTexture(const TextureFetch& fetch, const uint8_t* source, std::vector
+     rgba.assign(size_t(width) * height * 4, 0);
+     uint8_t block[32];
+     uint8_t texels[16][4];
+-    for (uint32_t by = 0; by < blocksY; by++)
++    bool texelsDone = info.blockSize == 1;
++    if (texelsDone)
++        switch (info.log2Bytes)
++        {
++        case 0: DecodeTexels<1>(fetch, source, rgba.data(), width, height, pitchBlocks, 0, packX, packY); break;
++        case 1: DecodeTexels<2>(fetch, source, rgba.data(), width, height, pitchBlocks, 1, packX, packY); break;
++        case 2: DecodeTexels<4>(fetch, source, rgba.data(), width, height, pitchBlocks, 2, packX, packY); break;
++        case 3: DecodeTexels<8>(fetch, source, rgba.data(), width, height, pitchBlocks, 3, packX, packY); break;
++        default: texelsDone = false; break;
++        }
++    for (uint32_t by = 0; !texelsDone && by < blocksY; by++)
+     {
+         const int32_t rowOffset = fetch.Tiled() ? TiledOffset2DOuter(by + packY, pitchBlocks, info.log2Bytes) : 0;
+         for (uint32_t bx = 0; bx < blocksX; bx++)
+@@ -554,6 +592,36 @@ uint32_t TextureBCKind(uint32_t format)
+     }
+ }
+ 
++namespace
++{
++// CopyTextureBlocks with the block size fixed at compile time: the copies and the swap become a few
++// instructions. With the size at run time every block cost two memcpy calls and a Swap call: a
++// 1268x1280 k_16 image (1.6 million 2-byte blocks) re-uploaded each frame took 25-30 ms. Each row
++// is assembled here and written to dst in one go (upload memory: write-combined, never read).
++template <uint32_t BlockBytes>
++void CopyBlocks(const TextureFetch& fetch, const uint8_t* source, uint8_t* dst, uint32_t dstRowPitch, uint32_t blocksX, uint32_t blocksY,
++    uint32_t pitchBlocks, uint32_t log2Bytes, uint32_t packX, uint32_t packY)
++{
++    const uint32_t endian = fetch.Endian();
++    const bool tiled = fetch.Tiled();
++    thread_local std::vector<uint8_t> row;
++    row.resize(size_t(blocksX) * BlockBytes);
++    for (uint32_t by = 0; by < blocksY; by++)
++    {
++        const int32_t rowOffset = tiled ? TiledOffset2DOuter(by + packY, pitchBlocks, log2Bytes) : 0;
++        for (uint32_t bx = 0; bx < blocksX; bx++)
++        {
++            const size_t offset = tiled ? size_t(TiledOffset2DInner(bx + packX, by + packY, log2Bytes, rowOffset) >> log2Bytes) * BlockBytes
++                                        : (size_t(by + packY) * pitchBlocks + bx + packX) * BlockBytes;
++            uint8_t* block = row.data() + size_t(bx) * BlockBytes;
++            memcpy(block, source + offset, BlockBytes);
++            Swap(block, BlockBytes, endian);
++        }
++        memcpy(dst + size_t(by) * dstRowPitch, row.data(), row.size());
++    }
++}
++} // namespace
++
+ bool CopyTextureBlocks(const TextureFetch& fetch, uint8_t* dst, uint32_t dstRowPitch)
+ {
+     FormatInfo info;
+@@ -562,28 +630,18 @@ bool CopyTextureBlocks(const TextureFetch& fetch, uint8_t* dst, uint32_t dstRowP
+     const uint8_t* source = GuestPtr<uint8_t>(GpuPhysToGuest(fetch.Address()));
+     const uint32_t bs = info.blockSize;
+     const uint32_t blocksX = (fetch.Width() + bs - 1) / bs, blocksY = (fetch.Height() + bs - 1) / bs;
+-    const uint32_t blockBytes = 1u << info.log2Bytes;
+     uint32_t pitchBlocks = std::max(fetch.Pitch() / bs, blocksX);
+     if (fetch.Tiled())
+         pitchBlocks = (pitchBlocks + 31) & ~31u;
+     uint32_t packX, packY;
+     PackedMipOffset(fetch, bs, packX, packY);
+-    for (uint32_t by = 0; by < blocksY; by++)
++    switch (info.log2Bytes) // the kinds TextureBCKind lists: 2, 8 and 16-byte blocks
+     {
+-        uint8_t* row = dst + size_t(by) * dstRowPitch;
+-        const int32_t rowOffset = fetch.Tiled() ? TiledOffset2DOuter(by + packY, pitchBlocks, info.log2Bytes) : 0;
+-        for (uint32_t bx = 0; bx < blocksX; bx++)
+-        {
+-            const size_t offset = fetch.Tiled() ? size_t(TiledOffset2DInner(bx + packX, by + packY, info.log2Bytes, rowOffset) >> info.log2Bytes) * blockBytes
+-                                                : (size_t(by + packY) * pitchBlocks + bx + packX) * blockBytes;
+-            // Swapped here, then written once: dst is upload memory (write-combined, never read).
+-            uint8_t block[16];
+-            memcpy(block, source + offset, blockBytes);
+-            Swap(block, blockBytes, fetch.Endian());
+-            memcpy(row + size_t(bx) * blockBytes, block, blockBytes);
+-        }
++    case 1: CopyBlocks<2>(fetch, source, dst, dstRowPitch, blocksX, blocksY, pitchBlocks, 1, packX, packY); return true;
++    case 3: CopyBlocks<8>(fetch, source, dst, dstRowPitch, blocksX, blocksY, pitchBlocks, 3, packX, packY); return true;
++    case 4: CopyBlocks<16>(fetch, source, dst, dstRowPitch, blocksX, blocksY, pitchBlocks, 4, packX, packY); return true;
++    default: return false;
+     }
+-    return true;
+ }
+ 
+ bool TextureMipLevel(const TextureFetch& base, uint32_t level, TextureFetch& out)

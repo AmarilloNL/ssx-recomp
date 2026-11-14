@@ -1,5 +1,5 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index e65d99a..e0f8b6f 100644
+index e65d99a..01eee77 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -48,6 +48,22 @@ if(NOT EXISTS "${REGPU_FFX}/upscalers/fsr3/include/gpu/fsr1/ffx_fsr1.h")
@@ -9,7 +9,7 @@ index e65d99a..e0f8b6f 100644
 +if(WIN32)
 +    list(FILTER REGPU_SOURCES EXCLUDE REGEX "/src/platform/linux/")
 +else()
-+    # Linux: Direct3D 12 through vkd3d, shaders through DXC (src/platform/linux). The window and
++    # Linux: Direct3D 12 through vkd3d-proton, shaders through DXC (src/platform/linux). The window and
 +    # swap chain, the shader compiler and the debug server have Linux versions there.
 +    list(REMOVE_ITEM REGPU_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/render/presenter.cpp"
 +                                   "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/d3dcompiler.cpp"
@@ -40,7 +40,7 @@ index e65d99a..e0f8b6f 100644
              EasuMain,RcasMain,DepthCopyMain,GammaMain,EnhanceMain "${REGPU_FFX}/api/internal/gpu" "${REGPU_FFX}/upscalers/fsr3/include/gpu/fsr1"
      DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/fsr1.hlsl" "${CMAKE_CURRENT_SOURCE_DIR}/tools/embed_hlsl.py")
  list(APPEND REGPU_SOURCES "${REGPU_GENERATED}/fsr1_cs.h")
-@@ -70,7 +91,18 @@ target_compile_definitions(regpu PUBLIC ${REGPU_GUEST_DEFINES})
+@@ -70,7 +91,24 @@ target_compile_definitions(regpu PUBLIC ${REGPU_GUEST_DEFINES})
  target_include_directories(regpu PRIVATE src "${REGPU_GENERATED}")
  target_compile_definitions(regpu PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
  target_compile_options(regpu PRIVATE -msse4.1 -fno-strict-aliasing -gline-tables-only)
@@ -48,14 +48,20 @@ index e65d99a..e0f8b6f 100644
 +if(WIN32)
 +    target_link_libraries(regpu PUBLIC d3d12 dxgi ws2_32 winmm synchronization onecore)
 +else()
-+    find_package(PkgConfig REQUIRED)
-+    pkg_check_modules(VKD3D REQUIRED IMPORTED_TARGET libvkd3d libvkd3d-utils)
++    # vkd3d-proton, native build (meson --prefix <dir>: lib/libvkd3d-proton-d3d12.so,
++    # include/vkd3d-proton): github.com/HansKristian-Work/vkd3d-proton.
++    set(REGPU_VKD3D_PROTON_DIR "" CACHE PATH "vkd3d-proton install folder (Linux)")
++    if(NOT EXISTS "${REGPU_VKD3D_PROTON_DIR}/include/vkd3d-proton/vkd3d_d3d12.h")
++        message(FATAL_ERROR "Set REGPU_VKD3D_PROTON_DIR to a native vkd3d-proton install")
++    endif()
 +    find_package(Vulkan REQUIRED)
 +    # The stand-in headers (windows.h, d3d12.h, ...) come before everything else.
 +    target_include_directories(regpu BEFORE PUBLIC src/platform/linux/include)
 +    target_compile_options(regpu PRIVATE -fPIC -Wno-unknown-pragmas -Wno-nonportable-include-path)
++    target_include_directories(regpu PUBLIC "${REGPU_VKD3D_PROTON_DIR}/include/vkd3d-proton")
 +    target_include_directories(regpu PRIVATE "${REGPU_DXC_DIR}/include")
-+    target_link_libraries(regpu PUBLIC PkgConfig::VKD3D Vulkan::Vulkan "${REGPU_DXC_DIR}/lib/libdxcompiler.so" ${CMAKE_DL_LIBS} pthread)
++    target_link_libraries(regpu PUBLIC "${REGPU_VKD3D_PROTON_DIR}/lib/libvkd3d-proton-d3d12.so" Vulkan::Vulkan
++        "${REGPU_DXC_DIR}/lib/libdxcompiler.so" ${CMAKE_DL_LIBS} pthread)
 +endif()
  if(REGPU_FSR3)
      target_compile_definitions(regpu PRIVATE REGPU_FSR3=1)
@@ -295,10 +301,10 @@ index ee7cbcd..995d31d 100644
          static LiveSwitch captureTall("REGPU_CAPTURE_TALL");
 diff --git a/src/platform/linux/d3dcompile_linux.cpp b/src/platform/linux/d3dcompile_linux.cpp
 new file mode 100644
-index 0000000..bfe697a
+index 0000000..8fd801a
 --- /dev/null
 +++ b/src/platform/linux/d3dcompile_linux.cpp
-@@ -0,0 +1,37 @@
+@@ -0,0 +1,40 @@
 +// Linux: D3DCompile through DXC (regpu_win32.h points ReGPU's calls here). Shader model 5 targets
 +// become 6.0: DXIL, which vkd3d reads (its own HLSL compiler lacks SM 5.1 resource arrays).
 +#include <windows.h>
@@ -309,7 +315,7 @@ index 0000000..bfe697a
 +#include "platform/linux/dxc_compile.h"
 +
 +HRESULT RegpuD3DCompile(const void* source, SIZE_T size, const char*, const D3D_SHADER_MACRO* defines, ID3DInclude*,
-+    const char* entry, const char* target, UINT, UINT, ID3DBlob** code, ID3DBlob** errorBlob)
++    const char* entry, const char* target, UINT flags, UINT, ID3DBlob** code, ID3DBlob** errorBlob)
 +{
 +    std::string profile = target ? target : "";
 +    if (profile.size() >= 6 && profile[3] == '5') // vs_5_0, ps_5_1, cs_5_1 ...
@@ -320,7 +326,10 @@ index 0000000..bfe697a
 +
 +    std::vector<uint8_t> bytes;
 +    std::string errors;
-+    const bool ok = RegpuDxcCompile(source, size, entry ? entry : "main", profile.c_str(), defs, bytes, errors);
++    // As D3DCompile's flags ask: the shaders ReGPU translates at run time skip optimisation (the GPU
++    // driver optimises them anyway; -O3 took about a second per shader), the rest get DXC's default.
++    const int optimization = (flags & D3DCOMPILE_SKIP_OPTIMIZATION) ? 0 : 3;
++    const bool ok = RegpuDxcCompile(source, size, entry ? entry : "main", profile.c_str(), optimization, defs, bytes, errors);
 +    if (errorBlob)
 +    {
 +        *errorBlob = nullptr;
@@ -353,17 +362,19 @@ index 0000000..aa4b3bb
 +void DebugShotDone(const std::string&) {}
 diff --git a/src/platform/linux/dxc_compile.cpp b/src/platform/linux/dxc_compile.cpp
 new file mode 100644
-index 0000000..a73c286
+index 0000000..bc423a4
 --- /dev/null
 +++ b/src/platform/linux/dxc_compile.cpp
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,49 @@
 +// Linux: DXC as a library (see dxc_compile.h). One compiler per thread: DXC's instances are not
 +// thread-safe, and ReGPU compiles on several threads.
 +#include "platform/linux/dxc_compile.h"
 +
 +#include <dxc/dxcapi.h>
 +
-+bool RegpuDxcCompile(const void* source, size_t size, const char* entry, const char* profile,
++#include <algorithm>
++
++bool RegpuDxcCompile(const void* source, size_t size, const char* entry, const char* profile, int optimization,
 +    const std::vector<std::pair<std::string, std::string>>& defines, std::vector<uint8_t>& code, std::string& errors)
 +{
 +    thread_local CComPtr<IDxcCompiler3> compiler;
@@ -374,7 +385,8 @@ index 0000000..a73c286
 +    }
 +    const auto wide = [](const std::string& s) { return std::wstring(s.begin(), s.end()); };
 +    // HLSL 2021 (the default): the generated HLSL writes per-component logic for it (hlsl.cpp, REGPU_SEL).
-+    std::vector<std::wstring> args = { L"-E", wide(entry), L"-T", wide(profile), L"-O3" };
++    const std::wstring level = optimization <= 0 ? L"-Od" : L"-O" + std::to_wstring(std::min(optimization, 3));
++    std::vector<std::wstring> args = { L"-E", wide(entry), L"-T", wide(profile), level };
 +    for (const auto& [name, value] : defines)
 +    {
 +        args.push_back(L"-D");
@@ -405,7 +417,7 @@ index 0000000..a73c286
 +}
 diff --git a/src/platform/linux/dxc_compile.h b/src/platform/linux/dxc_compile.h
 new file mode 100644
-index 0000000..aa83c24
+index 0000000..c864de2
 --- /dev/null
 +++ b/src/platform/linux/dxc_compile.h
 @@ -0,0 +1,13 @@
@@ -418,9 +430,9 @@ index 0000000..aa83c24
 +#include <utility>
 +#include <vector>
 +
-+// profile: a shader model 6 target (ps_6_0, vs_6_0, cs_6_0). errors gets the compiler's messages,
-+// also warnings on success.
-+bool RegpuDxcCompile(const void* source, size_t size, const char* entry, const char* profile,
++// profile: a shader model 6 target (ps_6_0, vs_6_0, cs_6_0). optimization: DXC's -O level, 0 for
++// -Od. errors gets the compiler's messages, also warnings on success.
++bool RegpuDxcCompile(const void* source, size_t size, const char* entry, const char* profile, int optimization,
 +    const std::vector<std::pair<std::string, std::string>>& defines, std::vector<uint8_t>& code, std::string& errors);
 diff --git a/src/platform/linux/include/DirectXPackedVector.h b/src/platform/linux/include/DirectXPackedVector.h
 new file mode 100644
@@ -525,18 +537,18 @@ index 0000000..74ab79f
 +#include "../regpu_win32.h"
 diff --git a/src/platform/linux/presenter_linux.cpp b/src/platform/linux/presenter_linux.cpp
 new file mode 100644
-index 0000000..8b1df4e
+index 0000000..7e49032
 --- /dev/null
 +++ b/src/platform/linux/presenter_linux.cpp
-@@ -0,0 +1,609 @@
+@@ -0,0 +1,557 @@
 +// Linux output (render/presenter.h): ReGPU's frames on the host's window through Vulkan.
 +//
-+// vkd3d (Direct3D 12 on Vulkan) runs the renderer. The back buffers are Vulkan images that vkd3d
-+// wraps as D3D12 resources, so the renderer copies each frame into them as on Windows
-+// (PresenterRecordCopy). PresenterPresent hands the buffer to a presenter thread, which waits for
-+// the frame on the GPU, stretches it onto the window's swap chain (DXGI's stretch on Windows) and
-+// presents it. Only the host-window case exists here: the plugin always gives ReGPU its window
-+// (Config::createVulkanSurface).
++// vkd3d-proton (Direct3D 12 on Vulkan) runs the renderer. The back buffers are D3D12 resources, so
++// the renderer copies each frame into them as on Windows (PresenterRecordCopy); their Vulkan images
++// come from vkd3d-proton's interop interface. PresenterPresent hands the buffer to a presenter
++// thread, which waits for the frame on the GPU, stretches it onto the window's swap chain (DXGI's
++// stretch on Windows) and presents it. Only the host-window case exists here: the plugin always
++// gives ReGPU its window (Config::createVulkanSurface).
 +#include <windows.h>
 +#include <d3d12.h>
 +#include <wrl/client.h>
@@ -559,7 +571,6 @@ index 0000000..8b1df4e
 +namespace
 +{
 +constexpr UINT kBuffers = 3;
-+constexpr VkFormat kBackFormat = VK_FORMAT_R8G8B8A8_UNORM;
 +
 +void Check(HRESULT hr, const char* what)
 +{
@@ -575,12 +586,12 @@ index 0000000..8b1df4e
 +std::mutex g_deviceMutex;
 +ComPtr<ID3D12Device> g_device;
 +ComPtr<ID3D12CommandQueue> g_queue;
-+struct vkd3d_instance* g_instance = nullptr;
++ComPtr<ID3D12DXVKInteropDevice> g_interop;
 +
 +struct BackBuffer
 +{
-+    VkImage image = VK_NULL_HANDLE;
-+    VkDeviceMemory memory = VK_NULL_HANDLE;
++    VkImage image = VK_NULL_HANDLE;   // the resource's, owned by vkd3d-proton
++    VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED; // its layout in the PRESENT state
 +    ComPtr<ID3D12Resource> resource;
 +    uint64_t frameFence = 0;          // D3D12 fence value of the frame drawn into it
 +    VkCommandBuffer cmd = VK_NULL_HANDLE;
@@ -594,6 +605,7 @@ index 0000000..8b1df4e
 +    VkInstance instance = VK_NULL_HANDLE;
 +    VkPhysicalDevice physical = VK_NULL_HANDLE;
 +    VkDevice vk = VK_NULL_HANDLE;
++    VkQueue queue = VK_NULL_HANDLE; // vkd3d-proton's, behind g_queue
 +    uint32_t family = 0;
 +    VkSurfaceKHR surface = VK_NULL_HANDLE;
 +    VkSwapchainKHR swapchain = VK_NULL_HANDLE;
@@ -626,45 +638,15 @@ index 0000000..8b1df4e
 +    std::lock_guard lock(g_deviceMutex);
 +    if (g_device)
 +        return;
-+    const Settings& settings = GetSettings();
-+    std::vector<const char*> instanceExtensions = settings.vulkanInstanceExtensions;
-+    const bool window = settings.createVulkanSurface && !getenv("REGPU_HEADLESS");
-+    if (!window)
-+        instanceExtensions.clear();
-+
-+    vkd3d_instance_create_info ii{};
-+    ii.type = VKD3D_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-+    ii.pfn_signal_event = vkd3d_signal_event;
-+    ii.wchar_size = sizeof(WCHAR);
-+    ii.instance_extensions = instanceExtensions.data();
-+    ii.instance_extension_count = uint32_t(instanceExtensions.size());
-+    Check(vkd3d_create_instance(&ii, &g_instance), "vkd3d_create_instance");
-+
-+    static const char* const deviceExtensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
-+    vkd3d_device_create_info di{};
-+    di.type = VKD3D_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-+    // 11_0: vkd3d reports 12_0 only with tiled resources, which it doesn't implement and ReGPU
-+    // doesn't use. What ReGPU does need (bindless tables, typed UAV loads) it checks itself.
-+    di.minimum_feature_level = D3D_FEATURE_LEVEL_11_0;
-+    di.instance = g_instance;
-+    di.device_extensions = window ? deviceExtensions : nullptr;
-+    di.device_extension_count = window ? 1u : 0u;
-+    Check(vkd3d_create_device(&di, __uuidof(ID3D12Device), reinterpret_cast<void**>(g_device.ReleaseAndGetAddressOf())), "vkd3d_create_device");
++    // vkd3d-proton's own instance has the surface extensions (Wayland, X11) and its device the swap
++    // chain one, for its DXGI swap chains: the window's surface works on them as they are.
++    // 11_0: what ReGPU needs beyond it (bindless tables, typed UAV loads) it checks itself.
++    Check(D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&g_device)), "D3D12CreateDevice");
++    Check(g_device.As(g_interop), "ID3D12DXVKInteropDevice");
 +    D3D12_COMMAND_QUEUE_DESC qd{};
 +    qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
 +    Check(g_device->CreateCommandQueue(&qd, IID_PPV_ARGS(&g_queue)), "CreateCommandQueue");
-+    Log("presenter: vkd3d device on Vulkan");
-+}
-+
-+uint32_t MemoryType(uint32_t bits, VkMemoryPropertyFlags flags)
-+{
-+    VkPhysicalDeviceMemoryProperties props;
-+    vkGetPhysicalDeviceMemoryProperties(g_p.physical, &props);
-+    for (uint32_t i = 0; i < props.memoryTypeCount; i++)
-+        if ((bits & (1u << i)) && (props.memoryTypes[i].propertyFlags & flags) == flags)
-+            return i;
-+    Fatal("presenter: no Vulkan memory type for the back buffers");
-+    return 0;
++    Log("presenter: vkd3d-proton device on Vulkan");
 +}
 +
 +// Waits until no stretch reads back buffer i any more.
@@ -683,18 +665,12 @@ index 0000000..8b1df4e
 +    {
 +        WaitBlit(b);
 +        b.resource.Reset();
-+        if (b.image)
-+            vkDestroyImage(g_p.vk, b.image, nullptr);
-+        if (b.memory)
-+            vkFreeMemory(g_p.vk, b.memory, nullptr);
 +        b.image = VK_NULL_HANDLE;
-+        b.memory = VK_NULL_HANDLE;
 +    }
 +}
 +
-+// The back buffers at width x height: Vulkan images, as D3D12 resources in the PRESENT state.
-+// (VKD3D_RESOURCE_PRESENT_STATE_TRANSITION: in that state the image is in PRESENT_SRC_KHR layout,
-+// which the stretch starts and ends in.)
++// The back buffers at width x height: D3D12 render targets, left in the PRESENT state; the stretch
++// reads their Vulkan image in the layout vkd3d-proton keeps for that state and leaves it there.
 +void CreateBackBuffers(uint32_t width, uint32_t height)
 +{
 +    DestroyBackBuffers();
@@ -703,42 +679,24 @@ index 0000000..8b1df4e
 +    for (UINT i = 0; i < kBuffers; i++)
 +    {
 +        BackBuffer& b = g_p.back[i];
-+        VkImageCreateInfo ici{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
-+        ici.imageType = VK_IMAGE_TYPE_2D;
-+        ici.format = kBackFormat;
-+        ici.extent = { width, height, 1 };
-+        ici.mipLevels = 1;
-+        ici.arrayLayers = 1;
-+        ici.samples = VK_SAMPLE_COUNT_1_BIT;
-+        ici.tiling = VK_IMAGE_TILING_OPTIMAL;
-+        ici.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-+                    VK_IMAGE_USAGE_SAMPLED_BIT;
-+        ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-+        ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-+        CheckVk(vkCreateImage(g_p.vk, &ici, nullptr, &b.image), "vkCreateImage(back buffer)");
-+        VkMemoryRequirements req;
-+        vkGetImageMemoryRequirements(g_p.vk, b.image, &req);
-+        VkMemoryAllocateInfo mai{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-+        mai.allocationSize = req.size;
-+        mai.memoryTypeIndex = MemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-+        CheckVk(vkAllocateMemory(g_p.vk, &mai, nullptr, &b.memory), "vkAllocateMemory(back buffer)");
-+        CheckVk(vkBindImageMemory(g_p.vk, b.image, b.memory, 0), "vkBindImageMemory(back buffer)");
-+
-+        vkd3d_image_resource_create_info ri{};
-+        ri.type = VKD3D_STRUCTURE_TYPE_IMAGE_RESOURCE_CREATE_INFO;
-+        ri.vk_image = b.image;
-+        ri.desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-+        ri.desc.Width = width;
-+        ri.desc.Height = height;
-+        ri.desc.DepthOrArraySize = 1;
-+        ri.desc.MipLevels = 1;
-+        ri.desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-+        ri.desc.SampleDesc.Count = 1;
-+        ri.desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-+        ri.desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-+        ri.flags = VKD3D_RESOURCE_INITIAL_STATE_TRANSITION | VKD3D_RESOURCE_PRESENT_STATE_TRANSITION;
-+        ri.present_state = D3D12_RESOURCE_STATE_PRESENT;
-+        Check(vkd3d_create_image_resource(g_device.Get(), &ri, b.resource.ReleaseAndGetAddressOf()), "vkd3d_create_image_resource");
++        D3D12_RESOURCE_DESC desc{};
++        desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
++        desc.Width = width;
++        desc.Height = height;
++        desc.DepthOrArraySize = 1;
++        desc.MipLevels = 1;
++        desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
++        desc.SampleDesc.Count = 1;
++        desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
++        desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
++        D3D12_HEAP_PROPERTIES heap{};
++        heap.Type = D3D12_HEAP_TYPE_DEFAULT;
++        Check(g_device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_PRESENT, nullptr,
++                  IID_PPV_ARGS(&b.resource)), "CreateCommittedResource(back buffer)");
++        UINT64 handle = 0, offset = 0;
++        Check(g_interop->GetVulkanResourceInfo(b.resource.Get(), &handle, &offset), "GetVulkanResourceInfo(back buffer)");
++        b.image = VkImage(handle);
++        g_interop->GetVulkanImageLayout(b.resource.Get(), D3D12_RESOURCE_STATE_PRESENT, &b.layout);
 +
 +        D3D12_CPU_DESCRIPTOR_HANDLE h = g_p.rtvHeap->GetCPUDescriptorHandleForHeapStart();
 +        h.ptr += SIZE_T(i) * g_p.rtvStride;
@@ -877,7 +835,7 @@ index 0000000..8b1df4e
 +    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 +    vkBeginCommandBuffer(cmd, &bi);
 +    VkImage dst = g_p.swapImages[index];
-+    Barrier(cmd, b.image, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
++    Barrier(cmd, b.image, b.layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
 +    Barrier(cmd, dst, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
 +    VkImageBlit blit{};
 +    blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
@@ -885,7 +843,7 @@ index 0000000..8b1df4e
 +    blit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
 +    blit.dstOffsets[1] = { int32_t(g_p.swapExtent.width), int32_t(g_p.swapExtent.height), 1 };
 +    vkCmdBlitImage(cmd, b.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
-+    Barrier(cmd, b.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_READ_BIT, 0);
++    Barrier(cmd, b.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, b.layout, VK_ACCESS_TRANSFER_READ_BIT, 0);
 +    Barrier(cmd, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_WRITE_BIT, 0);
 +    vkEndCommandBuffer(cmd);
 +
@@ -906,10 +864,12 @@ index 0000000..8b1df4e
 +    pi.pImageIndices = &index;
 +
 +    vkResetFences(g_p.vk, 1, &b.blitDone);
-+    VkQueue queue = vkd3d_acquire_vk_queue(g_queue.Get()); // vkd3d's queue, locked while we submit
-+    CheckVk(vkQueueSubmit(queue, 1, &si, b.blitDone), "vkQueueSubmit(present)");
-+    r = vkQueuePresentKHR(queue, &pi);
-+    vkd3d_release_vk_queue(g_queue.Get());
++    // vkd3d-proton's queue, locked while we submit (GetVulkanQueueInfo takes the lock itself, so the
++    // queue was looked up once, in Start).
++    g_interop->LockCommandQueue(g_queue.Get());
++    CheckVk(vkQueueSubmit(g_p.queue, 1, &si, b.blitDone), "vkQueueSubmit(present)");
++    r = vkQueuePresentKHR(g_p.queue, &pi);
++    g_interop->UnlockCommandQueue(g_queue.Get());
 +    {
 +        std::lock_guard lock(g_p.mutex);
 +        b.blitPending = true;
@@ -953,10 +913,10 @@ index 0000000..8b1df4e
 +{
 +    EnsureDevice();
 +    const Settings& settings = GetSettings();
-+    g_p.instance = vkd3d_instance_get_vk_instance(vkd3d_instance_from_device(g_device.Get()));
-+    g_p.physical = vkd3d_get_vk_physical_device(g_device.Get());
-+    g_p.vk = vkd3d_get_vk_device(g_device.Get());
-+    g_p.family = vkd3d_get_vk_queue_family_index(g_queue.Get());
++    Check(g_interop->GetVulkanHandles(&g_p.instance, &g_p.physical, &g_p.vk), "GetVulkanHandles");
++    UINT32 family = 0;
++    Check(g_interop->GetVulkanQueueInfo(g_queue.Get(), &g_p.queue, &family), "GetVulkanQueueInfo");
++    g_p.family = family;
 +    g_p.surface = VkSurfaceKHR(settings.createVulkanSurface(g_p.instance));
 +    if (!g_p.surface)
 +    {
@@ -1140,48 +1100,54 @@ index 0000000..8b1df4e
 +}
 diff --git a/src/platform/linux/regpu_win32.h b/src/platform/linux/regpu_win32.h
 new file mode 100644
-index 0000000..7bacfc8
+index 0000000..a5e145a
 --- /dev/null
 +++ b/src/platform/linux/regpu_win32.h
-@@ -0,0 +1,228 @@
+@@ -0,0 +1,358 @@
 +#pragma once
-+// Linux: the Windows and Direct3D 12 API ReGPU uses, on top of vkd3d (Direct3D 12 on Vulkan, by
-+// WineHQ). The stand-in headers next to this one (windows.h, d3d12.h, wrl/client.h, ...) all
++// Linux: the Windows and Direct3D 12 API ReGPU uses, on top of vkd3d-proton (Direct3D 12 on Vulkan,
++// native build). The stand-in headers next to this one (windows.h, d3d12.h, wrl/client.h, ...) all
 +// include it, so ReGPU's sources build unchanged.
 +//
-+// vkd3d's COM interfaces use the Windows calling convention (ms_abi) and, with
-+// WIDL_EXPLICIT_AGGREGATE_RETURNS, the MSVC way of returning structs from methods
-+// (GetCPUDescriptorHandleForHeapStart, GetDesc): its own headers are needed, not the DirectX-Headers.
-+#ifndef WIDL_EXPLICIT_AGGREGATE_RETURNS
-+#define WIDL_EXPLICIT_AGGREGATE_RETURNS
-+#endif
++// vkd3d-proton's headers return structs from COM methods the MSVC way
++// (WIDL_EXPLICIT_AGGREGATE_RETURNS: GetCPUDescriptorHandleForHeapStart, GetDesc), so its own headers
++// are needed, not the DirectX-Headers.
 +#ifndef NOMINMAX
 +#define NOMINMAX // (vkd3d_windows.h's min/max macros break the standard headers)
 +#endif
++#define COM_NO_WINDOWS_H // (the generated headers would include <windows.h> and <ole2.h>)
++#include <vulkan/vulkan.h> // (before vkd3d-proton's, which otherwise forward-declare Vulkan's enums)
 +#include <vkd3d_windows.h>
 +#include <vkd3d_d3d12.h>
 +#include <vkd3d_d3d12sdklayers.h>
 +#include <vkd3d_d3dcommon.h>
 +#include <vkd3d_dxgiformat.h>
-+#include <vkd3d_utils.h>
++#include <vkd3d_device_vkd3d_ext.h>
 +#undef min
 +#undef max
 +
++#include <fcntl.h>
++#include <poll.h>
++#include <sys/eventfd.h>
 +#include <pthread.h>
 +#include <sched.h>
 +#include <time.h>
 +#include <unistd.h>
 +#include <immintrin.h>
 +
++#include <atomic>
 +#include <cerrno>
 +#include <chrono>
 +#include <climits>
++#include <condition_variable>
++#include <mutex>
 +#include <cstdint>
 +#include <cstdio>
 +#include <cstdlib>
 +#include <cstring>
 +#include <thread>
 +#include <utility>
++#include <vector>
 +
 +// ---------------------------------------------------------------------------- COM helpers
 +#ifndef IID_PPV_ARGS
@@ -1222,13 +1188,104 @@ index 0000000..7bacfc8
 +    template <typename U>
 +    HRESULT As(ComPtr<U>* out) const { return p_->QueryInterface(__uuidof(U), reinterpret_cast<void**>(out->ReleaseAndGetAddressOf())); }
 +    template <typename U>
-+    HRESULT As(ComPtr<U>& out) const { return As(&out); }
++    HRESULT As(ComPtr<U>& out) const { return As(std::addressof(out)); } // (& is overloaded, as in WRL)
 +    bool operator==(const ComPtr& o) const { return p_ == o.p_; }
 +    bool operator==(std::nullptr_t) const { return p_ == nullptr; }
 +private:
 +    T* p_ = nullptr;
 +};
 +} // namespace Microsoft::WRL
++
++// ---------------------------------------------------------------------------- not in vkd3d-proton
++// The shader compiler's types (d3dcompiler.h; DXC compiles here, see below).
++struct D3D_SHADER_MACRO
++{
++    LPCSTR Name;
++    LPCSTR Definition;
++};
++struct ID3DInclude;
++
++// The debug layer's message queue: Windows only (vkd3d-proton has none), so asking for it fails and
++// the callers log nothing. Declared for the code that asks.
++enum D3D12_MESSAGE_CATEGORY : int {};
++enum D3D12_MESSAGE_SEVERITY : int { D3D12_MESSAGE_SEVERITY_ERROR = 1 };
++enum D3D12_MESSAGE_ID : int {};
++enum D3D12_MESSAGE_CALLBACK_FLAGS : int { D3D12_MESSAGE_CALLBACK_FLAG_NONE = 0 };
++struct D3D12_MESSAGE
++{
++    D3D12_MESSAGE_CATEGORY Category;
++    D3D12_MESSAGE_SEVERITY Severity;
++    D3D12_MESSAGE_ID ID;
++    const char* pDescription;
++    SIZE_T DescriptionByteLength;
++};
++using D3D12MessageFunc = void (*)(D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_SEVERITY, D3D12_MESSAGE_ID, LPCSTR, void*);
++struct ID3D12InfoQueue : IUnknown
++{
++    virtual UINT64 STDMETHODCALLTYPE GetNumStoredMessages() = 0;
++    virtual HRESULT STDMETHODCALLTYPE GetMessage(UINT64 index, D3D12_MESSAGE* message, SIZE_T* size) = 0;
++    virtual void STDMETHODCALLTYPE ClearStoredMessages() = 0;
++};
++struct ID3D12InfoQueue1 : ID3D12InfoQueue
++{
++    virtual HRESULT STDMETHODCALLTYPE RegisterMessageCallback(D3D12MessageFunc callback, D3D12_MESSAGE_CALLBACK_FLAGS flags,
++        void* context, DWORD* cookie) = 0;
++};
++__CRT_UUID_DECL(ID3D12InfoQueue, 0x0742a90b, 0xc387, 0x483f, 0xb9, 0x46, 0x30, 0xa7, 0xe4, 0xe6, 0x14, 0x58)
++__CRT_UUID_DECL(ID3D12InfoQueue1, 0x2852dd88, 0xb484, 0x4c0c, 0xb6, 0xb1, 0x67, 0x16, 0x85, 0x00, 0xe6, 0x00)
++
++// vkd3d-proton's wide strings are UTF-16 (WCHAR is 16-bit), ReGPU's are wchar_t (32-bit here). The
++// pipeline library keys pipelines by name, so its names are converted (they are ASCII).
++struct RegpuUtf16
++{
++    explicit RegpuUtf16(const wchar_t* s)
++    {
++        for (; *s; ++s)
++            text.push_back(WCHAR(*s));
++        text.push_back(0);
++    }
++    operator LPCWSTR() const { return text.data(); }
++    std::vector<WCHAR> text;
++};
++#define LoadGraphicsPipeline(name, ...) LoadGraphicsPipeline(RegpuUtf16(name), __VA_ARGS__)
++#define StorePipeline(name, ...) StorePipeline(RegpuUtf16(name), __VA_ARGS__)
++
++// ---------------------------------------------------------------------------- blobs
++// D3DCreateBlob (d3dcompiler on Windows; vkd3d-proton has no utility library).
++class RegpuBlob final : public ID3DBlob
++{
++public:
++    explicit RegpuBlob(SIZE_T size) : data_(size) {}
++    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** out) override
++    {
++        if (IsEqualGUID(iid, __uuidof(ID3DBlob)) || IsEqualGUID(iid, __uuidof(IUnknown)))
++        {
++            AddRef();
++            *out = this;
++            return S_OK;
++        }
++        *out = nullptr;
++        return E_NOINTERFACE;
++    }
++    ULONG STDMETHODCALLTYPE AddRef() override { return ++refs_; }
++    ULONG STDMETHODCALLTYPE Release() override
++    {
++        const ULONG n = --refs_;
++        if (!n)
++            delete this;
++        return n;
++    }
++    void* STDMETHODCALLTYPE GetBufferPointer() override { return data_.data(); }
++    SIZE_T STDMETHODCALLTYPE GetBufferSize() override { return data_.size(); }
++private:
++    std::atomic<ULONG> refs_{ 1 };
++    std::vector<uint8_t> data_;
++};
++inline HRESULT D3DCreateBlob(SIZE_T size, ID3DBlob** blob)
++{
++    *blob = new RegpuBlob(size);
++    return S_OK;
++}
 +
 +// ---------------------------------------------------------------------------- shader compiler
 +// DXC instead of vkd3d-utils' D3DCompile (d3dcompile_linux.cpp).
@@ -1263,17 +1320,50 @@ index 0000000..7bacfc8
 +#define THREAD_PRIORITY_TIME_CRITICAL 15
 +#define DUPLICATE_SAME_ACCESS 2
 +
-+// Events are vkd3d-utils' (auto-reset), so ID3D12Fence::SetEventOnCompletion can signal them.
-+inline HANDLE CreateEventW(void*, BOOL manualReset, BOOL initialState, const void*)
++// Auto-reset events (the only kind ReGPU uses): eventfds, as vkd3d-proton's native build takes them
++// in SetEventOnCompletion (the handle is the descriptor). Reading the counter resets it.
++inline HANDLE CreateEventW(void*, BOOL, BOOL initialState, const void*)
 +{
-+    HANDLE e = vkd3d_create_event();
-+    (void)manualReset; // ReGPU only uses auto-reset events
-+    if (e && initialState) vkd3d_signal_event(e);
-+    return e;
++    int fd = eventfd(initialState ? 1 : 0, EFD_CLOEXEC | EFD_NONBLOCK);
++    if (fd == 0) // vkd3d-proton takes descriptor 0 for "no event"
++    {
++        const int moved = fcntl(fd, F_DUPFD_CLOEXEC, 1);
++        close(fd);
++        fd = moved;
++    }
++    return reinterpret_cast<HANDLE>(intptr_t(fd));
 +}
-+inline BOOL SetEvent(HANDLE e) { return SUCCEEDED(vkd3d_signal_event(e)); }
-+inline DWORD WaitForSingleObject(HANDLE e, DWORD ms) { return vkd3d_wait_event(e, ms); }
-+inline BOOL CloseHandle(HANDLE e) { if (e) vkd3d_destroy_event(e); return TRUE; }
++inline BOOL SetEvent(HANDLE e)
++{
++    const uint64_t one = 1;
++    return write(int(intptr_t(e)), &one, sizeof(one)) == sizeof(one);
++}
++inline DWORD WaitForSingleObject(HANDLE e, DWORD ms)
++{
++    const int fd = int(intptr_t(e));
++    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
++    for (;;)
++    {
++        uint64_t count;
++        if (read(fd, &count, sizeof(count)) == sizeof(count))
++            return WAIT_OBJECT_0;
++        int timeout = -1;
++        if (ms != INFINITE)
++        {
++            const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
++            if (left <= 0)
++                return WAIT_TIMEOUT;
++            timeout = int(std::min<long long>(left, INT_MAX));
++        }
++        pollfd p{ fd, POLLIN, 0 };
++        poll(&p, 1, timeout);
++    }
++}
++inline BOOL CloseHandle(HANDLE e)
++{
++    const intptr_t fd = intptr_t(e);
++    return fd > 0 && close(int(fd)) == 0;
++}
 +
 +inline void Sleep(DWORD ms)
 +{

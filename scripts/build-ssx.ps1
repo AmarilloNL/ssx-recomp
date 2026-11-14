@@ -30,8 +30,8 @@ $OlderXexpSha256 = '3ED16A2D3590277EF6277BD726AF7C035AB6303D624C12F01000F9A4F1D1
 $SdkPackage = 'sdk-10'
 $SdkPackageUrl = "https://github.com/AmarilloNL/ssx-recomp/releases/download/$SdkPackage/rexglue-sdk-ssx-10.zip"
 # The ReGPU renderer, prebuilt against that SDK package by scripts\build-regpu-package.ps1 (no game code).
-$ReGpuPackage = 'regpu-1'
-$ReGpuPackageUrl = "https://github.com/AmarilloNL/ssx-recomp/releases/download/$ReGpuPackage/rexgpu-regpu-1.zip"
+$ReGpuPackage = 'regpu-2'
+$ReGpuPackageUrl = "https://github.com/AmarilloNL/ssx-recomp/releases/download/$ReGpuPackage/rexgpu-regpu-2.zip"
 
 function Step($text) { Write-Host ""; Write-Host "==> $text" -ForegroundColor Cyan }
 function Fail($text) {
