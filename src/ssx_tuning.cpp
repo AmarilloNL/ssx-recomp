@@ -67,7 +67,7 @@ struct Tuning {
 
 // The newest tuning update in the files of the tuning folder: our own copy, or a profile save that
 // carries one (the version is the 32-bit number right before the archive in both).
-// ponytail: reads each file as plain bytes. A save still inside its Xbox 360 package is found too as
+// Note: reads each file as plain bytes. A save still inside its Xbox 360 package is found too as
 // long as the archive isn't split by one of the package's hash blocks (a single-file save package
 // keeps it whole); unpack the package properly if one ever isn't found.
 Tuning FindTuning() {
@@ -171,7 +171,7 @@ const uint8_t* DiscArray(rex::memory::Memory* memory, const uint8_t* node, const
 
 // The XP table's nodes that still point at the disc's array: the key, then a pointer to ten 32-bit
 // values that start with 6,000. (Normally one: the collection the database just built.)
-// ponytail: a scan of the game's heap after each load of the database (a few hundred MB, about a
+// Note: a scan of the game's heap after each load of the database (a few hundred MB, about a
 // tenth of a second, during loading). Take the node table from the game's collection object instead
 // if that ever shows.
 std::vector<uint8_t*> FindXpNodes(rex::memory::Memory* memory, bool* longer_seen) {
