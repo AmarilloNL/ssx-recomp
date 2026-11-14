@@ -1,0 +1,48 @@
+diff --git a/include/regpu/regpu.h b/include/regpu/regpu.h
+index a6f52b1..51c0a0e 100644
+--- a/include/regpu/regpu.h
++++ b/include/regpu/regpu.h
+@@ -81,6 +81,10 @@ struct Writeback
+ // What ReGPU needs from the game's runtime. Required unless marked optional.
+ struct Host
+ {
++    // Optional: draws the host's own UI over each presented frame, on the presenting thread.
++    // commandList is the ID3D12GraphicsCommandList recording the present, backBuffer the swap chain's
++    // ID3D12Resource (in D3D12_RESOURCE_STATE_RENDER_TARGET, width x height) and rtv its view's CPU handle.
++    void (*drawOverlay)(void* commandList, void* backBuffer, size_t rtv, uint32_t width, uint32_t height) = nullptr;
+     // The guest's 4 GB address space: guest address A is at base + A.
+     uint8_t* base = nullptr;
+     // Optional: the file mapping of the 512 MB physical memory, if the game maps it from one
+diff --git a/src/render/presenter.cpp b/src/render/presenter.cpp
+index 3055166..eb8c618 100644
+--- a/src/render/presenter.cpp
++++ b/src/render/presenter.cpp
+@@ -14,6 +14,7 @@
+ #include <wrl/client.h>
+ 
+ #include "log.h"
++#include "regpu/regpu.h"
+ #include "render/presenter.h"
+ #include "settings.h"
+ 
+@@ -489,9 +490,17 @@ bool PresenterRecordCopy(ID3D12GraphicsCommandList* list, ID3D12Resource* src, I
+         from.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+         list->CopyTextureRegion(&dst, offsetX + 24, offsetY + 24, 0, &from, nullptr);
+     }
+-    b.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+-    b.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+-    std::swap(b.Transition.StateBefore, b.Transition.StateAfter);
++    b.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
++    if (const auto drawOverlay = regpu::GetHost().drawOverlay)
++    {
++        b.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
++        list->ResourceBarrier(1, &b);
++        D3D12_CPU_DESCRIPTOR_HANDLE rtv = g_p.rtvHeap->GetCPUDescriptorHandleForHeapStart();
++        rtv.ptr += SIZE_T(i) * g_p.rtvStride;
++        drawOverlay(list, backBuffer, rtv.ptr, UINT(bd.Width), bd.Height);
++        b.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
++    }
++    b.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+     list->ResourceBarrier(1, &b);
+     return true;
+ }

@@ -5,9 +5,25 @@
 
 #pragma once
 
+#include <atomic>
+#include <chrono>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <memory>
+#include <thread>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 #include <rex/cvar.h>
 #include <rex/filesystem.h>
@@ -19,7 +35,10 @@
 #include <rex/runtime.h>
 #include <rex/system/gpu_plugin.h>
 #include <rex/system/xmemory.h>
+#include <rex/ui/imgui_drawer.h>
+#include <rex/ui/immediate_drawer.h>
 #include <rex/ui/keybinds.h>
+#include <rex/ui/presenter.h>
 #include <rex/ui/window.h>
 
 #include "ssx_dlc.h"
@@ -105,10 +124,33 @@ class SsxApp : public rex::ReXApp {
   }
 
   void OnPreSetup(rex::RuntimeConfig& config) override {
-    if (config.gpu_plugin.empty()) config.gpu_plugin = "xenos";
+    // ssx_renderer picks the GPU plugin (--gpu_plugin still wins); ReGPU falls back to the
+    // standard renderer when its DLL is missing or doesn't load.
+    if (config.gpu_plugin.empty()) {
+      config.gpu_plugin = rex::cvar::GetFlagByName("ssx_renderer") == "regpu" ? "regpu" : "xenos";
+      // A start of ReGPU that crashed or was killed within 30 s (StartMarker): the standard renderer.
+      std::error_code ec;
+      if (config.gpu_plugin == "regpu" && std::filesystem::exists(StartMarker(), ec)) {
+        REXLOG_WARN("ReGPU didn't start last time; using the standard renderer");
+        config.gpu_plugin = "xenos";
+        std::filesystem::remove(StartMarker(), ec);
+      }
+    }
     // Load the plugin now (ReXApp would right after this hook) so its cvars,
     // e.g. resolution_scale, exist for SsxApplyStartupSettings.
     if (!config.graphics) config.graphics = rex::system::LoadGpuPlugin(config.gpu_plugin);
+    if (!config.graphics && config.gpu_plugin == "regpu") {
+      REXLOG_WARN("ReGPU renderer not available; using the standard renderer");
+      config.gpu_plugin = "xenos";
+      config.graphics = rex::system::LoadGpuPlugin(config.gpu_plugin);
+    } else if (config.graphics && config.gpu_plugin == "regpu") {
+      std::ofstream(StartMarker()) << "ReGPU is starting (removed after 30 s or when the game closes)\n";
+      std::thread([] {
+        std::this_thread::sleep_for(std::chrono::seconds(30));
+        std::error_code ignored;
+        std::filesystem::remove(StartMarker(), ignored);
+      }).detach();
+    }
     // Keyboard play on by default; an explicit choice in ssx.toml wins.
     if (rex::cvar::GetFlagSource("mnk_mode") == rex::cvar::Source::kDefault) {
       rex::cvar::SetFlagByName("mnk_mode", "true");
@@ -126,8 +168,11 @@ class SsxApp : public rex::ReXApp {
     SsxSetMusicDir(user_data_root() / "music");
 
     window()->SetTitle("SSX");
+    rex::ui::ImGuiDrawer* drawer = imgui_drawer();
+    if (!drawer) drawer = CreateReGpuOverlay();
+    if (!drawer) return;
     settings_ = std::make_unique<SsxSettingsDialog>(
-        imgui_drawer(), static_cast<rex::input::InputSystem*>(runtime()->input_system()),
+        drawer, static_cast<rex::input::InputSystem*>(runtime()->input_system()),
         config_path_, [this] {
           // Same path as the window close button: ends the title and exits the process.
           if (SsxSpawnRestart()) window()->RequestClose();
@@ -140,9 +185,65 @@ class SsxApp : public rex::ReXApp {
 
   void OnConfigureFonts(ImFontAtlas* atlas) override { SsxSettingsDialog::ConfigureFonts(atlas); }
 
-  void OnShutdown() override { settings_.reset(); }
+  void OnShutdown() override {
+    settings_.reset();
+    overlay_.reset();
+  }
+
+  // A normal close (window, Alt+F4, F1's restart): the ReGPU start was fine. (ReXGlue exits the
+  // process right after closing, without OnShutdown.)
+  bool OnWindowCloseRequested() override {
+    std::error_code ignored;
+    std::filesystem::remove(StartMarker(), ignored);
+    return true;
+  }
 
  private:
+  // ReGPU is the default renderer, so a PC it can't start on must not crash on every start. This
+  // marker next to the exe exists while a ReGPU start is unproven: from loading the plugin until the
+  // game has run for 30 s or closes normally. Still there at the next start (a crash or a kill), the
+  // standard renderer is used that time; F1 can switch back.
+  static std::filesystem::path StartMarker() {
+    return rex::filesystem::GetExecutableFolder() / "regpu-starting.flag";
+  }
+
+  // ReXGlue draws its overlays (the F1 menu) through the GPU plugin's presenter; the ReGPU plugin
+  // has none, but draws them itself over each frame (regpu-plugin/src/overlay.h). The frame is
+  // built on the UI thread once per presented frame.
+  struct OverlayContext : rex::ui::UIDrawContext {
+    OverlayContext(uint32_t width, uint32_t height) : UIDrawContext(width, height) {}
+  };
+
+  rex::ui::ImGuiDrawer* CreateReGpuOverlay() {
+    using OverlayFn = rex::ui::ImmediateDrawer* (*)(void (*)(void*), void*);
+    void* plugin = SsxReGpuModule();
+#ifdef _WIN32
+    auto get = plugin ? reinterpret_cast<OverlayFn>(GetProcAddress(HMODULE(plugin), "ssx_regpu_overlay")) : nullptr;
+#else
+    auto get = plugin ? reinterpret_cast<OverlayFn>(dlsym(plugin, "ssx_regpu_overlay")) : nullptr;
+#endif
+    if (!get) return nullptr;
+    overlay_ = std::make_unique<rex::ui::ImGuiDrawer>(
+        window(), 64, [this](ImFontAtlas* atlas) { OnConfigureFonts(atlas); },
+        [this](ImGuiStyle& imgui_style, rex::ui::Style& ui_style) { OnConfigureStyle(imgui_style, ui_style); });
+    overlay_->SetPresenterAndImmediateDrawer(nullptr, get(&OnReGpuFrame, this));
+    return overlay_.get();
+  }
+
+  // On ReGPU's presenting thread: build the next overlay frame on the UI thread (one at a time).
+  static void OnReGpuFrame(void* context) {
+    auto* app = static_cast<SsxApp*>(context);
+    if (app->overlay_pending_.exchange(true)) return;
+    app->app_context().CallInUIThreadDeferred([app] {
+      app->overlay_pending_ = false;
+      if (!app->overlay_) return;
+      OverlayContext context(app->window()->GetActualPhysicalWidth(), app->window()->GetActualPhysicalHeight());
+      app->overlay_->Draw(context);
+    });
+  }
+
+  std::unique_ptr<rex::ui::ImGuiDrawer> overlay_;
+  std::atomic<bool> overlay_pending_{false};
   std::filesystem::path config_path_;
   std::filesystem::path iso_path_;
   std::unique_ptr<SsxSettingsDialog> settings_;

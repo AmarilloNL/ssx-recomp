@@ -2,7 +2,7 @@
 
 # 🏂 SSX (2012) — Native PC Port
 
-**EA's SSX, running natively on Windows — up to 300 fps, sharper, no emulator.**
+**EA's SSX, running natively on Windows — up to 300 fps, up to 4K, no emulator.**
 
 [![Latest release](https://img.shields.io/github/v/release/AmarilloNL/ssx-recomp?style=for-the-badge&label=installer&color=0aa5e6)](../../releases/latest)
 [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4?style=for-the-badge&logo=windows11&logoColor=white)](#installing)
@@ -46,8 +46,8 @@ code runs natively, and its Xbox 360 graphics are translated to Direct3D 12.
 | | |
 |---|---|
 | ⚡ **Up to 300 fps** | or match your monitor, at real-time game speed (the original runs at 30; 3× is [locked to 60](#frame-rate-lock)) |
-| 🖥️ **Sharper image** | 1200×640 rendering (the 360 renders 1120×584), optional 2× or 3× scale (up to 3600×1920) |
-| 🔍 **AMD FSR 1** | upscaling by default, plus CAS sharpening, FXAA and anisotropic filtering |
+| 🖥️ **Sharper image** | the [ReGPU renderer](#regpu) draws at your screen's resolution, 720p to 4K |
+| 🔍 **Standard renderer too** | 1200×640 with 2× or 3× scale, AMD FSR 1, CAS, FXAA, VSync, in case ReGPU shows a problem |
 | ⚙️ **Settings menu** | in game: **F1**, or **Back + Start** on a controller |
 | ⌨️ **Keyboard & controller** | key rebinding, vibration, deadzone |
 | 🪪 **Your name & picture** | instead of "User" and an empty square (settings → **Profile**) |
@@ -153,14 +153,19 @@ again.
 | ⌨️ **Keyboard** | WASD steer · Space jump · arrow keys = trick stick · Q/E triggers · 1/3 bumpers · Enter start · Tab back |
 
 > [!TIP]
-> **1× + FSR** runs at very high frame rates and looks sharp. **2×** is noticeably sharper (about
-> 60% of the 1× frame rate). We recommend **2×**: 3× has a locked frame rate (see below). If a setting ever stops the game from starting, delete `ssx.toml` next to
-> `ssx.exe`.
+> The game uses the [**ReGPU renderer**](#regpu), drawing at your screen's resolution: pick a
+> lower one in **F1 → Graphics → Resolution** for more frames. With the standard renderer, **1× + FSR**
+> runs at very high frame rates and **2×** is noticeably sharper (about 60% of the 1× frame rate);
+> 3× has a locked frame rate (see below). If a setting ever stops the game from starting, delete
+> `ssx.toml` next to `ssx.exe`.
+>
+> **Tearing** (a horizontal cut through the picture) on a screen without G-Sync/FreeSync, like
+> a handheld? Turn on **VSync** in **F1 → Display** and restart.
 
 <a id="frame-rate-lock"></a>
 
 > [!WARNING]
-> **3× is limited by the graphics card; we recommend 2×.** It draws about 4K (3600×1920), and
+> **Standard renderer: 3× is limited by the graphics card; we recommend 2×** (or [ReGPU](#regpu), the default). It draws about 4K (3600×1920), and
 > every pixel goes through the emulation of the Xbox 360's graphics chip. The settings menu warns
 > you when you pick it.
 >
@@ -331,6 +336,29 @@ the console:
 The game's Audio Settings have a volume for your music and a **Remix** switch.
 New folders show up the next time you open the playlist list; no restart needed.
 
+<a id="regpu"></a>
+
+## 🚀 The ReGPU renderer (the default)
+
+[ReGPU](https://github.com/zer0ducksgiven/ReGPU) is a newer, much smaller Direct3D 12 renderer for
+recompiled Xbox 360 games, and the game's default renderer. SSX loads it as a ReXGlue GPU plugin
+(`regpu-plugin/`, adapted from [Glue2GPU](https://github.com/zer0ducksgiven/Glue2GPU)). On the test
+PC (RTX 4080 SUPER) it draws at 1440p at about 200 fps where the standard renderer manages about 140
+at its 2× scale, and 4K at about 110 fps.
+
+- **Resolution:** F1 > Graphics > Resolution picks the drawing size: *Match my screen* (the
+  default), 720p, 1080p, 1440p / 2K or 4K, changed while the game runs (any other 16:9 size can go
+  in `ssx.toml` as `regpu_resolution = "WIDTHxHEIGHT"`). Ultrawide screens get a 16:9 picture for
+  now. The frame rate isn't locked at high resolutions.
+- **The standard renderer** is still there: F1 > Graphics > Renderer > Standard, then restart. It
+  has the 1×/2×/3× resolution scale and the FSR, CAS, FXAA, VSync and 16:9 options.
+- **If ReGPU can't start** on a PC, the game uses the standard renderer by itself at the next start.
+- **Tested** on NVIDIA graphics cards so far. If something looks different from the standard
+  renderer, a screenshot helps a lot (F12 saves one with the renderer's own debug data).
+- **How it's installed:** the builder downloads it prebuilt (release `regpu-1`, made by
+  `scripts\build-regpu-package.ps1`: ReGPU with this project's `patches\regpu-*.patch`, no game
+  code). Developers build it from source with `scripts\build-regpu.ps1` (needs Git and Python 3).
+
 <a id="roadmap"></a>
 
 ## 🗺️ Roadmap
@@ -401,6 +429,8 @@ in `tools/rexglue-src`.
 - [XenonRecomp](https://github.com/hedge-dev/XenonRecomp) (hedge-dev): the codegen approach ReXGlue builds on
 - [xenia-canary game patches](https://github.com/xenia-canary/game-patches) (Margen67): the SSX 60 fps and render size findings
 - AMD FidelityFX (FSR / CAS)
+- [ReGPU](https://github.com/zer0ducksgiven/ReGPU) and [Glue2GPU](https://github.com/zer0ducksgiven/Glue2GPU)
+  (MIT): the ReGPU renderer and its ReXGlue plugin
 
 ---
 

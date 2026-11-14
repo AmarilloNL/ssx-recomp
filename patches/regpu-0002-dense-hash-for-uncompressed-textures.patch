@@ -1,0 +1,22 @@
+diff --git a/src/gpu/renderer.cpp b/src/gpu/renderer.cpp
+index 8d4a881..74591b9 100644
+--- a/src/gpu/renderer.cpp
++++ b/src/gpu/renderer.cpp
+@@ -5044,6 +5044,17 @@ void TextureHashSpan(const TextureFetch& fetch, uint32_t w, uint32_t h, const ui
+     // Small textures (icons, thumbnails) are hashed densely, big ones sampled: a change confined
+     // to a few dwords must not slip between the samples.
+     stride = bytes <= (64u << 10) ? 4 : bytes <= (512u << 10) ? 64 : 256;
++    // REGPU_DENSE_HASH_KB: uncompressed textures up to that size are hashed densely too. Atlases the
++    // CPU fills a little at a time (font glyphs rasterised as new text appears) are uncompressed and
++    // often 1 MB (1024x1024 k_8): a new glyph rarely covers one of the 4 sampled dwords of its 32x32
++    // tile, and the stale copy showed old glyphs. Compressed textures are assets, loaded whole.
++    static const size_t denseKb = getenv("REGPU_DENSE_HASH_KB") ? size_t(atoi(getenv("REGPU_DENSE_HASH_KB"))) : 0;
++    if (stride > 4 && bytes <= (denseKb << 10))
++    {
++        const char* name = TextureFormatName(fetch.Format());
++        if (!name || (strncmp(name, "DXT", 3) != 0 && strncmp(name, "DXN", 3) != 0 && strncmp(name, "CTX", 3) != 0))
++            stride = 4;
++    }
+ }
+ 
+ // Decodes (if changed) and uploads a texture; returns its resource.

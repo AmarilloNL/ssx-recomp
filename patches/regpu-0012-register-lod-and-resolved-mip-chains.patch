@@ -1,0 +1,231 @@
+diff --git a/src/gpu/hlsl.cpp b/src/gpu/hlsl.cpp
+index a256b45..d7ddfc1 100644
+--- a/src/gpu/hlsl.cpp
++++ b/src/gpu/hlsl.cpp
+@@ -211,6 +211,11 @@ float3 CubeDirection(float3 stf)
+ 
+ float4 TFetchRaw(uint slot, float3 coord, bool denorm, bool vertexStage, float bias, float2 texel);
+ static int gFilterOverride = -1; // the fetch instruction's filter (0 point, 1 linear), -1 the constant's
++// setTexLOD's register, and a fetch that takes its level from it alone (tex2Dlod): the "bias" passed
++// down is then the level. SSX's tone map reads its average luminance that way, the 1x1 level of an
++// image it reduces level by level; fetched by the gradients it got the full-size level instead.
++static float gTexLod = 0;
++static bool gFetchLevel = false;
+ // The sampler for a fetch: the constant's mode (0 linear wrap, 1 linear clamp, 2 point clamp, 3 point
+ // wrap), its filter replaced by the instruction's when it has one.
+ uint FetchMode(uint mode)
+@@ -230,7 +235,7 @@ uint FetchMode(uint mode)
+ #define REGPU_SAMPLE_BIAS_2D(t, s, uv, bias) ((t).SampleLevel((s), (uv), max((bias), 0)))
+ #define REGPU_SAMPLE_BIAS_CUBE(t, s, dir, bias) ((t).SampleLevel((s), (dir), max((bias), 0)))
+ #else
+-#define REGPU_SAMPLE_BIAS_2D(t, s, uv, bias) ((t).SampleBias((s), (uv), (bias)))
++#define REGPU_SAMPLE_BIAS_2D(t, s, uv, bias) (gFetchLevel ? (t).SampleLevel((s), (uv), (bias)) : (t).SampleBias((s), (uv), (bias)))
+ #define REGPU_SAMPLE_BIAS_CUBE(t, s, dir, bias) ((t).SampleBias((s), (dir), (bias)))
+ #endif
+ 
+@@ -758,12 +763,16 @@ struct Emitter
+                 : "float3(" + reg + comp[f.srcSwizzle & 3] + ", " + reg + comp[(f.srcSwizzle >> 2) & 3] + ", " + reg +
+                 comp[(f.srcSwizzle >> 4) & 3] + ")";
+             char call[320];
++            // The register LOD (setTexLOD) adds to the bias; alone, without the gradients' LOD, it is the level.
++            static const bool noRegLod = getenv("REGPU_NO_REGISTER_LOD") != nullptr; // A/B: ignored, as before
++            const bool regLod = f.useRegLod && !noRegLod, level = regLod && !f.useCompLod && pixel;
++            const char* lod = regLod ? "gTexLod + " : "";
+             if (LeanFetch() && pixel && f.dimension == 1)
+-                snprintf(call, sizeof(call), "TFetch2D(%u, %s, %s, %.4f + tbias[%u].x, float2(%.1f, %.1f))", f.constIndex, uv.c_str(),
+-                    f.denormalized ? "true" : "false", f.lodBias, f.constIndex, f.offsetX, f.offsetY);
++                snprintf(call, sizeof(call), "TFetch2D(%u, %s, %s, %s%.4f + tbias[%u].x, float2(%.1f, %.1f))", f.constIndex, uv.c_str(),
++                    f.denormalized ? "true" : "false", lod, f.lodBias, f.constIndex, f.offsetX, f.offsetY);
+             else
+-                snprintf(call, sizeof(call), "TFetch(%u, %s, %s, %s, %.4f + tbias[%u].x, float2(%.1f, %.1f))", f.constIndex, uv.c_str(),
+-                    f.denormalized ? "true" : "false", pixel ? "false" : "true", f.lodBias, f.constIndex, f.offsetX, f.offsetY);
++                snprintf(call, sizeof(call), "TFetch(%u, %s, %s, %s, %s%.4f + tbias[%u].x, float2(%.1f, %.1f))", f.constIndex, uv.c_str(),
++                    f.denormalized ? "true" : "false", pixel ? "false" : "true", lod, f.lodBias, f.constIndex, f.offsetX, f.offsetY);
+             // Declared, then assigned: fxc drops the value when the fetch initialises the declaration
+             // in some shaders ("internal error: invalid access of unbound variable").
+             // The instruction's own filter (mag filter 0 point, 1 linear) overrides the fetch constant's,
+@@ -772,10 +781,13 @@ struct Emitter
+             // came and went as the car moved a fraction of a texel. REGPU_NO_FETCH_FILTER_OVERRIDE=1: ignored.
+             static const bool noOverride = getenv("REGPU_NO_FETCH_FILTER_OVERRIDE") != nullptr;
+             const bool overrides = !noOverride && (f.magFilter == 0 || f.magFilter == 1);
+-            body = std::string("{ float4 t; ") + (overrides ? "gFilterOverride = " + std::to_string(f.magFilter) + "; " : "") + "t = " + call + "; " +
++            body = std::string("{ float4 t; ") + (overrides ? "gFilterOverride = " + std::to_string(f.magFilter) + "; " : "") +
++                (level ? "gFetchLevel = true; " : "") + "t = " + call + "; " + (level ? "gFetchLevel = false; " : "") +
+                 (overrides ? "gFilterOverride = -1; " : "") + DestSwizzleWrite(f.dest, f.destSwizzle, "t") + "}";
+             result.usedTextureSlots |= 1u << f.constIndex;
+         }
++        else if (f.opcode == 24) // setTexLOD: the level (or bias) of the fetches after it that ask for it
++            body = "gTexLod = r[" + std::to_string(f.src) + "]." + "xyzw"[f.srcSwizzle & 3] + ";";
+         else if (f.opcode == 18 && pixel)
+         {
+             // getGradients: screen-space derivatives of two source components,
+@@ -1082,7 +1094,7 @@ float4 TFetch2D(uint slot, float3 coord, bool denorm, float bias, float2 texel)
+     // Sampler index: the filter mode (1-3 its own sampler), else the anisotropy (s4-s7), else s0.
+     const uint mode = info & 3u, aniso = (info >> 20) & 7u;
+     const uint s = mode != 0u ? mode : (aniso >= 1u && aniso <= 4u ? aniso + 3u : 0u);
+-    float4 v = gtex[asuint(tbias[slot].y)].SampleBias(gsamp[s], uv, bias);
++    float4 v = REGPU_SAMPLE_BIAS_2D(gtex[asuint(tbias[slot].y)], gsamp[s], uv, bias); // (or the level: gFetchLevel)
+     uint gamma = (info >> 24) & 0xFu;
+     if (gamma != 0u)
+     {
+diff --git a/src/gpu/renderer.cpp b/src/gpu/renderer.cpp
+index da4ec50..db313da 100644
+--- a/src/gpu/renderer.cpp
++++ b/src/gpu/renderer.cpp
+@@ -610,6 +610,7 @@ struct Renderer
+     std::unordered_map<uint64_t, CachedTexture> cubes;
+     std::unordered_map<uint64_t, CachedTexture> volumes; // 3D textures
+     std::unordered_map<uint64_t, CachedTexture> mipChains; // resolved textures with their mips, by base and shape
++    ComPtr<ID3D12Resource> mipChainTexel[2];               // 1x1 8888 / RGBA16F: a one-texel level's average (ResolvedMipChain)
+     // Bindless texture descriptors.
+     struct BindlessEntry
+     {
+@@ -4988,7 +4989,10 @@ ID3D12Resource* ResolvedMipChain(const TextureFetch& fetch, const ResolvedTextur
+ {
+     TextureScope textureScope;
+     const uint32_t w = std::min(fetch.Width(), level0.width), h = std::min(fetch.Height(), level0.height);
+-    const UINT bpp = level0.format == DXGI_FORMAT_R8G8B8A8_UNORM ? 4 : 8;
++    // (In guest bytes, and from the size rounded up to a power of two, as the console lays the levels
++    // out: SSX's 300x160 16-bit luminance has its 150x80 level in a 256x128 one, the next 64 KB on.)
++    const UINT bpp = level0.guestBpp ? level0.guestBpp : level0.format == DXGI_FORMAT_R8G8B8A8_UNORM ? 4 : 8;
++    const uint32_t pw = std::bit_ceil(fetch.Width()), ph = std::bit_ceil(fetch.Height());
+     std::vector<const ResolvedTexture*> levels{ &level0 };
+     uint32_t address = fetch.MipAddress();
+     for (uint32_t i = 1; i <= fetch.MipMaxLevel() && (w >> i || h >> i); i++)
+@@ -4998,7 +5002,7 @@ ID3D12Resource* ResolvedMipChain(const TextureFetch& fetch, const ResolvedTextur
+         if (!r || r->format != level0.format || r->width < lw || r->height < lh)
+             break;
+         levels.push_back(r);
+-        const uint32_t bytes = ((lw + 31) & ~31u) * ((lh + 31) & ~31u) * bpp;
++        const uint32_t bytes = ((std::max(pw >> i, 1u) + 31) & ~31u) * ((std::max(ph >> i, 1u) + 31) & ~31u) * bpp;
+         address += std::max((bytes + 4095) & ~4095u, 4096u);
+     }
+     if (levels.size() < 2)
+@@ -5074,6 +5078,89 @@ ID3D12Resource* ResolvedMipChain(const TextureFetch& fetch, const ResolvedTextur
+     for (auto& x : b)
+         std::swap(x.Transition.StateBefore, x.Transition.StateAfter);
+     C().list->ResourceBarrier(UINT(b.size()), b.data());
++    // The console's one-texel level holds one value. Ours was drawn at the render scale, a block of host
++    // pixels that each saw a part of the image, and the level above took a few of them: all its texels
++    // take the block's average. (SSX's tone map reads its exposure from the 1x1 level of its luminance
++    // chain: at 2x the left of the picture was exposed for the top left quarter, the right for the top
++    // right one.) REGPU_NO_MIP_TEXEL_AVERAGE=1: as copied (A/B).
++    static LiveSwitch noAverage("REGPU_NO_MIP_TEXEL_AVERAGE");
++    const UINT last = count - 1;
++    const uint32_t bx = std::min(std::max(1u, uint32_t(ScaleX() + 1e-3)), levels[last]->hostWidth);
++    const uint32_t by = std::min(std::max(1u, uint32_t(ScaleY() + 1e-3)), levels[last]->hostHeight);
++    const bool rgba8 = level0.format == DXGI_FORMAT_R8G8B8A8_UNORM;
++    FrameResources& f = Frame();
++    if (!noAverage && (w >> last) <= 1 && (h >> last) <= 1 && bx * by > 1 && (rgba8 || level0.format == DXGI_FORMAT_R16G16B16A16_FLOAT) &&
++        f.descriptorsUsed < kDescriptorsPerFrame)
++    {
++        ComPtr<ID3D12Resource>& one = g_r.mipChainTexel[rgba8 ? 0 : 1];
++        if (!one)
++        {
++            D3D12_HEAP_PROPERTIES hp{};
++            hp.Type = D3D12_HEAP_TYPE_DEFAULT;
++            D3D12_RESOURCE_DESC td{};
++            td.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
++            td.Width = td.Height = 1;
++            td.DepthOrArraySize = 1;
++            td.MipLevels = 1;
++            td.SampleDesc.Count = 1;
++            td.Format = level0.format;
++            td.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
++            Check(g_r.device->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &td,
++                      D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&one)),
++                "CreateCommittedResource(mip chain texel)");
++            CountCreate("mip chain texel");
++        }
++        const UINT slot = f.descriptorBase + f.descriptorsUsed++;
++        D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
++        srv.Format = level0.format;
++        srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
++        srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
++        srv.Texture2D.MipLevels = 1;
++        g_r.device->CreateShaderResourceView(levels[last]->resource.Get(), &srv, Cpu(g_r.srvHeap.Get(), slot, g_r.srvStride));
++        D3D12_RESOURCE_BARRIER t[2]{};
++        for (UINT i = 0; i < 2; i++)
++        {
++            t[i].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
++            t[i].Transition.pResource = i ? chain.resource.Get() : one.Get();
++            t[i].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
++            t[i].Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
++            t[i].Transition.StateAfter = i ? D3D12_RESOURCE_STATE_COPY_DEST : D3D12_RESOURCE_STATE_RENDER_TARGET;
++        }
++        C().list->ResourceBarrier(2, t);
++        const auto rtv = g_r.blitRtvHeap->GetCPUDescriptorHandleForHeapStart();
++        C().list->CreateRenderTargetView(g_r.device, one.Get(), rtv); // in order with the recorded commands
++        C().list->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
++        C().list->SetGraphicsRootSignature(g_r.blitRootSignature.Get());
++        C().list->SetPipelineState(rgba8 ? g_r.colorBlit8.Get() : g_r.colorBlit16.Get());
++        C().list->SetGraphicsRootDescriptorTable(0, Gpu(g_r.srvHeap.Get(), slot, g_r.srvStride));
++        const uint32_t constants[9] = { std::bit_cast<uint32_t>(1.0f), 0, 0, 0, 0, 0, bx, by, 0 };
++        C().list->SetGraphicsRoot32BitConstants(1, 9, constants, 0);
++        const D3D12_VIEWPORT vp{ 0, 0, 1, 1, 0, 1 };
++        const D3D12_RECT sc{ 0, 0, 1, 1 };
++        C().list->RSSetViewports(1, &vp);
++        C().list->RSSetScissorRects(1, &sc);
++        C().list->DrawInstanced(3, 1, 0, 0);
++        t[0].Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
++        t[0].Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
++        C().list->ResourceBarrier(1, t);
++        D3D12_TEXTURE_COPY_LOCATION dst{}, src{};
++        dst.pResource = chain.resource.Get();
++        dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
++        dst.SubresourceIndex = last;
++        src.pResource = one.Get();
++        src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
++        for (uint32_t y = 0; y < std::max(hh >> last, 1u); y++)
++            for (uint32_t x = 0; x < std::max(hw >> last, 1u); x++)
++                C().list->CopyTextureRegion(&dst, x, y, 0, &src, nullptr);
++        t[0].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
++        t[0].Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
++        std::swap(t[1].Transition.StateBefore, t[1].Transition.StateAfter);
++        C().list->ResourceBarrier(2, t);
++        // Back to the main targets and root signature (the draw this is fetched for sets its state after).
++        C().list->OMSetRenderTargets(1, &C().rtv, FALSE, &C().dsv);
++        C().list->SetGraphicsRootSignature(g_r.rootSignature.Get());
++        g_drawState.Invalidate();
++    }
+     return chain.resource.Get();
+ }
+ 
+@@ -10264,7 +10351,11 @@ void DrawImpl(uint32_t initiator, uint32_t dmaBase, uint32_t dmaSize)
+         // constant may declare a narrower image inside it (e.g. 163 of 192 columns):
+         // the shader scales UVs so 0..1 spans the declared image, not the padding.
+         tb[2] = tb[3] = 1.0f;
+-        if (onGpu && resolvedPtr && !cube && resolvedPtr->width && resolvedPtr->height && resolvedPtr->resource)
++        // (Not for a resolved mip chain: ResolvedMipChain crops it to the declared image already.
++        // Scaled again, SSX's adapted luminance (300 of 320 columns, blended with its own previous
++        // frame) shrank sideways every frame into horizontal streaks, and the tone map drew them.)
++        if (onGpu && resolvedPtr && !cube && resolvedPtr->width && resolvedPtr->height && resolvedPtr->resource &&
++            (!texture || texture->GetDesc().MipLevels == 1))
+         {
+             tb[2] = std::min(1.0f, float(fetch.Width()) / float(resolvedPtr->width));
+             tb[3] = std::min(1.0f, float(fetch.Height()) / float(resolvedPtr->height));
+diff --git a/src/gpu/ucode.cpp b/src/gpu/ucode.cpp
+index 6946e98..6eb4888 100644
+--- a/src/gpu/ucode.cpp
++++ b/src/gpu/ucode.cpp
+@@ -279,6 +279,8 @@ Fetch DecodeFetch(const uint32_t* w)
+         f.srcSwizzle = Bits(w[0], 26, 6);
+         f.dimension = Bits(w[2], 14, 2);
+         f.magFilter = Bits(w[1], 12, 2);
++        f.useCompLod = Bits(w[1], 28, 1);
++        f.useRegLod = Bits(w[1], 29, 1);
+         f.lodBias = float(int32_t(Bits(w[2], 2, 7) << 25) >> 25) / 16.0f;
+         f.offsetX = float(int32_t(Bits(w[2], 16, 5) << 27) >> 27) * 0.5f;
+         f.offsetY = float(int32_t(Bits(w[2], 21, 5) << 27) >> 27) * 0.5f;
+diff --git a/src/gpu/ucode.h b/src/gpu/ucode.h
+index 80ab3d6..e830651 100644
+--- a/src/gpu/ucode.h
++++ b/src/gpu/ucode.h
+@@ -74,6 +74,7 @@ struct Fetch
+     bool denormalized;   // coordinates in texels
+     uint32_t dimension;
+     float lodBias;       // texture fetch LOD bias (instruction)
++    bool useCompLod = true, useRegLod = false; // texture fetch: the LOD from the gradients / from setTexLOD
+     uint32_t magFilter = 3; // texture fetch: 0 point, 1 linear, 3 the fetch constant's (w1 bits 12-13)
+     float offsetX = 0, offsetY = 0; // texture fetch texel offsets (signed 5 bits, half texels)
+     bool predicated, predCondition;

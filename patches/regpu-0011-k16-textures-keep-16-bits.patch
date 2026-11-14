@@ -1,0 +1,51 @@
+diff --git a/src/gpu/renderer.cpp b/src/gpu/renderer.cpp
+index da1cc90..da4ec50 100644
+--- a/src/gpu/renderer.cpp
++++ b/src/gpu/renderer.cpp
+@@ -2326,6 +2326,8 @@ UINT BindlessIndexLocked(ID3D12Resource* resource, DXGI_FORMAT format, uint32_t
+     srv.Format = format;
+     srv.Shader4ComponentMapping = format == DXGI_FORMAT_BC4_UNORM
+         ? D3D12_ENCODE_SHADER_4_COMPONENT_MAPPING(0, 0, 0, 0) // DXT5A: its one channel in all four
++        : format == DXGI_FORMAT_R16_UNORM
++        ? D3D12_ENCODE_SHADER_4_COMPONENT_MAPPING(0, 0, 0, 5) // k_16: its channel in red, green and blue, alpha 1 (as decoded)
+         : D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+     if (kind == 1)
+     {
+@@ -5276,7 +5278,7 @@ ID3D12Resource* GetTextureLocked(const TextureFetch& fetch, DXGI_FORMAT& format,
+     // the upload. D3D12 needs block-aligned sizes; others are decoded to RGBA8.
+     LiveSwitch &noNativeBC = g_sw_REGPU_NO_NATIVE_BC;
+     const uint32_t kind = TextureBCKind(fetch.Format());
+-    const uint32_t bc = !noNativeBC && ((w % 4 == 0 && h % 4 == 0) || kind == 6) && !forceDecode ? kind : 0;
++    const uint32_t bc = !noNativeBC && ((w % 4 == 0 && h % 4 == 0) || kind >= 6) && !forceDecode ? kind : 0;
+     const uint8_t* source;
+     size_t sourceBytes, hashStride;
+     TextureHashSpan(fetch, w, h, source, sourceBytes, hashStride);
+@@ -5328,10 +5330,10 @@ ID3D12Resource* GetTextureLocked(const TextureFetch& fetch, DXGI_FORMAT& format,
+     if (bc)
+     {
+         static const DXGI_FORMAT bcFormats[] = { DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_BC1_UNORM, DXGI_FORMAT_BC2_UNORM, DXGI_FORMAT_BC3_UNORM,
+-            DXGI_FORMAT_BC4_UNORM, DXGI_FORMAT_BC5_UNORM, DXGI_FORMAT_R16G16B16A16_FLOAT };
++            DXGI_FORMAT_BC4_UNORM, DXGI_FORMAT_BC5_UNORM, DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R16_UNORM };
+         const DXGI_FORMAT bcFormat = bcFormats[bc];
+-        // Kind 6 (16_16_16_16_FLOAT) is uncompressed: blocks of one texel, 8 bytes.
+-        const uint32_t blockBytes = bc == 1 || bc == 4 || bc == 6 ? 8 : 16, bs = bc == 6 ? 1 : 4;
++        // Kinds 6 (16_16_16_16_FLOAT) and 7 (16) are uncompressed: blocks of one texel, 8 and 2 bytes.
++        const uint32_t blockBytes = bc == 7 ? 2 : bc == 1 || bc == 4 || bc == 6 ? 8 : 16, bs = bc >= 6 ? 1 : 4;
+         D3D12_RESOURCE_BARRIER b{};
+         b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+         b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+diff --git a/src/gpu/texture.cpp b/src/gpu/texture.cpp
+index 1aabc1d..7cbfe1e 100644
+--- a/src/gpu/texture.cpp
++++ b/src/gpu/texture.cpp
+@@ -546,6 +546,10 @@ uint32_t TextureBCKind(uint32_t format)
+     case k_DXT5A: return 4;
+     case k_DXN: return 5;
+     case k_16_16_16_16_FLOAT: return 6; // not compressed: 1x1 "blocks" of 8 bytes
++    // k_16 keeps its 16 bits (R16_UNORM, 1x1 "blocks" of 2 bytes). Decoded to 8 bits, a table of
++    // 16-bit indices lost its low byte: SSX's snow looks its trail tiles up in a 1268x1280 k_16 table,
++    // and the tracks came out as scattered pieces of the wrong tiles.
++    case k_16: return 7;
+     default: return 0;
+     }
+ }

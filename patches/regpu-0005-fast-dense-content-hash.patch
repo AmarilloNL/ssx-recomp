@@ -1,0 +1,29 @@
+diff --git a/src/gpu/renderer.cpp b/src/gpu/renderer.cpp
+index 1c67bdd..65f2345 100644
+--- a/src/gpu/renderer.cpp
++++ b/src/gpu/renderer.cpp
+@@ -1279,7 +1279,23 @@ uint64_t ContentHash(const uint8_t* data, size_t bytes, size_t stride = 256)
+     if (fullHash)
+         stride = 4;
+     uint64_t h = mix(0xCBF29CE484222325ull, bytes);
+-    for (size_t i = 0; i + 4 <= bytes; i += stride)
++    size_t i = 0;
++    // Every dword: 64-bit words in four independent lanes. One chain per dword (a multiply and a
++    // shift each, waiting on the last) took ~3 ms a frame for a 3.2 MB table hashed densely
++    // (REGPU_DENSE_HASH_KB). (l ^ v) * odd is a bijection, so any changed word changes its lane.
++    if (stride == 4)
++    {
++        uint64_t lane[4] = { h, h ^ 0x9E3779B97F4A7C15ull, h ^ 0xC2B2AE3D27D4EB4Full, h ^ 0x165667B19E3779F9ull };
++        for (; i + 32 <= bytes; i += 32)
++            for (int k = 0; k < 4; k++)
++            {
++                uint64_t v;
++                memcpy(&v, data + i + k * 8, 8);
++                lane[k] = (lane[k] ^ v) * 0xFF51AFD7ED558CCDull;
++            }
++        h = mix(mix(mix(mix(h, lane[0]), lane[1]), lane[2]), lane[3]);
++    }
++    for (; i + 4 <= bytes; i += stride)
+     {
+         uint32_t v;
+         memcpy(&v, data + i, 4);

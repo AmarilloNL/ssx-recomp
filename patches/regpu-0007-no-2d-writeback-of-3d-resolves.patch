@@ -1,0 +1,19 @@
+diff --git a/src/gpu/renderer.cpp b/src/gpu/renderer.cpp
+index 65f2345..a6c33ec 100644
+--- a/src/gpu/renderer.cpp
++++ b/src/gpu/renderer.cpp
+@@ -7185,9 +7185,11 @@ void Resolve()
+         static const uint64_t writebackMax = getenv("REGPU_RESOLVE_WRITEBACK_MAX") ? strtoull(getenv("REGPU_RESOLVE_WRITEBACK_MAX"), nullptr, 10) : 0;
+         if (request.mode == regpu::Writeback::Mode::None && uint64_t(width) * height <= writebackMax)
+             request.mode = regpu::Writeback::Mode::Deferred;
+-        // (Written as a 2D image it would land in the wrong place of the volume's tiled memory, and a
+-        // changed volume is decoded again from memory over the slices drawn into it.)
+-        if (toVolume && !getenv("REGPU_NO_RESOLVE_TO_3D"))
++        // Never written back, with or without REGPU_NO_RESOLVE_TO_3D: as a 2D image it lands in the wrong
++        // places of the volume's 3D-tiled memory (SSX's trail volume came out as square patches of
++        // garbage on the snow around the riders), and a changed volume is decoded again from memory over
++        // the slices drawn into it.
++        if (toVolume)
+             request.mode = regpu::Writeback::Mode::None;
+         // Any destination format the copy can write (from the FM4 port; 8888 only before).
+         const bool anyFormat = destFormat == 6 || !g_writeback8888Only;

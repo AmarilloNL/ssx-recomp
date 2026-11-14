@@ -18,6 +18,8 @@
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#else
+#include <dlfcn.h>
 #endif
 
 #include <rex/audio/downmix.h>
@@ -41,6 +43,22 @@ REXCVAR_DEFINE_STRING(ssx_render_resolution, "high", "SSX",
     .allowed({"original", "high", "720p"})  // 720p: older configs, now means high
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 REXCVAR_DEFINE_INT32(ssx_volume, 100, "SSX", "Master volume (0-100)").range(0, 100);
+REXCVAR_DEFINE_STRING(ssx_renderer, "regpu", "SSX",
+                      "Renderer: regpu (ReGPU, the default) or standard (ReXGlue's) (restart)")
+    .allowed({"standard", "regpu"})
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+// Off: frames are shown the moment they're done, which tears on screens without variable refresh
+// rate (G-Sync/FreeSync), e.g. handhelds. On: the screen shows the newest whole frame at each
+// refresh. The frame rate setting still sets the pace either way.
+REXCVAR_DEFINE_BOOL(ssx_vsync, false, "SSX", "VSync: no tearing on screens without G-Sync/FreeSync (restart)")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+namespace {
+// What ssx_vsync turns off. Only it sets them at runtime, and that isn't saved: turning VSync off
+// (even while it's active) restores them at the next start.
+constexpr const char* kTearingFlags[] = {"d3d12_allow_variable_refresh_rate_and_tearing",
+                                         "vulkan_allow_present_mode_immediate"};
+}  // namespace
 
 namespace {
 
@@ -48,11 +66,26 @@ void ApplyVolume(int32_t volume) { rex::audio::SetOutputGain(volume / 100.0f); }
 
 }  // namespace
 
+void* SsxReGpuModule() {
+#ifdef _WIN32
+  return GetModuleHandleW(L"rexgpu-regpu.dll");
+#else
+  // RTLD_NOLOAD: only when ReXGlue already loaded it (its soname).
+  static void* const module = dlopen("librexgpu-regpu.so", RTLD_NOW | RTLD_NOLOAD);
+  return module;
+#endif
+}
+
+bool SsxUsingReGpu() {
+  static const bool regpu = SsxReGpuModule() != nullptr;
+  return regpu;
+}
+
 int32_t SsxTargetFps() {
-  // The scale needs a restart: read it once.
+  // The scale needs a restart: read it once. (ReGPU holds high frame rates at 3x: no lock there.)
   static const int32_t scale =
       rex::string::from_string<int32_t>(rex::cvar::GetFlagByName("resolution_scale"), 1);
-  if (scale >= 3) return std::clamp(REXCVAR_GET(ssx_framerate_3x), 30, 60);
+  if (scale >= 3 && !SsxUsingReGpu()) return std::clamp(REXCVAR_GET(ssx_framerate_3x), 30, 60);
   int32_t fps = REXCVAR_GET(ssx_framerate);
   if (fps == 0) {  // match the main display
 #ifndef _WIN32
@@ -75,6 +108,16 @@ int32_t SsxTargetFps() {
 // the config file or was set at runtime, as valid TOML.
 void SsxSaveConfig(const std::filesystem::path& path) {
   std::string out = "# SSX settings - written by the game. Edit in-game with F1.\n";
+  // Lines for settings that don't exist right now (the other renderer's) are kept as they are.
+  {
+    std::ifstream in(path);
+    for (std::string line; std::getline(in, line);) {
+      size_t eq = line.find('=');
+      if (line.empty() || line[0] == '#' || eq == std::string::npos || eq == 0) continue;
+      std::string key = line.substr(0, line.find_last_not_of(" \t", eq - 1) + 1);
+      if (!rex::cvar::GetFlagInfo(key)) out += line + "\n";
+    }
+  }
   for (const auto& entry : rex::cvar::GetRegistry()) {
     if (entry.type == rex::cvar::FlagType::Command ||
         (entry.source != rex::cvar::Source::kConfig && entry.source != rex::cvar::Source::kRuntime)) {
@@ -82,6 +125,10 @@ void SsxSaveConfig(const std::filesystem::path& path) {
     }
     std::string value = entry.getter();
     if (value == entry.default_value) continue;
+    if (entry.source == rex::cvar::Source::kRuntime && std::find(std::begin(kTearingFlags), std::end(kTearingFlags),
+                                            entry.name) != std::end(kTearingFlags)) {
+      continue;
+    }
     if (entry.type == rex::cvar::FlagType::String) {
       std::string quoted = "\"";
       for (char c : value) {
@@ -177,6 +224,15 @@ void SsxApplyStartupSettings() {
     rex::cvar::SetFlagByName("resolution_scale", "1");
   }
 #endif
+
+  // VSync (the presenters read these when the window's swap chain is made, after this).
+  // D3D12 then presents without the tearing flag, Vulkan in mailbox (or FIFO) mode.
+  if (REXCVAR_GET(ssx_vsync)) {
+    for (const char* flag : kTearingFlags) {
+      // Each build has only its own presenter's flag.
+      if (rex::cvar::SetFlagByName(flag, "false")) REXLOG_INFO("VSync: {} = false", flag);
+    }
+  }
 
   ApplyVolume(REXCVAR_GET(ssx_volume));
   rex::cvar::RegisterChangeCallback("ssx_volume", [](std::string_view, std::string_view value) {

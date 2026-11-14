@@ -1,0 +1,71 @@
+diff --git a/src/gpu/hlsl.cpp b/src/gpu/hlsl.cpp
+index aec57fe..55c880d 100644
+--- a/src/gpu/hlsl.cpp
++++ b/src/gpu/hlsl.cpp
+@@ -11,6 +11,17 @@ namespace
+ using namespace ucode;
+ 
+ const char kPreamble[] = R"(
++// Per-component logic: HLSL 2021 (DXC, the Linux build) wants select/and/or for vectors, fxc the
++// operators. Same result either way.
++#if defined(__HLSL_VERSION) && __HLSL_VERSION >= 2021
++#define REGPU_SEL(c, a, b) select(c, a, b)
++#define REGPU_AND(a, b) and(a, b)
++#define REGPU_OR(a, b) or(a, b)
++#else
++#define REGPU_SEL(c, a, b) ((c) ? (a) : (b))
++#define REGPU_AND(a, b) ((a) && (b))
++#define REGPU_OR(a, b) ((a) || (b))
++#endif
+ cbuffer VSConstants : register(b0)
+ {
+     float4 vc[256];
+@@ -312,7 +323,7 @@ float2 Mirror(float2 uv, uint info)
+         const float2 lo_ = 0.5 / (texelSize); \
+         const float2 inside_ = float2((wraps_ && ((info_ >> 18) & 1u) == 0u) ? frac((uv).x) : (uv).x, \
+                                       (wraps_ && ((info_ >> 19) & 1u) == 0u) ? frac((uv).y) : (uv).y); \
+-        uv = (pad_ > 0.0 && pad_ < 1.0) ? clamp(inside_, lo_, 1.0 - lo_) : (uv); \
++        uv = REGPU_SEL(REGPU_AND(pad_ > 0.0, pad_ < 1.0), clamp(inside_, lo_, 1.0 - lo_), (uv)); \
+         uv *= (pad_.x != 0.0) ? abs(pad_) : float2(1.0, 1.0); \
+     }
+ 
+@@ -347,7 +358,7 @@ float4 TFetchRaw(uint slot, float3 coord, bool denorm, bool vertexStage, float b
+     if ((tinfo[slot].x >> 31) & 1u) uv.y = abs(uv.y);
+     // Clamp to border (tinfo.x bit 16; bit 17 white): outside the image the border colour, as
+     // shadow maps rely on (white: nothing casts a shadow beyond the map).
+-    if (((tinfo[slot].x >> 16) & 1u) && any(uv < 0.0 || uv > 1.0))
++    if (((tinfo[slot].x >> 16) & 1u) && (any(uv < 0.0) || any(uv > 1.0)))
+         return ((tinfo[slot].x >> 17) & 1u) ? float4(1, 1, 1, 1) : float4(0, 0, 0, 0);
+     // One axis clamped, the other wrapping (tinfo.x bits 18 U, 19 V): clamp that axis here to
+     // the edge texels' centres; the sampler wraps.
+@@ -390,7 +401,7 @@ float4 CubeOp(float4 a, float4 b)
+ 
+ // Direct3D 9 multiplication, as the Xenos ALU does it: zero times anything (even
+ // infinity or NaN) is zero. Shaders rely on it to switch terms off by weight.
+-float4 Mul9(float4 a, float4 b) { return (a == 0 || b == 0) ? 0 : a * b; }
++float4 Mul9(float4 a, float4 b) { return REGPU_SEL(REGPU_OR(a == 0, b == 0), 0, a * b); }
+ float Mul9(float a, float b) { return (a == 0 || b == 0) ? 0 : a * b; }
+ float Dot9(float4 a, float4 b) { float4 m = Mul9(a, b); return m.x + m.y + m.z + m.w; }
+ 
+@@ -513,9 +524,9 @@ struct Emitter
+         case 9: return "trunc(" + A + ")";
+         case 10: return "floor(" + A + ")";
+         case 11: return "Mul9(" + A + ", " + B + ") + " + C;
+-        case 12: return "(" + A + " == 0.0) ? " + B + " : " + C;
+-        case 13: return "(" + A + " >= 0.0) ? " + B + " : " + C;
+-        case 14: return "(" + A + " > 0.0) ? " + B + " : " + C;
++        case 12: return "REGPU_SEL(" + A + " == 0.0, " + B + ", " + C + ")";
++        case 13: return "REGPU_SEL(" + A + " >= 0.0, " + B + ", " + C + ")";
++        case 14: return "REGPU_SEL(" + A + " > 0.0, " + B + ", " + C + ")";
+         case 15: return "Dot9(" + A + ", " + B + ").xxxx";
+         case 16: return "Dot9(float4((" + A + ").xyz, 0), float4((" + B + ").xyz, 0)).xxxx";
+         case 17: return "(Dot9(float4((" + A + ").xy, 0, 0), float4((" + B + ").xy, 0, 0)) + (" + C + ").x).xxxx";
+@@ -1107,7 +1118,7 @@ float4 TFetch2D(uint slot, float3 coord, bool denorm, float bias, float2 texel)
+     if (denorm) uv = (uv + texel) / texelSize;
+     else uv += texel / texelSize;
+     uv = Mirror(uv, info);
+-    if (((info >> 16) & 1u) && any(uv < 0.0 || uv > 1.0))
++    if (((info >> 16) & 1u) && (any(uv < 0.0) || any(uv > 1.0)))
+         return ((info >> 17) & 1u) ? float4(1, 1, 1, 1) : float4(0, 0, 0, 0);
+     if ((info >> 18) & 1u) uv.x = clamp(uv.x, 0.5 / texelSize.x, 1.0 - 0.5 / texelSize.x);
+     if ((info >> 19) & 1u) uv.y = clamp(uv.y, 0.5 / texelSize.y, 1.0 - 0.5 / texelSize.y);
