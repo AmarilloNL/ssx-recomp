@@ -13,6 +13,7 @@
 #include <memory>
 #include <thread>
 
+#ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -20,6 +21,9 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 #include <rex/cvar.h>
 #include <rex/filesystem.h>
@@ -212,8 +216,12 @@ class SsxApp : public rex::ReXApp {
 
   rex::ui::ImGuiDrawer* CreateReGpuOverlay() {
     using OverlayFn = rex::ui::ImmediateDrawer* (*)(void (*)(void*), void*);
-    HMODULE plugin = GetModuleHandleW(L"rexgpu-regpu.dll");
-    auto get = plugin ? reinterpret_cast<OverlayFn>(GetProcAddress(plugin, "ssx_regpu_overlay")) : nullptr;
+    void* plugin = SsxReGpuModule();
+#ifdef _WIN32
+    auto get = plugin ? reinterpret_cast<OverlayFn>(GetProcAddress(HMODULE(plugin), "ssx_regpu_overlay")) : nullptr;
+#else
+    auto get = plugin ? reinterpret_cast<OverlayFn>(dlsym(plugin, "ssx_regpu_overlay")) : nullptr;
+#endif
     if (!get) return nullptr;
     overlay_ = std::make_unique<rex::ui::ImGuiDrawer>(
         window(), 64, [this](ImFontAtlas* atlas) { OnConfigureFonts(atlas); },

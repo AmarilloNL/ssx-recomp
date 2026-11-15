@@ -1,0 +1,16 @@
+diff --git a/src/core/memory_posix.cpp b/src/core/memory_posix.cpp
+index b52bf39..f169377 100644
+--- a/src/core/memory_posix.cpp
++++ b/src/core/memory_posix.cpp
+@@ -483,6 +483,11 @@ FileMappingHandle CreateFileMappingHandle(const std::filesystem::path& path, siz
+     shm_unlink(full_path.c_str());
+     return kFileMappingHandleInvalid;
+   }
++  // The name isn't needed after this (the descriptor is used), and an unlinked object is freed
++  // when the last descriptor and mapping go, also when the process crashes or hard-exits. Linked,
++  // each run left its guest memory in /dev/shm (RAM) until the tmpfs filled and page faults on
++  // guest memory raised SIGBUS. CloseFileMappingHandle's unlink then finds nothing, harmlessly.
++  shm_unlink(full_path.c_str());
+   return static_cast<FileMappingHandle>(ret);
+ #endif
+ }

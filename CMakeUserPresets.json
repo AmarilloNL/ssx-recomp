@@ -30,6 +30,18 @@
                 "REXSDK_DIR": "",
                 "CMAKE_PREFIX_PATH": "${sourceDir}/tools/rexglue-sdk-ssx"
             }
+        },
+        {
+            "name": "ssx-linux",
+            "displayName": "SSX release for Linux (SDK built by scripts/build-ssx-linux.sh in tools/rexglue-sdk-ssx)",
+            "inherits": "linux-amd64-release",
+            "binaryDir": "${sourceDir}/out/build/ssx-linux",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "REXSDK_DIR": "",
+                "CMAKE_PREFIX_PATH": "${sourceDir}/tools/rexglue-sdk-ssx"
+            }
         }
     ]
 }

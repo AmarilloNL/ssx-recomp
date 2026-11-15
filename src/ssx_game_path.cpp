@@ -9,16 +9,70 @@
 #include <cwctype>
 #include <string>
 
+#ifdef _WIN32
 #include <windows.h>
 #include <shobjidl.h>
+#pragma comment(lib, "ole32.lib")
+#else
+#include <cstdio>
+#include <cstdlib>
+#endif
 
 #include <rex/cvar.h>
 
 #include "ssx_settings.h"
 
-#pragma comment(lib, "ole32.lib")
-
 namespace fs = std::filesystem;
+
+#ifndef _WIN32
+namespace {
+
+bool Has(const char* tool) {
+  return std::system((std::string("command -v ") + tool + " >/dev/null 2>&1").c_str()) == 0;
+}
+
+// Runs a command, its first line of output (without the newline).
+std::string FirstLine(const std::string& command) {
+  std::string line;
+  if (FILE* out = popen(command.c_str(), "r")) {
+    char buffer[4096];
+    if (std::fgets(buffer, sizeof(buffer), out)) line = buffer;
+    pclose(out);
+  }
+  while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
+  return line;
+}
+
+}  // namespace
+
+// The titles and patterns are the port's own constants, never user text, so plain single quotes do.
+std::string SsxPickFile(const char* title, const char* filter_name, const char* patterns) {
+  const char* home = std::getenv("HOME");
+  std::string start = home ? home : "/";
+  if (Has("kdialog")) {
+    return FirstLine(std::string("kdialog --title '") + title + "' --getopenfilename '" + start + "' '" +
+                     patterns + "|" + filter_name + "' 2>/dev/null");
+  }
+  if (Has("zenity")) {
+    return FirstLine(std::string("zenity --file-selection --title='") + title + "' --file-filter='" +
+                     filter_name + " | " + patterns + "' 2>/dev/null");
+  }
+  std::fprintf(stderr, "SSX: no file picker found (install kdialog or zenity).\n");
+  return {};
+}
+
+void SsxMessage(const char* text, bool error) {
+  std::fprintf(stderr, "SSX: %s\n", text);
+  std::string quoted = "'";
+  for (const char* c = text; *c; ++c) quoted += *c == '\'' ? std::string("'\\''") : std::string(1, *c);
+  quoted += "'";
+  if (Has("kdialog")) {
+    std::system((std::string("kdialog --title SSX ") + (error ? "--error " : "--sorry ") + quoted + " 2>/dev/null").c_str());
+  } else if (Has("zenity")) {
+    std::system((std::string("zenity --title=SSX ") + (error ? "--error" : "--warning") + " --text=" + quoted + " 2>/dev/null").c_str());
+  }
+}
+#endif
 
 namespace {
 
@@ -38,6 +92,7 @@ fs::path Validate(fs::path p) {
   return {};
 }
 
+#ifdef _WIN32
 fs::path PickWithDialog() {
   fs::path result;
   if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE))) {
@@ -64,6 +119,20 @@ fs::path PickWithDialog() {
   return result;
 }
 
+void ShowMessage(const wchar_t* text, bool error) {
+  MessageBoxW(nullptr, text, L"SSX", MB_OK | (error ? MB_ICONERROR : MB_ICONWARNING));
+}
+#define SSX_TEXT(s) L##s
+#else
+fs::path PickWithDialog() {
+  return SsxPickFile("Select your SSX game: default.xex in the extracted disc, or the .iso",
+                     "SSX game (default.xex, .iso)", "*.iso *.ISO default.xex");
+}
+
+void ShowMessage(const char* text, bool error) { SsxMessage(text, error); }
+#define SSX_TEXT(s) s
+#endif
+
 }  // namespace
 
 std::optional<fs::path> SsxLocateGame(const fs::path& exe_dir, const fs::path& config_path) {
@@ -84,10 +153,9 @@ std::optional<fs::path> SsxLocateGame(const fs::path& exe_dir, const fs::path& c
     if (picked.empty()) return std::nullopt;  // cancelled
     found = Validate(picked);
     if (found.empty()) {
-      MessageBoxW(nullptr,
-                  L"That doesn't look like SSX. Pick default.xex from the extracted disc, "
-                  L"or the disc's .iso file.",
-                  L"SSX", MB_OK | MB_ICONWARNING);
+      ShowMessage(SSX_TEXT("That doesn't look like SSX. Pick default.xex from the extracted disc, "
+                           "or the disc's .iso file."),
+                  false);
     }
   }
   rex::cvar::SetFlagByName("game_data_root", found.string());
@@ -101,9 +169,8 @@ std::optional<fs::path> SsxLocateUpdate(const fs::path& exe_dir) {
   if (fs::exists(folder / "default.xexp", ec) && fs::exists(folder / "patch0.big", ec)) {
     return folder;
   }
-  MessageBoxW(nullptr,
-              L"This SSX build is made for the title update, but the update's files are missing "
-              L"from the \"update\" folder next to ssx.exe. Run SSX-Installer.exe again to fix it.",
-              L"SSX", MB_OK | MB_ICONERROR);
+  ShowMessage(SSX_TEXT("This SSX build is made for the title update, but the update's files are missing "
+                       "from the \"update\" folder next to the game. Run the installer again to fix it."),
+              true);
   return std::nullopt;
 }

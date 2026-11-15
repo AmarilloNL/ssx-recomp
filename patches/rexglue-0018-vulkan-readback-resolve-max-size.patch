@@ -1,0 +1,72 @@
+diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
+index a744375..0982f28 100644
+--- a/src/graphics/command_processor.cpp
++++ b/src/graphics/command_processor.cpp
+@@ -54,6 +54,17 @@ REXCVAR_DEFINE_STRING(readback_resolve, "none", "GPU",
+     .allowed({"none", "fast", "some", "full"})
+     .lifecycle(rex::cvar::Lifecycle::kHotReload);
+ 
++REXCVAR_DEFINE_BOOL(readback_resolve_one_off_sync, false, "GPU",
++                    "D3D12: with resolve readback, read back the first 4 resolves to each 2D range (up "
++                    "to 4 MB) right away, whatever their size and the readback mode.")
++    .lifecycle(rex::cvar::Lifecycle::kHotReload);
++
++REXCVAR_DEFINE_INT32(readback_resolve_max_size, 0, "GPU",
++                     "With resolve readback, only read back resolves of at most this many bytes "
++                     "(0: all). Games often read only tiny render targets on the CPU.")
++    .range(0, INT32_MAX)
++    .lifecycle(rex::cvar::Lifecycle::kHotReload);
++
+ REXCVAR_DEFINE_BOOL(readback_resolve_half_pixel_offset, false, "GPU",
+                     "When draw resolution scaling is active, sample from the center of each "
+                     "scaled block during resolve readback downscale")
+diff --git a/src/graphics/d3d12/command_processor.cpp b/src/graphics/d3d12/command_processor.cpp
+index 706e254..7acc22a 100644
+--- a/src/graphics/d3d12/command_processor.cpp
++++ b/src/graphics/d3d12/command_processor.cpp
+@@ -43,16 +43,8 @@ REXCVAR_DEFINE_BOOL(d3d12_readback_resolve, false, "GPU/D3D12",
+                     "Read render-to-texture results on the CPU")
+     .lifecycle(rex::cvar::Lifecycle::kHotReload);
+ 
+-REXCVAR_DEFINE_BOOL(readback_resolve_one_off_sync, false, "GPU/D3D12",
+-                    "With resolve readback, read back the first 4 resolves to each 2D range (up "
+-                    "to 4 MB) right away, whatever their size and the readback mode.")
+-    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+-
+-REXCVAR_DEFINE_INT32(readback_resolve_max_size, 0, "GPU/D3D12",
+-                     "With resolve readback, only read back resolves of at most this many bytes "
+-                     "(0: all). Games often read only tiny render targets on the CPU.")
+-    .range(0, INT32_MAX)
+-    .lifecycle(rex::cvar::Lifecycle::kHotReload);
++REXCVAR_DECLARE(bool, readback_resolve_one_off_sync);
++REXCVAR_DECLARE(int32_t, readback_resolve_max_size);
+ 
+ REXCVAR_DEFINE_BOOL(d3d12_submit_on_primary_buffer_end, true, "GPU/D3D12",
+                     "Submit command list when PM4 primary buffer ends")
+diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
+index 001f36b..5fcd60b 100644
+--- a/src/graphics/vulkan/command_processor.cpp
++++ b/src/graphics/vulkan/command_processor.cpp
+@@ -51,6 +51,8 @@ REXCVAR_DEFINE_BOOL(vulkan_readback_resolve, false, "GPU/Vulkan",
+                     "Read render-to-texture results on the CPU")
+     .lifecycle(rex::cvar::Lifecycle::kHotReload);
+ 
++REXCVAR_DECLARE(int32_t, readback_resolve_max_size);
++
+ REXCVAR_DEFINE_BOOL(vulkan_readback_memexport, false, "GPU/Vulkan",
+                     "Read data written by memory export in shaders on the CPU")
+     .lifecycle(rex::cvar::Lifecycle::kHotReload);
+@@ -4472,6 +4474,13 @@ bool VulkanCommandProcessor::IssueCopy_ReadbackResolvePath() {
+     return true;
+   };
+ 
++  // Only small resolves, when limited: games often read only tiny render targets on the CPU, and
++  // reading back the big ones each frame (written ranges are conservative) is what costs and breaks.
++  if (int32_t max_size = REXCVAR_GET(readback_resolve_max_size);
++      max_size > 0 && written_length > uint32_t(max_size)) {
++    return true;
++  }
++
+   bool is_scaled = texture_cache_->IsDrawResolutionScaled();
+   uint64_t resolve_key = MakeReadbackResolveKey(written_address, written_length);
+   ReadbackBuffer& readback = readback_buffers_[resolve_key];

@@ -14,6 +14,8 @@ REXCVAR_DECLARE(int32_t, ssx_volume);
 int32_t SsxTargetFps();
 // The ReGPU renderer plugin is in use (rather than ReXGlue's own).
 bool SsxUsingReGpu();
+// The ReGPU plugin's loaded module (HMODULE / dlopen handle), or nullptr.
+void* SsxReGpuModule();
 
 // Adaptive frame pacing above 60 fps when the GPU can't keep up; call once per
 // presented frame (VdSwap).

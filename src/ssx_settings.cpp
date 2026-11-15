@@ -14,9 +14,15 @@
 #include <set>
 #include <string>
 
+#ifdef _WIN32
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#else
+#include <dlfcn.h>
+
+#include <SDL3/SDL_video.h>
+#endif
 
 #include <rex/audio/downmix.h>
 #include <rex/cvar.h>
@@ -62,8 +68,18 @@ void ApplyVolume(int32_t volume) { rex::audio::SetOutputGain(volume / 100.0f); }
 
 }  // namespace
 
+void* SsxReGpuModule() {
+#ifdef _WIN32
+  return GetModuleHandleW(L"rexgpu-regpu.dll");
+#else
+  // RTLD_NOLOAD: only when ReXGlue already loaded it (its soname).
+  static void* const module = dlopen("librexgpu-regpu.so", RTLD_NOW | RTLD_NOLOAD);
+  return module;
+#endif
+}
+
 bool SsxUsingReGpu() {
-  static const bool regpu = GetModuleHandleW(L"rexgpu-regpu.dll") != nullptr;
+  static const bool regpu = SsxReGpuModule() != nullptr;
   return regpu;
 }
 
@@ -74,11 +90,32 @@ int32_t SsxTargetFps() {
   if (scale >= 3 && !SsxUsingReGpu()) return std::clamp(REXCVAR_GET(ssx_framerate_3x), 30, 60);
   int32_t fps = REXCVAR_GET(ssx_framerate);
   if (fps == 0) {  // match the main display
+#ifndef _WIN32
+    // The main display's refresh rate from SDL (the game window's library), looked up every 2 s:
+    // this runs every frame, and SDL has no display until the window is open.
+    static std::atomic<int32_t> display_hz{60};
+    static std::atomic<int64_t> next_check{0};
+    static bool logged = false;
+    const int64_t now = std::chrono::steady_clock::now().time_since_epoch().count();
+    if (now >= next_check.load(std::memory_order_relaxed)) {
+      next_check = now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::seconds(2)).count();
+      if (const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
+          mode && mode->refresh_rate > 1.0f) {
+        const int32_t hz = int32_t(mode->refresh_rate + 0.5f);
+        if (display_hz.exchange(hz) != hz || !logged) {
+          logged = true;
+          REXLOG_INFO("Display: {:.2f} Hz (frame rate \"match display\")", mode->refresh_rate);
+        }
+      }
+    }
+    fps = display_hz.load(std::memory_order_relaxed);
+#else
     DEVMODEW mode = {};
     mode.dmSize = sizeof(mode);
     fps = EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &mode) && mode.dmDisplayFrequency > 1
               ? int32_t(mode.dmDisplayFrequency)
               : 60;
+#endif
   }
   return std::clamp(fps, 30, 360);
 }
@@ -133,14 +170,31 @@ void SsxApplyStartupSettings() {
   if (rex::cvar::GetFlagSource("render_target_path_d3d12") == rex::cvar::Source::kDefault) {
     rex::cvar::SetFlagByName("render_target_path_d3d12", "rov");
   }
+  // Vulkan (Linux) the same way: its render-target path sends the game's picture to the screen
+  // from the wrong surface after some draws (blank screen in races; SDK issue #508), FSI doesn't.
+  if (rex::cvar::GetFlagSource("render_target_path_vulkan") == rex::cvar::Source::kDefault) {
+    rex::cvar::SetFlagByName("render_target_path_vulkan", "fsi");
+  }
+  // Vulkan holds back every frame that still draws something with a shader being compiled in the
+  // background, so the first minutes on a fresh install froze for seconds at a time. Showing those
+  // frames (a moment of pop-in at worst) keeps the game moving.
+  if (rex::cvar::GetFlagSource("vulkan_async_skip_incomplete_frames") == rex::cvar::Source::kDefault) {
+    rex::cvar::SetFlagByName("vulkan_async_skip_incomplete_frames", "false");
+  }
   if (REXCVAR_GET(ssx_render_resolution) == "720p") {  // replaced by high, see sub_82FB6120
     rex::cvar::SetFlagByName("ssx_render_resolution", "high");
   }
   // FSR 1 upscales the game's output to the window much more sharply than bilinear,
   // at almost no cost.
+#ifdef _WIN32
   if (rex::cvar::GetFlagSource("present_effect") == rex::cvar::Source::kDefault) {
     rex::cvar::SetFlagByName("present_effect", "fsr");
   }
+#else
+  // Note: the Vulkan renderer's FSR/CAS output comes out almost black (max 1 of 255), so
+  // Linux always scales bilinear; fix that pass in the SDK if sharper scaling is wanted there.
+  rex::cvar::SetFlagByName("present_effect", "bilinear");
+#endif
   // With ROV the GPU thread otherwise runs screen-space vertex shaders on the CPU;
   // SSX is bound by that thread, and letting the host GPU do it measured +12% in races.
   if (rex::cvar::GetFlagSource("execute_unclipped_draw_vs_on_cpu_for_psi_render_backend") ==
@@ -179,6 +233,15 @@ void SsxApplyStartupSettings() {
     REXLOG_WARN("resolution_scale above 3 is not supported in SSX; using 3");
     rex::cvar::SetFlagByName("resolution_scale", "3");
   }
+#ifndef _WIN32
+  // Note: 1x only on Linux. The scaled-resolve fixes (patches 0003-0014) are Direct3D 12 only;
+  // at 2x on Vulkan the frame rate sank and the GPU hung (NVIDIA Xid 39, GTX 1080) after a few
+  // minutes of riding. Port those fixes before offering 2x here.
+  if (rex::string::from_string<int32_t>(rex::cvar::GetFlagByName("resolution_scale"), 1) != 1) {
+    REXLOG_WARN("resolution_scale above 1 is not supported on Linux yet; using 1");
+    rex::cvar::SetFlagByName("resolution_scale", "1");
+  }
+#endif
 
   // VSync (the presenters read these when the window's swap chain is made, after this).
   // D3D12 then presents without the tearing flag, Vulkan in mailbox (or FIFO) mode.

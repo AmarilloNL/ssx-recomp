@@ -1,0 +1,21 @@
+diff --git a/src/graphics/pipeline/render_target/cache.cpp b/src/graphics/pipeline/render_target/cache.cpp
+index 953c5fd..154eecc 100644
+--- a/src/graphics/pipeline/render_target/cache.cpp
++++ b/src/graphics/pipeline/render_target/cache.cpp
+@@ -459,7 +459,15 @@ bool RenderTargetCache::Update(bool is_rasterization_done,
+   uint32_t resource_formats[1 + xenos::kMaxColorRenderTargets];
+   uint32_t rts_are_64bpp = 0;
+   if (is_rasterization_done) {
+-    if (normalized_depth_control.z_enable || normalized_depth_control.stencil_enable) {
++    // A depth test that never passes, without depth writes or stencil, leaves the EDRAM untouched
++    // on the console (games use such draws for memexport). Taking the range for the depth buffer
++    // here made the next color resolve read the depth buffer instead (black screen, issue #508).
++    bool depth_never_touched = normalized_depth_control.z_enable &&
++                               !normalized_depth_control.z_write_enable &&
++                               !normalized_depth_control.stencil_enable &&
++                               normalized_depth_control.zfunc == xenos::CompareFunction::kNever;
++    if ((normalized_depth_control.z_enable || normalized_depth_control.stencil_enable) &&
++        !depth_never_touched) {
+       depth_and_color_rts_used_bits |= 1;
+       auto rb_depth_info = regs.Get<reg::RB_DEPTH_INFO>();
+       edram_bases[0] = rb_depth_info.depth_base;

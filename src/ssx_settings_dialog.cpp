@@ -10,10 +10,16 @@
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <string>
 
+#ifdef _WIN32
 #include <windows.h>
 #include <commdlg.h>
+#pragma comment(lib, "comdlg32.lib")
+#else
+#include "ssx_game_path.h"
+#endif
 
 #include <imgui.h>
 
@@ -26,8 +32,6 @@
 #include "ssx_frame_stats.h"
 #include "ssx_input_lock.h"
 #include "ssx_settings.h"
-
-#pragma comment(lib, "comdlg32.lib")
 
 REXCVAR_DEFINE_BOOL(ssx_show_fps, false, "SSX", "Show the frame rate in the top-left corner");
 
@@ -109,7 +113,54 @@ const struct {
 constexpr uint16_t kPadStart = 0x0010, kPadBack = 0x0020, kPadLb = 0x0100, kPadRb = 0x0200,
                    kPadB = 0x2000;
 
+#ifdef _WIN32
 bool IsModifier(int vk) { return (vk >= VK_SHIFT && vk <= VK_MENU) || (vk >= VK_LSHIFT && vk <= VK_RMENU); }
+
+// Clears the "pressed since last call" bits, so only keys pressed from now on count.
+void ForgetKeyPresses() {
+  for (int vk = 8; vk < 255; ++vk) GetAsyncKeyState(vk);
+}
+
+// A key pressed since the last call (not Escape or a modifier), as a virtual key; 0 if none.
+int PressedKey() {
+  for (int vk = 8; vk < 255; ++vk) {
+    if (vk == VK_ESCAPE || IsModifier(vk) || !(GetAsyncKeyState(vk) & 1)) continue;
+    return vk;
+  }
+  return 0;
+}
+#else
+void ForgetKeyPresses() {}
+
+// The same from ImGui's keys (Linux has no key state to poll): letters, digits, arrows and the
+// usual others, as Windows virtual keys (what the keybind cvars name).
+int PressedKey() {
+  for (int k = ImGuiKey_A; k <= ImGuiKey_Z; ++k) {
+    if (ImGui::IsKeyPressed(ImGuiKey(k), false)) return 'A' + (k - ImGuiKey_A);
+  }
+  for (int k = ImGuiKey_0; k <= ImGuiKey_9; ++k) {
+    if (ImGui::IsKeyPressed(ImGuiKey(k), false)) return '0' + (k - ImGuiKey_0);
+  }
+  for (int k = ImGuiKey_Keypad0; k <= ImGuiKey_Keypad9; ++k) {
+    if (ImGui::IsKeyPressed(ImGuiKey(k), false)) return 0x60 + (k - ImGuiKey_Keypad0);
+  }
+  for (int k = ImGuiKey_F2; k <= ImGuiKey_F12; ++k) {
+    if (ImGui::IsKeyPressed(ImGuiKey(k), false)) return 0x71 + (k - ImGuiKey_F2);
+  }
+  const struct {
+    ImGuiKey key;
+    int vk;
+  } kOthers[] = {{ImGuiKey_Space, 0x20},     {ImGuiKey_Enter, 0x0D},      {ImGuiKey_Tab, 0x09},
+                 {ImGuiKey_Backspace, 0x08}, {ImGuiKey_LeftArrow, 0x25},  {ImGuiKey_UpArrow, 0x26},
+                 {ImGuiKey_RightArrow, 0x27}, {ImGuiKey_DownArrow, 0x28}, {ImGuiKey_Insert, 0x2D},
+                 {ImGuiKey_Delete, 0x2E},    {ImGuiKey_Home, 0x24},       {ImGuiKey_End, 0x23},
+                 {ImGuiKey_PageUp, 0x21},    {ImGuiKey_PageDown, 0x22}};
+  for (const auto& other : kOthers) {
+    if (ImGui::IsKeyPressed(other.key, false)) return other.vk;
+  }
+  return 0;
+}
+#endif
 
 // Xbox gamertag characters: letters, digits and spaces.
 int NameCharFilter(ImGuiInputTextCallbackData* data) {
@@ -117,8 +168,11 @@ int NameCharFilter(ImGuiInputTextCallbackData* data) {
   return c < 128 && (std::isalnum(c) || c == ' ') ? 0 : 1;
 }
 
-// Windows' file picker; the chosen image as UTF-8, or empty if cancelled.
+// The system's file picker; the chosen image as UTF-8, or empty if cancelled.
 std::string ChoosePicture() {
+#ifndef _WIN32
+  return SsxPickFile("Choose a picture", "Images (PNG, JPG, BMP, GIF)", "*.png *.jpg *.jpeg *.bmp *.gif");
+#else
   wchar_t file[MAX_PATH] = L"";
   OPENFILENAMEW ofn = {};
   ofn.lStructSize = sizeof(ofn);
@@ -132,6 +186,7 @@ std::string ChoosePicture() {
   WideCharToMultiByte(CP_UTF8, 0, file, -1, utf8.data(), int(utf8.size()), nullptr, nullptr);
   utf8.pop_back();  // terminator
   return utf8;
+#endif
 }
 
 float UiScale(const ImGuiIO& io) { return std::clamp(io.DisplaySize.y / kFontDesignHeight, 0.5f, 2.0f); }
@@ -188,13 +243,19 @@ void PopStyle() {
 }  // namespace
 
 void SsxSettingsDialog::ConfigureFonts(ImFontAtlas* atlas) {
-  // Segoe UI ships with Windows; fall back to ImGui's built-in font without it.
+  // Segoe UI ships with Windows, Noto Sans with most Linux desktops; ImGui's built-in font without them.
+#ifdef _WIN32
   const char* body = "C:\\Windows\\Fonts\\segoeui.ttf";
   const char* title = "C:\\Windows\\Fonts\\segoeuib.ttf";
-  if (GetFileAttributesA(body) != INVALID_FILE_ATTRIBUTES) {
+#else
+  const char* body = "/usr/share/fonts/noto/NotoSans-Regular.ttf";
+  const char* title = "/usr/share/fonts/noto/NotoSans-Bold.ttf";
+#endif
+  std::error_code ec;
+  if (std::filesystem::exists(body, ec)) {
     body_font = atlas->AddFontFromFileTTF(body, 30.0f);
   }
-  if (GetFileAttributesA(title) != INVALID_FILE_ATTRIBUTES) {
+  if (std::filesystem::exists(title, ec)) {
     title_font = atlas->AddFontFromFileTTF(title, 46.0f);
   }
 }
@@ -330,7 +391,7 @@ void SsxSettingsDialog::DrawBinds() {
     ImGui::TableNextColumn();
     if (ImGui::Button("Change")) {
       capturing_ = bind.cvar;
-      for (int vk = 8; vk < 255; ++vk) GetAsyncKeyState(vk);  // drop stale "pressed" bits
+      ForgetKeyPresses();
     }
     ImGui::SameLine();
     if (ImGui::Button("Reset")) {
@@ -345,13 +406,11 @@ void SsxSettingsDialog::DrawBinds() {
     capturing_.clear();
     return;
   }
-  for (int vk = 8; vk < 255; ++vk) {
-    if (vk == VK_ESCAPE || IsModifier(vk) || !(GetAsyncKeyState(vk) & 1)) continue;
+  if (int vk = PressedKey()) {
     std::string name = rex::ui::VirtualKeyToString(static_cast<rex::ui::VirtualKey>(vk));
     if (!name.empty()) {
       Set(capturing_.c_str(), name);
       capturing_.clear();
-      return;
     }
   }
 }
@@ -382,6 +441,11 @@ void SsxSettingsDialog::DrawDisplayTab() {
 
 void SsxSettingsDialog::DrawGraphicsTab() {
   if (!BeginRows("##graphics")) return;
+#ifdef _WIN32
+  const bool scaling = !SsxUsingReGpu();
+#else
+  const bool scaling = false;  // Linux: the standard renderer draws at 1x, scaled bilinear (ssx_settings.cpp)
+#endif
   Row("Renderer", SsxUsingReGpu()
                       ? "ReGPU draws the game faster and sharper, up to 4K. If something looks wrong, "
                         "Standard is the previous renderer (and please report it). Applies after a restart."
@@ -391,11 +455,11 @@ void SsxSettingsDialog::DrawGraphicsTab() {
   if (SsxUsingReGpu()) {
     Row("Resolution", "How many pixels the game is drawn with: higher is sharper, but heavier on the GPU.");
     Combo("##resolution", "regpu_resolution", kResolutionsReGpu, std::size(kResolutionsReGpu));
-  } else {
+  } else if (scaling) {
     Row("Resolution scale", "N x N times as many pixels: sharper, but heavier on the GPU.");
   }
-  bool heavy = !SsxUsingReGpu() && std::atoi(rex::cvar::GetFlagByName("resolution_scale").c_str()) >= 3;
-  if (!SsxUsingReGpu() && Combo("##scale", "resolution_scale", kScales, std::size(kScales)) && !heavy &&
+  bool heavy = scaling && std::atoi(rex::cvar::GetFlagByName("resolution_scale").c_str()) >= 3;
+  if (scaling && Combo("##scale", "resolution_scale", kScales, std::size(kScales)) && !heavy &&
       std::atoi(rex::cvar::GetFlagByName("resolution_scale").c_str()) >= 3) {
     ImGui::OpenPopup("##scale_warning");
   }
@@ -407,11 +471,11 @@ void SsxSettingsDialog::DrawGraphicsTab() {
   DrawScaleWarning();
 
   std::string effect = rex::cvar::GetFlagByName("present_effect");
-  if (!SsxUsingReGpu()) {
+  if (scaling) {
     Row("Upscaling", "How the image is scaled to your screen. FSR is sharpest at 1x.");
     Combo("##upscaling", "present_effect", kUpscaling, std::size(kUpscaling));
   }
-  if (!SsxUsingReGpu() && (effect == "fsr" || effect == "cas")) {
+  if (scaling && (effect == "fsr" || effect == "cas")) {
     // FSR: "sharpness reduction" 0 (sharpest) .. 2 stops. CAS: additional sharpness 0 .. 1.
     const char* cvar = effect == "fsr" ? "present_fsr_sharpness_reduction" : "present_cas_additional_sharpness";
     float raw = std::strtof(rex::cvar::GetFlagByName(cvar).c_str(), nullptr);

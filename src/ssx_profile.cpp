@@ -6,15 +6,16 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
 #include <windows.h>
 #include <wincodec.h>
 #include <wrl/client.h>
+#pragma comment(lib, "windowscodecs.lib")
+#endif
 
 #include <rex/cvar.h>
 
 #include "ssx_runtime_export.h"
-
-#pragma comment(lib, "windowscodecs.lib")
 
 REXCVAR_DEFINE_STRING(ssx_player_name, "", "SSX", "Player name shown in the game (empty: User)")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
@@ -22,8 +23,6 @@ REXCVAR_DEFINE_STRING(ssx_player_picture, "", "SSX", "Image file shown as the ga
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 namespace {
-
-using Microsoft::WRL::ComPtr;
 
 // Copies the player name (if set) over the runtime's into a guest char buffer of `size` bytes.
 void WriteName(uint8_t* dest, uint32_t size) {
@@ -39,6 +38,12 @@ void WriteName(uint8_t* dest, uint32_t size) {
 std::vector<uint32_t> LoadPicture(uint32_t size) {
   const std::string& path = REXCVAR_GET(ssx_player_picture);
   if (path.empty()) return {};
+#ifndef _WIN32
+  // Note: no image decoder on Linux yet (Windows uses WIC), so the plain picture stays;
+  // stb_image (in the SDK's thirdparty) when someone asks for it.
+  return {};
+#else
+  using Microsoft::WRL::ComPtr;
   std::wstring wpath(MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0), L'\0');
   MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, wpath.data(), int(wpath.size()));
   HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -75,6 +80,7 @@ std::vector<uint32_t> LoadPicture(uint32_t size) {
   if (SUCCEEDED(com)) CoUninitialize();
   if (!ok) pixels.clear();
   return pixels;
+#endif
 }
 
 }  // namespace

@@ -537,10 +537,10 @@ index 0000000..74ab79f
 +#include "../regpu_win32.h"
 diff --git a/src/platform/linux/presenter_linux.cpp b/src/platform/linux/presenter_linux.cpp
 new file mode 100644
-index 0000000..7e49032
+index 0000000..478fa44
 --- /dev/null
 +++ b/src/platform/linux/presenter_linux.cpp
-@@ -0,0 +1,557 @@
+@@ -0,0 +1,572 @@
 +// Linux output (render/presenter.h): ReGPU's frames on the host's window through Vulkan.
 +//
 +// vkd3d-proton (Direct3D 12 on Vulkan) runs the renderer. The back buffers are D3D12 resources, so
@@ -552,6 +552,8 @@ index 0000000..7e49032
 +#include <windows.h>
 +#include <d3d12.h>
 +#include <wrl/client.h>
++
++#include <dlfcn.h>
 +
 +#include <algorithm>
 +#include <atomic>
@@ -1093,10 +1095,23 @@ index 0000000..7e49032
 +    g_p.current = (i + 1) % kBuffers;
 +}
 +
-+// Note: the host knows its display; 60 until the Linux plugin reports the refresh rate.
++// The main display's refresh rate, from SDL: the host's window library, in its runtime (looked up by
++// name: ReGPU has no SDL headers). SDL 3's SDL_DisplayMode starts displayID, format, w, h,
++// pixel_density, refresh_rate. 60 without SDL.
 +uint32_t DisplayRefreshHz()
 +{
-+    return 60;
++    struct Mode
++    {
++        uint32_t displayID, format;
++        int w, h;
++        float pixelDensity, refreshRate;
++    };
++    using Primary = uint32_t (*)();
++    using Current = const Mode* (*)(uint32_t);
++    const auto primary = reinterpret_cast<Primary>(dlsym(RTLD_DEFAULT, "SDL_GetPrimaryDisplay"));
++    const auto current = reinterpret_cast<Current>(dlsym(RTLD_DEFAULT, "SDL_GetCurrentDisplayMode"));
++    const Mode* mode = primary && current ? current(primary()) : nullptr;
++    return mode && mode->refreshRate > 1.0f ? uint32_t(mode->refreshRate + 0.5f) : 60;
 +}
 diff --git a/src/platform/linux/regpu_win32.h b/src/platform/linux/regpu_win32.h
 new file mode 100644
