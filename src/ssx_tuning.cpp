@@ -286,7 +286,8 @@ void ExtendLevelTables() {
       for (int step = -256; step <= 256 && !found; ++step) {
         uint8_t* node = xp_node + step * 12;
         uint32_t address = memory->HostToGuestVirtual(node);
-        if (Readable(memory, address, 12) && Be32(node) == table.key && DiscArray(memory, node, table)) found = node;      }
+        if (Readable(memory, address, 12) && Be32(node) == table.key && DiscArray(memory, node, table)) found = node;
+      }
       if (!found) break;
       nodes.push_back(found);
     }

@@ -170,6 +170,7 @@ void SsxApplyStartupSettings() {
   if (rex::cvar::GetFlagSource("render_target_path_d3d12") == rex::cvar::Source::kDefault) {
     rex::cvar::SetFlagByName("render_target_path_d3d12", "rov");
   }
+#ifndef _WIN32
   // Vulkan (Linux) the same way: its render-target path sends the game's picture to the screen
   // from the wrong surface after some draws (blank screen in races; SDK issue #508), FSI doesn't.
   if (rex::cvar::GetFlagSource("render_target_path_vulkan") == rex::cvar::Source::kDefault) {
@@ -181,6 +182,7 @@ void SsxApplyStartupSettings() {
   if (rex::cvar::GetFlagSource("vulkan_async_skip_incomplete_frames") == rex::cvar::Source::kDefault) {
     rex::cvar::SetFlagByName("vulkan_async_skip_incomplete_frames", "false");
   }
+#endif
   if (REXCVAR_GET(ssx_render_resolution) == "720p") {  // replaced by high, see sub_82FB6120
     rex::cvar::SetFlagByName("ssx_render_resolution", "high");
   }
