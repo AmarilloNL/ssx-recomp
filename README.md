@@ -2,16 +2,16 @@
 
 # 🏂 SSX (2012) — Native PC Port
 
-**EA's SSX, running natively on Windows — up to 300 fps, up to 4K, no emulator.**
+**EA's SSX, running natively on Windows and Linux — up to 300 fps, up to 4K, no emulator.**
 
 [![Latest release](https://img.shields.io/github/v/release/AmarilloNL/ssx-recomp?style=for-the-badge&label=installer&color=0aa5e6)](../../releases/latest)
 [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4?style=for-the-badge&logo=windows11&logoColor=white)](#installing)
-[![Linux](https://img.shields.io/badge/Linux-preview-f59e0b?style=for-the-badge&logo=linux&logoColor=white)](#linux)
+[![Linux](https://img.shields.io/badge/Linux-beta-f59e0b?style=for-the-badge&logo=linux&logoColor=white)](#linux)
 [![Direct3D 12](https://img.shields.io/badge/Direct3D-12-7a3cff?style=for-the-badge)](#graphics)
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge)](LICENSE)
 <a href="https://playported.com/ports/1191-ssx/"><img src="https://playported.com/badge.svg" alt="Listed on PlayPorted" height="28"></a>
 
-[**⬇️ Download**](../../releases/latest) · [🎬 Gameplay](#gameplay) · [✨ Features](#features) · [🛠️ Install](#installing) · [🎮 Controls](#playing) · [🖥️ Graphics](#graphics) · [📦 DLC & update](#adding-dlc) · [🎵 Music](#your-music) · [🗺️ Roadmap](#roadmap)
+[**⬇️ Download**](../../releases/latest) · [🎬 Gameplay](#gameplay) · [✨ Features](#features) · [🛠️ Install](#installing) · [🐧 Linux](#linux) · [🎮 Controls](#playing) · [🖥️ Graphics](#graphics) · [📦 DLC & update](#adding-dlc) · [🎵 Music](#your-music) · [🗺️ Roadmap](#roadmap)
 
 </div>
 
@@ -24,9 +24,10 @@
 > **ISOs, game files and pre-built executables will not be provided.** Requests or links to
 > pirated copies are removed.
 
-A native Windows build of EA's *SSX* (2012), made by statically recompiling the Xbox 360
+A native Windows and Linux build of EA's *SSX* (2012), made by statically recompiling the Xbox 360
 executable to x86-64 with the [ReXGlue SDK](https://github.com/rexglue/rexglue-sdk). The game's
-code runs natively, and its Xbox 360 graphics are drawn with Direct3D 12.
+code runs natively, and its Xbox 360 graphics are drawn with Direct3D 12 (on Linux through
+[vkd3d-proton](https://github.com/HansKristian-Work/vkd3d-proton) and Vulkan).
 
 <a id="gameplay"></a>
 
@@ -51,7 +52,7 @@ code runs natively, and its Xbox 360 graphics are drawn with Direct3D 12.
 | ⚙️ **Settings menu** | in game: **F1**, or **Back + Start** on a controller |
 | ⌨️ **Keyboard & controller** | key rebinding, vibration, deadzone |
 | 🪪 **Your name & picture** | instead of "User" and an empty square (settings → **Profile**) |
-| 💿 **Runs from your ISO** | saves stay in `Documents\ssx` |
+| 💿 **Runs from your ISO** | saves stay in `Documents\ssx` (Linux: `~/.local/share/ssx`) |
 | 📦 **DLC** | Mt. Eddie, Japan and the other packs, from your own console ([how](#adding-dlc)) |
 | 📈 **Title update** | the game's last update, with the gear for levels 11 to 15 ([how](#title-update)), and [riders up to level 15](#level-15) |
 | 🎵 **Your own music** | your music folders as playlists in the game's Music menu, remixed live as you ride ([how](#your-music)) |
@@ -59,6 +60,8 @@ code runs natively, and its Xbox 360 graphics are drawn with Direct3D 12.
 <a id="installing"></a>
 
 ## 🛠️ Installing
+
+### 🪟 Windows
 
 1. 💿 Make an ISO of **your own** SSX (USA) Xbox 360 disc.
 2. ⬇️ Download **`SSX-Installer.exe`** from the [latest release](../../releases/latest).
@@ -114,6 +117,48 @@ the file for you.
 
 </details>
 
+<a id="linux"></a>
+
+### 🐧 Linux (beta)
+
+A native Linux version: Vulkan, no Wine or Proton. Like on Windows, it's built on your PC from your
+own ISO, by an installer script:
+
+1. 💿 Make an ISO of **your own** SSX (USA) Xbox 360 disc.
+2. ⬇️ Download **`ssx-linux-installer.sh`** from the [latest release](../../releases/latest).
+3. ▶️ Run it in a terminal (add `--title-update <file>` once for [the title update](#title-update)):
+   ```sh
+   bash ssx-linux-installer.sh --iso ~/Games/SSX.iso
+   ```
+4. 🏂 When it says **DONE**, start **SSX** from your app menu.
+
+> [!NOTE]
+> Needs about **15 GB** free during the build and **20–60 minutes** the first time. The script
+> installs missing build tools with your package manager (it asks for your password through
+> `sudo`). 🔄 **To update, run it again**: your saves and settings stay.
+>
+> **Beta:** tested on **CachyOS** (KDE Plasma on Wayland) with an NVIDIA GTX 1080 and an Xbox
+> controller, where races hold 60 fps. Debian/Ubuntu (`apt`) and Fedora (`dnf`) get their packages
+> installed too, but haven't been tested yet: reports are welcome.
+
+<details>
+<summary><b>Linux notes</b></summary>
+<br>
+
+- Where this README says `Documents\ssx`, Linux uses **`~/.local/share/ssx`** (saves, `dlc`,
+  `music`). Your own music needs `ffmpeg`.
+- The game uses **ReGPU**, as on Windows, drawing at your screen's resolution. If ReGPU can't be
+  built on your PC, the script says so and the game uses the standard renderer, which runs at 1× on
+  Linux (2× made the graphics driver hang in testing), scaled bilinear.
+- Not on Linux yet: the gamer picture.
+- The first ride in each new area can stutter briefly while the game's shaders are prepared.
+  They're kept for the next start.
+- The port goes to `~/SSX-PC` (`--folder` picks another place); the game is in `source/dist/SSX`.
+  From a git clone, `./scripts/build-ssx-linux.sh --iso ~/Games/SSX.iso` does the same build.
+- If something goes wrong, attach `build-ssx-linux.log` (in `~/SSX-PC/source`) to an issue.
+
+</details>
+
 <a id="playing"></a>
 
 ## 🎮 Playing
@@ -150,6 +195,7 @@ The game has two renderers. **ReGPU is the default**; the standard renderer is t
 - **Ultrawide screens** get a 16:9 picture for now. Any other 16:9 size can go in `ssx.toml` as
   `regpu_resolution = "WIDTHxHEIGHT"`.
 - **If ReGPU can't start** on a PC, the game uses the standard renderer by itself at the next start.
+- **On Linux** ReGPU runs on Vulkan through vkd3d-proton; the standard renderer runs at 1× there.
 - **Tested** mostly on NVIDIA graphics cards. If something looks different from the standard
   renderer, a screenshot helps a lot (F12 saves one with the renderer's own debug data).
 
@@ -320,16 +366,6 @@ the console:
 The game's Audio Settings have a volume for your music and a **Remix** switch. New folders show up
 the next time you open the playlist list; no restart needed.
 
-<a id="linux"></a>
-
-## 🐧 Linux (preview)
-
-A native Linux version (Vulkan, no Wine or Proton) lives on the
-[`linux-support`](../../tree/linux-support) branch, built with a script instead of the installer.
-It uses ReGPU too, through [vkd3d-proton](https://github.com/HansKristian-Work/vkd3d-proton).
-Tested on CachyOS with an NVIDIA GTX 1080: races hold 60 fps. See
-[its README](../../tree/linux-support#linux) for how to build it.
-
 <a id="roadmap"></a>
 
 ## 🗺️ Roadmap
@@ -339,7 +375,7 @@ The game is playable and is being tested by playing through the whole World Tour
 **🔧 Being worked on**
 - 🏔️ **Playing through every region** to find and fix bugs, especially the Deadly Descent
   mechanics (cold, darkness, oxygen and so on), which depend on details of the original hardware.
-- 🐧 **Linux:** frame rates above 60, and moving it from its branch to the main download.
+- 🐧 **Linux (beta):** testing on more PCs (AMD and Intel graphics, other distributions).
 - 💻 **Installer reliability** on more PCs, based on the reports in the issues.
 
 **👀 Known issues**
@@ -347,6 +383,7 @@ The game is playable and is being tested by playing through the whole World Tour
   screenshots are welcome.
 - Only SSX (USA) is supported, with or without its last title update (0.0.3.2).
 - Ultrawide screens get a 16:9 picture.
+- Linux: no gamer picture yet, and the standard renderer runs at 1× only.
 - Online features (RiderNet, global events, online races) don't work: they go through Xbox Live,
   which the port can't sign in to. EA's SSX servers themselves are still running for the consoles
   (on Xbox 360 with fewer features than on PS3).
@@ -355,6 +392,7 @@ The game is playable and is being tested by playing through the whole World Tour
 <summary><b>✅ Fixed so far</b></summary>
 <br>
 
+- ✅ A native Linux version (beta), with ReGPU (1.5.0)
 - ✅ Races on ReGPU no longer sink to 40–60 fps: the snow's trail table uploads in about 1 ms
   instead of 10–20 (1.4.3)
 - ✅ Your own music plays after every restart of an event (1.4.2)
