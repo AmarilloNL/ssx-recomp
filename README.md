@@ -207,7 +207,7 @@ The game has two renderers. **ReGPU is the default**; the standard renderer is t
 
 | Scale | Frame rate choices | Default |
 |---|---|---|
-| 1×, 2× | 30, 60, 70, 90, 120, 144, 165, 240, 300 or match your monitor | 60 |
+| 1×, 2× | 30, 60, 70, 72, 90, 120, 144, 165, 240, 300 or match your monitor | 60 |
 | 3× | 30, 40, 50, 55, 60 | 60 |
 
 We recommend 2× (or ReGPU). 3× draws about 4K (3600×1920 = 6.9 million pixels, 9 times the 1×

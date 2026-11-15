@@ -51,9 +51,9 @@ const ImVec4 kTextDim(0.55f, 0.65f, 0.72f, 1.0f);
 const ImVec4 kWarn(1.0f, 0.78f, 0.30f, 1.0f);
 
 const Choice kFramerates[] = {{"30 fps  (original)", "30"}, {"60 fps", "60"},   {"70 fps", "70"},
-                              {"90 fps", "90"},             {"120 fps", "120"}, {"144 fps", "144"},
-                              {"165 fps", "165"},           {"240 fps", "240"}, {"300 fps", "300"},
-                              {"Match main display", "0"}};
+                              {"72 fps  (half of 144)", "72"}, {"90 fps", "90"}, {"120 fps", "120"},
+                              {"144 fps", "144"},           {"165 fps", "165"}, {"240 fps", "240"},
+                              {"300 fps", "300"},           {"Match main display", "0"}};
 // 3x: only rates a fast GPU holds there (see DrawScaleWarning).
 const Choice kFramerates3x[] = {{"30 fps  (original)", "30"}, {"40 fps", "40"}, {"50 fps", "50"},
                                 {"55 fps", "55"},             {"60 fps", "60"}};
