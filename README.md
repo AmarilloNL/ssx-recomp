@@ -1,5 +1,7 @@
 <div align="center">
 
+<a href="https://recomplauncher.com/game/ssx-recomp"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a>
+
 # 🏂 SSX (2012) — Native PC Port
 
 **EA's SSX, running natively on Windows and Linux — up to 300 fps, up to 4K, no emulator.**
