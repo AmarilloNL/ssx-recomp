@@ -1,0 +1,22 @@
+diff --git a/src/gpu/renderer.cpp b/src/gpu/renderer.cpp
+index c075c3a..21413a6 100644
+--- a/src/gpu/renderer.cpp
++++ b/src/gpu/renderer.cpp
+@@ -10685,10 +10685,15 @@ void DrawImpl(uint32_t initiator, uint32_t dmaBase, uint32_t dmaSize)
+                 uint32_t zBits = *GuestPtr<uint32_t>(GpuPhysToGuest(d0 & 0xFFFFFFFC) + 8);
+                 if ((d1 & 3) == 2)
+                     zBits = __builtin_bswap32(zBits);
++                // Stored as 24-bit unorm, the depth saturates to [0, 1]: a fill at a z a hair outside
++                // it is still a fill (SSX clears its night flare lights' 512x256 target at z -3.7e-9,
++                // a 0 that came out just below: depth 0, stencil 0, transparent black; skipped, each
++                // light was drawn over the one before). REGPU_NO_ALIASED_DEPTH_FILL_CLAMP=1: [0, 1] only.
++                static LiveSwitch noClamp("REGPU_NO_ALIASED_DEPTH_FILL_CLAMP");
+                 const float z = std::bit_cast<float>(zBits);
+-                if (z >= 0.0f && z <= 1.0f)
++                if (noClamp ? z >= 0.0f && z <= 1.0f : std::isfinite(z))
+                 {
+-                    const uint32_t d = uint32_t(double(z) * 16777215.0);
++                    const uint32_t d = uint32_t(double(std::clamp(z, 0.0f, 1.0f)) * 16777215.0);
+                     fill[0] = float((d >> 8) & 0xFF) / 255.0f;
+                     fill[1] = float(d & 0xFF) / 255.0f;
+                     fill[2] = float(stencil) / 255.0f;

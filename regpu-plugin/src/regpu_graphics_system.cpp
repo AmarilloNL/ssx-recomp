@@ -267,8 +267,10 @@ void InterruptLockRelease() {}
 // Which resolves are also written to guest memory, for what SSX reads on the CPU (the same policy
 // as its readback_resolve settings with ReXGlue's renderer, src/ssx_settings.cpp):
 // - small ones (32x16 on Mount Craddock: sun or shade for the cold) every time, a frame late;
-// - every image the first time it is resolved, at once (the flare lights of night Deadly Descents
-//   are rendered and resolved at load, then compressed on the CPU).
+// - every image the first 4 times it is resolved, at once: the flare lights of night Deadly
+//   Descents are rendered and resolved at load, then compressed on the CPU, and the game draws up
+//   to 3 of them one after another into the same image (with only the first written, a later
+//   flare showed an earlier one's text, issue #7; ReXGlue's renderer reads back the first 4 too).
 // Large per-frame resolves are not written: the CPU never reads them, and some overrun into
 // CPU data (the snow volume into the trail quads' index buffer).
 // SSX_REGPU_WRITEBACK=none|all: none at all, or every resolve at once (A/B).
@@ -289,12 +291,15 @@ regpu::Writeback ResolveWriteback(const regpu::ResolveCopy& copy)
         return w;
     }
     static std::mutex mutex;
-    static std::unordered_map<uint64_t, bool> seen;
+    static std::unordered_map<uint64_t, uint32_t> seen;
     const uint64_t key = uint64_t(copy.base) << 32 ^ uint64_t(copy.width) << 18 ^ uint64_t(copy.height) << 6 ^
                          copy.format ^ (copy.depth ? 1ull << 63 : 0);
     std::lock_guard lock(mutex);
-    if (seen.try_emplace(key, true).second)
+    if (uint32_t& count = seen[key]; count < 4)
+    {
+        count++;
         w.mode = regpu::Writeback::Mode::Now;
+    }
     return w;
 }
 
