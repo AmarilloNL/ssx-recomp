@@ -57,6 +57,7 @@ New-Item -ItemType Directory $dist -Force | Out-Null
 Remove-Item "$dist\*" -Include *.exe, *.dll, README.txt -ErrorAction SilentlyContinue
 Copy-Item "$build\*" $dist -Include ssx.exe, *.dll
 Copy-Item "$root\README-player.txt" "$dist\README.txt"
+if (Test-Path "$root\recomplauncher.json") { Copy-Item "$root\recomplauncher.json" $dist -Force }  # RecompLauncher setup file, next to ssx.exe
 Copy-Item "$root\installer\ssx.ico" $dist  # used by the installer's desktop shortcut
 # Built for the title update (CMakeLists.txt): the game loads its default.xexp and patch0.big
 # from update\ next to the exe (put in game-dump\update by build-ssx.ps1).
