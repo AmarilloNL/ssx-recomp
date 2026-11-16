@@ -6,7 +6,7 @@
 # Run it again to update: only what changed is rebuilt, and your saves (~/.local/share/ssx) and
 # settings (ssx.toml next to the game) are kept.
 #
-# Usage: bash ssx-linux-installer.sh [--folder DIR] [--iso PATH] [--title-update PATH | --no-title-update]
+# Usage: bash ssx-linux-installer.sh [--folder DIR] [--iso PATH] [--title-update PATH | --no-title-update] [--no-menu]
 #   --folder: where the port goes (default ~/SSX-PC; the game ends up in DIR/source/dist/SSX).
 #   The other options go to the build script (see the top of scripts/build-ssx-linux.sh): without
 #   --iso it asks for your ISO with a file dialog.

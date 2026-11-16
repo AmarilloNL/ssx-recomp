@@ -9,6 +9,9 @@
 #   --iso: your SSX (USA) Xbox 360 ISO (asked for with a file dialog when left out).
 #   --title-update: the game's last title update (v0.0.3.2) from your own console, an Xbox 360
 #     package file. Once added, later builds keep using it; --no-title-update goes back to the disc version.
+#   --no-menu: no SSX entry in the app menu (for a launcher that installs and starts the game itself).
+# Without a terminal (a launcher running it), missing build tools are installed through the desktop's
+# password prompt (pkexec) instead of sudo.
 set -uo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -43,13 +46,19 @@ Vkd3dProtonCommit=4522cc1a8b1347f1ab1b0f7b14a23ed9444d95d1 # v3.1
 step() { printf '\n\033[36m==> %s\033[0m\n' "$*"; }
 fail() { printf '\n\033[31mERROR: %s\033[0m\nDetails are in %s\n' "$*" "$log"; exit 1; }
 sha() { sha256sum "$1" | cut -d' ' -f1; }
+# A command as root: sudo in a terminal (or when it needs no password), else the desktop's password
+# prompt (pkexec), as when a launcher runs this without a window.
+as_root() {
+  if [ -t 0 ] || sudo -n true 2>/dev/null || ! command -v pkexec >/dev/null; then sudo "$@"; else pkexec "$@"; fi
+}
 
-iso= title_update= no_title_update=
+iso= title_update= no_title_update= no_menu=
 while [ $# -gt 0 ]; do
   case "$1" in
     --iso) iso=${2:-}; shift 2 ;;
     --title-update) title_update=${2:-}; shift 2 ;;
     --no-title-update) no_title_update=1; shift ;;
+    --no-menu) no_menu=1; shift ;;
     *) fail "Unknown option: $1 (see the top of this script)" ;;
   esac
 done
@@ -74,15 +83,15 @@ missing() {
 if missing; then
   # Note: only the pacman list is tested (CachyOS); the apt and dnf lists follow SDL's Linux docs.
   if command -v pacman >/dev/null; then
-    cmd=(sudo pacman -S --needed --noconfirm git cmake ninja clang python pkgconf curl libx11 libxcb wayland
+    cmd=(as_root pacman -S --needed --noconfirm git cmake ninja clang python pkgconf curl libx11 libxcb wayland
          vulkan-headers vulkan-icd-loader ffmpeg)
   elif command -v apt-get >/dev/null; then
-    cmd=(sudo apt-get install -y build-essential git cmake ninja-build clang python3 pkg-config
+    cmd=(as_root apt-get install -y build-essential git cmake ninja-build clang python3 pkg-config
          libx11-xcb-dev libwayland-dev wayland-protocols libxkbcommon-dev libvulkan-dev libdecor-0-dev
          libasound2-dev libpulse-dev libpipewire-0.3-dev libudev-dev libxrandr-dev libxi-dev
          libxcursor-dev libxss-dev libxtst-dev ffmpeg)
   elif command -v dnf >/dev/null; then
-    cmd=(sudo dnf install -y gcc-c++ git cmake ninja-build clang python3 pkgconf-pkg-config libX11-devel
+    cmd=(as_root dnf install -y gcc-c++ git cmake ninja-build clang python3 pkgconf-pkg-config libX11-devel
          libxcb-devel wayland-devel wayland-protocols-devel libxkbcommon-devel vulkan-headers
          vulkan-loader-devel libdecor-devel alsa-lib-devel pulseaudio-libs-devel pipewire-devel
          systemd-devel libXrandr-devel libXi-devel libXcursor-devel libXScrnSaver-devel libXtst-devel
@@ -91,7 +100,7 @@ if missing; then
     fail "Please install: ${need_cmds[*]} and the development files for ${need_pkgs[*]}, then run this again."
   fi
   echo "  installing with: ${cmd[*]}"
-  echo "  (your password is asked for by sudo)"
+  echo "  (you are asked for your password)"
   "${cmd[@]}" || fail "Installing the build tools failed."
   missing && fail "Still missing after installing: check ${need_cmds[*]} and pkg-config ${need_pkgs[*]}."
 fi
@@ -311,10 +320,10 @@ build_regpu() {
       elif command -v dnf >/dev/null; then pkgs+=("$([ $n = widl ] && echo mingw64-tools || echo $n)")
       fi
     done
-    echo "  installing ${pkgs[*]} (your password is asked for by sudo)"
-    if command -v pacman >/dev/null; then sudo pacman -S --needed --noconfirm "${pkgs[@]}"
-    elif command -v apt-get >/dev/null; then sudo apt-get install -y "${pkgs[@]}"
-    elif command -v dnf >/dev/null; then sudo dnf install -y "${pkgs[@]}"
+    echo "  installing ${pkgs[*]} (you are asked for your password)"
+    if command -v pacman >/dev/null; then as_root pacman -S --needed --noconfirm "${pkgs[@]}"
+    elif command -v apt-get >/dev/null; then as_root apt-get install -y "${pkgs[@]}"
+    elif command -v dnf >/dev/null; then as_root dnf install -y "${pkgs[@]}"
     fi
   fi
   command -v meson >/dev/null && { command -v glslangValidator >/dev/null || command -v glslang >/dev/null; } ||
@@ -407,10 +416,11 @@ if [ ! -f "$dist/ssx.toml" ]; then
   printf '# SSX settings - written by the game. Edit in-game with F1.\ngame_data_root = "%s"\n' \
     "$(printf '%s' "$iso" | sed 's/\\/\\\\/g; s/"/\\"/g')" > "$dist/ssx.toml"
 fi
-# Start menu entry.
-apps="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
-mkdir -p "$apps"
-cat > "$apps/ssx-recomp.desktop" <<EOF
+# Start menu entry (not with --no-menu: a launcher's install leaves the player's own entry alone).
+if [ -z "$no_menu" ]; then
+  apps="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+  mkdir -p "$apps"
+  cat > "$apps/ssx-recomp.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=SSX
@@ -420,8 +430,10 @@ Path=$dist
 Icon=$dist/ssx.ico
 Categories=Game;
 EOF
+fi
 
 echo
 printf '\033[32mDONE. Your game is in: %s\033[0m\n' "$dist"
-echo "Start it from your app menu (SSX) or with $dist/ssx (F1 opens the settings)."
+if [ -z "$no_menu" ]; then echo "Start it from your app menu (SSX) or with $dist/ssx (F1 opens the settings)."
+else echo "Start it with $dist/ssx (F1 opens the settings)."; fi
 echo "Saves are in ${XDG_DATA_HOME:-$HOME/.local/share}/ssx."

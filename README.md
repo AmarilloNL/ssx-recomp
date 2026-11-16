@@ -432,6 +432,27 @@ in `tools/rexglue-src`.
 
 </details>
 
+<details>
+<summary><b>🚀 For launchers: installing without a window</b></summary>
+<br>
+
+Both installers also run without a window, for a launcher that installs the game for the player:
+
+```
+SSX-Installer.exe       --iso <ISO> --folder <folder> [--title-update <file>] [--no-menu]
+ssx-linux-installer.sh  --iso <ISO> --folder <folder> [--title-update <file>] [--no-menu]
+```
+
+The build output goes to stdout; the exit code is 0 when the game was built (1: the build failed,
+2 on Windows: wrong options). The game ends up in `<folder>/source/dist/SSX/ssx.exe` (Windows) or
+`<folder>/source/dist/SSX/ssx` (Linux), set up to read the ISO it was built from; a first build takes
+10–30 minutes, longer when build tools have to be installed. `--no-menu` leaves the player's own SSX
+app-menu entry alone (Linux; accepted and ignored on Windows, which makes no shortcut here). Without
+a terminal, the Linux installer installs missing build tools through the desktop's password prompt
+(pkexec) instead of sudo.
+
+</details>
+
 ## 🙏 Credits
 
 - [ReXGlue SDK](https://github.com/rexglue/rexglue-sdk) by Tom Clay: the static recompilation toolkit and runtime

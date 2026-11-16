@@ -28,9 +28,9 @@ using System.Windows.Forms;
 [assembly: AssemblyProduct("SSX PC Port Setup")]
 [assembly: AssemblyCompany("AmarilloNL")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 AmarilloNL, MIT License")]
-[assembly: AssemblyVersion("1.5.0.0")]
-[assembly: AssemblyFileVersion("1.5.0.0")]
-[assembly: AssemblyInformationalVersion("1.5.0")]
+[assembly: AssemblyVersion("1.5.1.0")]
+[assembly: AssemblyFileVersion("1.5.1.0")]
+[assembly: AssemblyInformationalVersion("1.5.1")]
 
 // Windows shell link (.lnk) interfaces, for the desktop shortcut.
 [ComImport, Guid("00021401-0000-0000-C000-000000000046")] class ShellLink { }
@@ -61,11 +61,49 @@ static class Program {
   [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
 
   [STAThread]
-  static void Main() {
+  static int Main(string[] args) {
+    if (args.Length > 0) return Headless(args);
     try { SetProcessDPIAware(); } catch (Exception) { }
     Application.EnableVisualStyles();
     Application.SetCompatibleTextRenderingDefault(false);
     Application.Run(new InstallerForm());
+    return 0;
+  }
+
+  const string Usage = "Usage: SSX-Installer.exe --iso <your SSX ISO> [--folder <install folder>] " +
+                       "[--title-update <file>] [--dlc <file>]...";
+
+  // Without a window, for a launcher: builds as the window does (the game ends up in
+  // <folder>\source\dist\SSX\ssx.exe; no desktop shortcut), the build's output on stdout. Exit code 0
+  // when the game is there, 1 when the build failed, 2 for wrong options.
+  static int Headless(string[] args) {
+    string iso = null, titleUpdate = null;
+    string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "SSX-PC");
+    var dlc = new List<string>();
+    for (int i = 0; i < args.Length; i++) {
+      string value = i + 1 < args.Length ? args[i + 1] : null;
+      if (args[i] == "--iso" && value != null) iso = args[++i];
+      else if (args[i] == "--folder" && value != null) folder = args[++i];
+      else if (args[i] == "--title-update" && value != null) titleUpdate = args[++i];
+      else if (args[i] == "--dlc" && value != null) dlc.Add(args[++i]);
+      else if (args[i] == "--no-menu") { }  // (the Linux installer's option: one launcher command line for both)
+      else { Console.Error.WriteLine(Usage); return 2; }
+    }
+    if (iso == null || !File.Exists(iso)) { Console.Error.WriteLine("ISO not found: " + iso + "\n" + Usage); return 2; }
+    if (titleUpdate != null && !File.Exists(titleUpdate)) { Console.Error.WriteLine("Title update not found: " + titleUpdate); return 2; }
+    Action<string> line = delegate(string text) { if (text != null) Console.WriteLine(text); };
+    try {
+      folder = Path.GetFullPath(folder);
+      InstallerForm.CopyDlc(dlc.ToArray(), line);
+      int code = InstallerForm.Build(Path.GetFullPath(iso), folder,
+                                     titleUpdate != null ? Path.GetFullPath(titleUpdate) : null, line, null);
+      if (code == 0 && File.Exists(Path.Combine(folder, "source\\dist\\SSX\\ssx.exe"))) return 0;
+      Console.Error.WriteLine("The build failed. The full log is build-ssx.log in " + Path.Combine(folder, "source"));
+      return 1;
+    } catch (Exception ex) {
+      Console.Error.WriteLine(ex.ToString());
+      return 1;
+    }
   }
 }
 
@@ -946,14 +984,14 @@ class InstallerForm : Form {
     clock = Stopwatch.StartNew();
     ShowPage(2);
     timer.Start();
-    var worker = new Thread(delegate() { CopyDlc(dlc); RunBuild(iso, folder, titleUpdate); });
+    var worker = new Thread(delegate() { CopyDlc(dlc, OnLine); RunBuild(iso, folder, titleUpdate); });
     worker.IsBackground = true;
     worker.Start();
   }
 
   // Copies the chosen DLC packages to Documents\ssx\dlc (the same Documents folder the game uses),
   // where the game installs them on its next start. A failed copy doesn't stop the install.
-  void CopyDlc(string[] files) {
+  internal static void CopyDlc(string[] files, Action<string> onLine) {
     if (files.Length == 0) return;
     string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "ssx", "dlc");
     foreach (string file in files) {
@@ -964,46 +1002,54 @@ class InstallerForm : Form {
             (!File.Exists(dest) || new FileInfo(dest).Length != new FileInfo(file).Length)) {
           File.Copy(file, dest, true);
         }
-        OnLine("DLC: " + Path.GetFileName(file) + " is in " + dir);
+        onLine("DLC: " + Path.GetFileName(file) + " is in " + dir);
       } catch (Exception ex) {
-        OnLine("DLC: could not copy " + file + ": " + ex.Message);
+        onLine("DLC: could not copy " + file + ": " + ex.Message);
       }
     }
   }
 
+  // Downloads the source into <folder>\source and runs its builder (scripts\build-ssx.ps1), each output
+  // line to onLine; started gets the builder's process (to stop it). Returns the builder's exit code.
+  internal static int Build(string iso, string folder, string titleUpdate, Action<string> onLine, Action<Process> started) {
+    string source = Path.Combine(folder, "source");
+    onLine("==> Downloading the SSX PC port source (no game files)");
+    Directory.CreateDirectory(folder);
+    string zip = Path.Combine(folder, "source.zip");
+    ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+    using (var web = new WebClient()) web.DownloadFile(SourceZipUrl, zip);
+    ExtractOver(zip, source);
+    File.Delete(zip);
+
+    var info = new ProcessStartInfo("powershell.exe",
+        "-NoProfile -ExecutionPolicy RemoteSigned -File \"" + Path.Combine(source, "scripts\\build-ssx.ps1") +
+        "\" -Iso \"" + iso + "\"" + (titleUpdate != null ? " -TitleUpdate \"" + titleUpdate + "\"" : "") +
+        " -NoPause");
+    info.UseShellExecute = false;
+    info.CreateNoWindow = true;
+    info.RedirectStandardOutput = true;
+    info.RedirectStandardError = true;
+    // PowerShell writes redirected output in the console (OEM) code page; non-English
+    // Windows messages are garbled when read as the ANSI default.
+    var oem = Encoding.GetEncoding(System.Globalization.CultureInfo.CurrentCulture.TextInfo.OEMCodePage);
+    info.StandardOutputEncoding = oem;
+    info.StandardErrorEncoding = oem;
+    info.WorkingDirectory = source;
+    var process = new Process { StartInfo = info };
+    process.OutputDataReceived += delegate(object s, DataReceivedEventArgs a) { onLine(a.Data); };
+    process.ErrorDataReceived += delegate(object s, DataReceivedEventArgs a) { onLine(a.Data); };
+    process.Start();
+    if (started != null) started(process);
+    process.BeginOutputReadLine();
+    process.BeginErrorReadLine();
+    process.WaitForExit();
+    return process.ExitCode;
+  }
+
   void RunBuild(string iso, string folder, string titleUpdate) {
     try {
-      string source = Path.Combine(folder, "source");
-      OnLine("==> Downloading the SSX PC port source (no game files)");
-      Directory.CreateDirectory(folder);
-      string zip = Path.Combine(folder, "source.zip");
-      ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
-      using (var web = new WebClient()) web.DownloadFile(SourceZipUrl, zip);
-      ExtractOver(zip, source);
-      File.Delete(zip);
-
-      var info = new ProcessStartInfo("powershell.exe",
-          "-NoProfile -ExecutionPolicy RemoteSigned -File \"" + Path.Combine(source, "scripts\\build-ssx.ps1") +
-          "\" -Iso \"" + iso + "\"" + (titleUpdate != null ? " -TitleUpdate \"" + titleUpdate + "\"" : "") +
-          " -NoPause");
-      info.UseShellExecute = false;
-      info.CreateNoWindow = true;
-      info.RedirectStandardOutput = true;
-      info.RedirectStandardError = true;
-      // PowerShell writes redirected output in the console (OEM) code page; non-English
-      // Windows messages are garbled when read as the ANSI default.
-      var oem = Encoding.GetEncoding(System.Globalization.CultureInfo.CurrentCulture.TextInfo.OEMCodePage);
-      info.StandardOutputEncoding = oem;
-      info.StandardErrorEncoding = oem;
-      info.WorkingDirectory = source;
-      buildProcess = new Process { StartInfo = info };
-      buildProcess.OutputDataReceived += delegate(object s, DataReceivedEventArgs a) { OnLine(a.Data); };
-      buildProcess.ErrorDataReceived += delegate(object s, DataReceivedEventArgs a) { OnLine(a.Data); };
-      buildProcess.Start();
-      buildProcess.BeginOutputReadLine();
-      buildProcess.BeginErrorReadLine();
-      buildProcess.WaitForExit();
-      bool ok = buildProcess.ExitCode == 0 && File.Exists(GameExe());
+      int code = Build(iso, folder, titleUpdate, OnLine, delegate(Process p) { buildProcess = p; });
+      bool ok = code == 0 && File.Exists(GameExe());
       Finish(ok, ok ? "" : cancelled ? "Installation cancelled."
                          : "Something went wrong. The full log is saved as build-ssx.log in the install folder.");
     } catch (Exception ex) {
