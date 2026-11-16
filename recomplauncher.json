@@ -1,0 +1,24 @@
+{
+    "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+    "format": 1,
+    "repo": "AmarilloNL/ssx-recomp",
+    "game": {
+        "kind": "iso",
+        "label": "Your own disc image (.iso) of SSX (USA) for Xbox 360, title ID 4541096D.",
+        "check": {
+            "xdvdfs": "default.xex"
+        }
+    },
+    "start": {
+        "program": [
+            "ssx.exe",
+            "ssx"
+        ],
+        "args": [
+            "--game_data_root={game}"
+        ]
+    },
+    "saves": [
+        "{documents}/ssx"
+    ]
+}
