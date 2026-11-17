@@ -82,6 +82,16 @@ void AddDrop(std::string_view file, std::string_view csv) {
     if (d.code == drop.code) { d = std::move(drop); return; }
   }
   drops.push_back(std::move(drop));
+  // Drops outside the game's own count (its list of lists leaves them out): Mount Eddie (DLC) has 31,
+  // Ids 1 to 31 (its list, in the DLC's archive, is only loaded on its drops).
+  static bool outside_added = false;
+  if (!outside_added) {
+    outside_added = true;
+    uint32_t eddie = Fnv1("rockies0706_track");
+    Drop d{"rockies0706", eddie, uint64_t(eddie) * 10000000000ull, {}, false, {}, {}, {}};
+    for (uint32_t id = 1; id <= 31; ++id) d.ids.insert(id);
+    drops.push_back(std::move(d));
+  }
   // In game order: the code ends in two digits for the range and two for the drop.
   auto digits = [](const Drop& d) { return d.code.substr(d.code.size() - std::min<size_t>(4, d.code.size())); };
   std::sort(drops.begin(), drops.end(), [&](const Drop& a, const Drop& b) { return digits(a) < digits(b); });
@@ -288,8 +298,11 @@ SsxSnowflakes SsxSnowflakeCounts() {
   for (const Drop& d : drops) {
     int got = 0;
     for (uint64_t id : ids) {
-      if (uint32_t(id) == uint32_t(d.base) && (!d.listed || d.ids.count(uint32_t((id - d.base) >> 32)))) ++got;
+      if (uint32_t(id) == uint32_t(d.base) && (d.ids.empty() || d.ids.count(uint32_t((id - d.base) >> 32)))) ++got;
     }
+    // A drop outside the game's count shows once the database has it (its DLC is installed), or has
+    // collected ones.
+    if (!d.listed && d.drops.empty() && !got) continue;
     size_t r = RangeIndex(d);
     auto localized = range_names.find(d.range);
     std::string range_name = localized != range_names.end() && !localized->second.empty() ? localized->second
@@ -302,7 +315,7 @@ SsxSnowflakes SsxSnowflakeCounts() {
     }
     range->collected += got;
     range->total += int(d.ids.size());
-    out.total += int(d.ids.size());
+    if (d.listed) out.total += int(d.ids.size());
     std::vector<std::pair<std::string, std::string>> names = d.drops;
     if (names.empty()) names.push_back({"", "Drop " + d.code.substr(d.code.size() - std::min<size_t>(2, d.code.size()))});
     for (const auto& [peak_name, drop_name] : names) {

@@ -614,10 +614,10 @@ void SsxSettingsDialog::DrawSnowflakesTab() {
         }
         ImGui::Unindent(indent * 2.0f);
         ImGui::TableNextColumn();
-        if (drop.listed) {
+        if (drop.total) {
           ImGui::TextColored(drop.collected == drop.total ? kAccent : kText, "%d / %d", drop.collected, drop.total);
         } else {
-          ImGui::TextColored(kTextDim, "%d", drop.collected);
+          ImGui::Text("%d", drop.collected);
         }
       }
     }
