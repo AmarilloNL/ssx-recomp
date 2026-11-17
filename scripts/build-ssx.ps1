@@ -4,7 +4,7 @@
 # game is downloaded or included: the game code is recompiled on this PC from the
 # default.xex inside your ISO, and the game data is read from your ISO at runtime.
 #
-# Usage: SSX-Installer.exe runs this. Manually:
+# Usage: ssx-recomp.exe runs this. Manually:
 #   powershell -ExecutionPolicy Bypass -File scripts\build-ssx.ps1 [-Iso path] [-TitleUpdate path] [-NoPause]
 # -TitleUpdate: the game's last title update (v0.0.3.2) from your own console, an Xbox 360
 #   package file. Once added, later builds keep using it; -NoTitleUpdate goes back to the disc version.
@@ -224,7 +224,7 @@ if ($NoTitleUpdate) {
 }
 $gameVersion = if (Test-Path $xexp) { '0.0.3.2' } else { '0.0.0.2' }
 if ($gameVersion -eq '0.0.3.2' -and -not (Test-Path "$updateDir\patch0.big")) {
-    Fail "The title update's files are incomplete. Run the installer again and add the title update."
+    Fail "The title update's files are incomplete. Hold Shift while starting ssx-recomp.exe and add the title update."
 }
 Write-Host ("Building the game version $gameVersion" + $(if ($gameVersion -eq '0.0.3.2') { ' (with the title update).' } else { ' (the disc release).' }))
 # Code generated for the other version is removed, so it is generated again from scratch.

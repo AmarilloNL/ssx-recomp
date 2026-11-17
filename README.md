@@ -67,21 +67,27 @@ code runs natively, and its Xbox 360 graphics are drawn with Direct3D 12 (on Lin
 ### 🪟 Windows
 
 1. 💿 Make an ISO of **your own** SSX (USA) Xbox 360 disc.
-2. ⬇️ Download **`SSX-Installer.exe`** from the [latest release](../../releases/latest).
-3. ▶️ Run it. SmartScreen may warn because the installer isn't code-signed: click
+2. ⬇️ Download **`ssx-recomp.exe`** from the [latest release](../../releases/latest).
+3. ▶️ Run it. SmartScreen may warn because it isn't code-signed: click
    **More info → Run anyway**. Its source is [`installer/SSXInstaller.cs`](installer/SSXInstaller.cs).
-4. ✅ Click **Next**, select your ISO, optionally click **Add files...** for DLC and the title
-   update from your own console ([which files](#adding-dlc)), tick the ownership box, and click
-   **Install**.
+4. ✅ The first time it opens the setup: click **Next**, select your ISO, optionally click
+   **Add files...** for DLC and the title update from your own console ([which files](#adding-dlc)),
+   tick the ownership box, and click **Install**.
 5. 🏂 When it says **DONE**, click **Play SSX** or use the desktop shortcut.
+
+From then on **`ssx-recomp.exe` starts the game**: the setup puts itself in the install folder
+(`SSX-PC\ssx-recomp.exe`) and the desktop shortcut points at it. Hold **Shift** while starting it
+(or pass `--setup`) to open the setup again, to update SSX or add DLC.
 
 > [!NOTE]
 > Needs **Windows 10/11 x64**, about **10 GB** free (mostly build tools that other software can
 > share; the game folder itself is about 1 GB), an internet connection and **10–30 minutes** the
 > first time.
 >
-> 🔄 **To update, just run the installer again**: it rebuilds only what changed, and your saves and
-> settings stay.
+> 🔄 **To update, download the new `ssx-recomp.exe` and run it**: being newer than the installed one,
+> it opens the setup with your ISO and folder filled in, rebuilds only what changed, and your saves
+> and settings stay. (Or hold **Shift** while starting the installed one.) An install made by the
+> old `SSX-Installer.exe` is updated the same way.
 
 <details>
 <summary><b>What the installer does on your PC</b></summary>
@@ -96,7 +102,8 @@ Everything happens locally:
 - downloads the prebuilt ReXGlue recompiler SDK and the prebuilt ReGPU renderer (no game code; see
   [`scripts/build-sdk-package.ps1`](scripts/build-sdk-package.ps1) and
   [`scripts/build-regpu-package.ps1`](scripts/build-regpu-package.ps1)) and recompiles the game,
-- produces the playable folder `SSX-PC\source\dist\SSX`.
+- produces the playable folder `SSX-PC\source\dist\SSX` and puts `ssx-recomp.exe` in `SSX-PC`,
+  where it starts the game from then on.
 
 If something goes wrong, the log is `build-ssx.log` in the install folder. Please attach it to an
 issue.
@@ -319,7 +326,7 @@ rates, resolution, DLC, your name and picture) works the same.
   larger one (about 9 MB, version 0.0.3.2); the smaller one (about 1 MB) is an older update that's
   already contained in it.
 - **Adding it:** **Add files...** in the installer, then **Install**. The installer checks that
-  it's the supported update. Running the installer again later keeps it; you only add it once.
+  it's the supported update. Updating later keeps it; you only add it once.
 - **Saves** work with both versions: the update loads saves from the disc version, and the disc
   version loads saves the update wrote.
 - **Going back to the disc version:** run the builder with `-NoTitleUpdate`:
@@ -449,7 +456,7 @@ in `tools/rexglue-src`.
 Both installers also run without a window, for a launcher that installs the game for the player:
 
 ```
-SSX-Installer.exe       --iso <ISO> --folder <folder> [--title-update <file>] [--no-menu]
+ssx-recomp.exe          --iso <ISO> --folder <folder> [--title-update <file>] [--no-menu]
 ssx-linux-installer.sh  --iso <ISO> --folder <folder> [--title-update <file>] [--no-menu]
 ```
 

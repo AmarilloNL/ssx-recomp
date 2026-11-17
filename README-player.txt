@@ -5,9 +5,13 @@ You need your own copy of the Xbox 360 game (the disc .iso, or the files
 extracted from it). No game data is included.
 
 Starting
-  Double-click ssx.exe. The first time, it asks for your game: pick the .iso,
-  or default.xex inside the extracted disc folder. It remembers the choice.
+  Double-click ssx-recomp.exe in the install folder (or use the desktop
+  shortcut). It starts the game, ssx.exe in this folder, which you can also
+  start directly. If the game doesn't know your game files, it asks: pick the
+  .iso, or default.xex inside the extracted disc folder. It remembers the choice.
   (You can also put the .iso, or a folder named "game", next to ssx.exe.)
+  To update SSX, add DLC or the title update: hold Shift while starting
+  ssx-recomp.exe (or start a newer ssx-recomp.exe) and the setup opens.
 
 Settings
   F1   Settings menu (F1 or Esc closes it). On a controller: Back + Start
@@ -45,7 +49,7 @@ Title update (optional, not included - you need it from your own Xbox 360)
   console it is
   in Content\0000000000000000\4541096D\000B0000\ (if there are two files, use
   the larger one).
-  Run SSX-Installer.exe again and add it with "Add files...": the game is
+  Hold Shift while starting ssx-recomp.exe and add it with "Add files...": the game is
   rebuilt with it (the "update" folder next to ssx.exe). Saves work with and
   without it.
 
