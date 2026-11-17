@@ -224,7 +224,7 @@ if ($NoTitleUpdate) {
 }
 $gameVersion = if (Test-Path $xexp) { '0.0.3.2' } else { '0.0.0.2' }
 if ($gameVersion -eq '0.0.3.2' -and -not (Test-Path "$updateDir\patch0.big")) {
-    Fail "The title update's files are incomplete. Hold Shift while starting ssx-recomp.exe and add the title update."
+    Fail "The title update's files are incomplete. Start ssx-recomp.exe, click Update / add DLC and add the title update."
 }
 Write-Host ("Building the game version $gameVersion" + $(if ($gameVersion -eq '0.0.3.2') { ' (with the title update).' } else { ' (the disc release).' }))
 # Code generated for the other version is removed, so it is generated again from scratch.

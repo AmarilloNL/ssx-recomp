@@ -170,7 +170,7 @@ std::optional<fs::path> SsxLocateUpdate(const fs::path& exe_dir) {
     return folder;
   }
   ShowMessage(SSX_TEXT("This SSX build is made for the title update, but the update's files are missing "
-                       "from the \"update\" folder next to the game. Hold Shift while starting ssx-recomp.exe to repair it."),
+                       "from the \"update\" folder next to the game. Start ssx-recomp.exe and click Update / add DLC to repair it."),
               true);
   return std::nullopt;
 }
