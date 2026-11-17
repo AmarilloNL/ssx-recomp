@@ -291,7 +291,9 @@ void SsxSettingsDialog::Set(const char* cvar, const std::string& value) {
   SsxSaveConfig(config_path_);
   // Keyboard support is created with the input system at startup.
   const auto* info = rex::cvar::GetFlagInfo(cvar);
-  if ((info && info->lifecycle != rex::cvar::Lifecycle::kHotReload) ||
+  // (ReGPU switches VSync at once; the standard renderer makes its swap chain at startup only.)
+  bool live = std::string_view(cvar) == "ssx_vsync" && SsxUsingReGpu();
+  if ((info && info->lifecycle != rex::cvar::Lifecycle::kHotReload && !live) ||
       std::string_view(cvar) == "mnk_mode") {
     restart_needed_ = true;
   }
@@ -429,9 +431,11 @@ void SsxSettingsDialog::DrawDisplayTab() {
     Row("Frame rate", "Gameplay keeps real-time speed at any rate.");
     Combo("##framerate", "ssx_framerate", kFramerates, std::size(kFramerates));
   }
-  if (!SsxUsingReGpu()) {  // (ReXGlue's presenter settings: not used by ReGPU)
-    Row("VSync", "No tearing on screens without G-Sync/FreeSync, like handhelds. Applies after a restart.");
-    Checkbox("##vsync", "ssx_vsync");
+  Row("VSync", SsxUsingReGpu()
+                    ? "No tearing on screens without G-Sync/FreeSync, like handhelds. Works with any frame rate."
+                    : "No tearing on screens without G-Sync/FreeSync, like handhelds. Applies after a restart.");
+  Checkbox("##vsync", "ssx_vsync");
+  if (!SsxUsingReGpu()) {  // (ReXGlue's presenter setting: not used by ReGPU)
     Row("Keep 16:9 aspect ratio", "Black bars instead of stretching on other window shapes.");
     Checkbox("##letterbox", "present_letterbox");
   }
