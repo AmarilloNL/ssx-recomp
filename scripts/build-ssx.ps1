@@ -23,6 +23,16 @@ $ErrorActionPreference = 'Continue'
 $root = (Resolve-Path "$PSScriptRoot\..").Path
 $log = "$root\build-ssx.log"
 Start-Transcript -Path $log -Force | Out-Null
+# On some PCs Windows' own folders are missing from PATH, and even SystemRoot/ComSpec can be
+# unset, so cmd, msiexec and the tools that vcvars64.bat runs aren't found (issue #15). Ask
+# Windows itself where its system folder is (that doesn't depend on any variable) and put
+# them back for this build.
+$sys = [Environment]::SystemDirectory
+if (-not $env:SystemRoot) { $env:SystemRoot = Split-Path $sys }
+if (-not $env:ComSpec) { $env:ComSpec = "$sys\cmd.exe" }
+foreach ($dir in "$sys\WindowsPowerShell\v1.0", "$sys\Wbem", $sys) {
+    if (($env:Path -split ';' | ForEach-Object { $_.TrimEnd('\') }) -notcontains $dir) { $env:Path = "$dir;$env:Path" }
+}
 
 # The recompilation config (function addresses, patches) matches exactly this default.xex:
 # SSX (USA) for Xbox 360, title 4541096D, media ID 55ABAB6C, version 0.0.0.2.
@@ -385,16 +395,21 @@ if (-not (Test-Msvc)) {
 # 'msvcrtd.lib'" (issue #2). INCLUDE, LIB and VCToolsInstallDir take precedence for clang/lld.
 $vsPath = & $vswhere -latest @vsFilter -property installationPath
 $vcvars = "$vsPath\VC\Auxiliary\Build\vcvars64.bat"
-# The installation's C++ environment, and whether its C++ libraries are there.
-function Use-VcVars {
-    if (-not (Test-Path $vcvars)) { return $false }
-    cmd /c "`"$vcvars`" >nul 2>&1 && set" | ForEach-Object {
+if (-not (Test-Path "$sys\cmd.exe")) {
+    Fail "Windows' command prompt ($sys\cmd.exe) is missing or blocked on this PC. Run 'sfc /scannow' as administrator to restore it." 31
+}
+# The installation's C++ environment (vcvars64.bat).
+function Import-VcVars {
+    if (-not (Test-Path $vcvars)) { return }
+    & "$sys\cmd.exe" /c "`"$vcvars`" >nul 2>&1 && set" | ForEach-Object {
         if ($_ -match '^(INCLUDE|LIB|LIBPATH|VCToolsInstallDir|VCToolsVersion|VCINSTALLDIR|VSINSTALLDIR|WindowsSdkDir|WindowsSDKVersion|UniversalCRTSdkDir|UCRTVersion)=(.*)$') {
             Set-Item "env:$($Matches[1])" $Matches[2]
         }
     }
-    return [bool]($env:LIB -split ';' | Where-Object { $_ -and (Test-Path "$_\msvcrt.lib") })
 }
+function Test-Lib($name) { [bool]($env:LIB -split ';' | Where-Object { $_ -and (Test-Path "$_\$name") }) }
+# Its environment, and whether its C++ libraries are there.
+function Use-VcVars { Import-VcVars; return (Test-Path $vcvars) -and (Test-Lib 'msvcrt.lib') }
 # Installed but incomplete or broken: what's missing is added, then the installation repaired, before giving up.
 if (-not (Use-VcVars)) {
     Write-Host "  The Visual Studio C++ build tools in $vsPath are incomplete; adding what's missing." -ForegroundColor Yellow
@@ -403,6 +418,31 @@ if (-not (Use-VcVars)) {
     if (-not (Use-VcVars)) {
         Fail ("The Visual Studio C++ build tools in $vsPath are incomplete and couldn't be repaired. Open the Visual Studio " +
               "Installer, choose Modify and tick 'MSVC v143 - VS 2022 C++ x64/x86 build tools' and a Windows SDK.") 31
+    }
+}
+# The Windows SDK (kernel32.lib, ucrt.lib, ...) can be missing from a Visual Studio that has the
+# C++ tools, or be installed where vcvars64.bat doesn't find it (issue #15).
+$kits = "${env:ProgramFiles(x86)}\Windows Kits\10"
+function Find-WinSdk { Get-ChildItem "$kits\Lib\10.*\um\x64\kernel32.lib" -ErrorAction SilentlyContinue | Sort-Object FullName | Select-Object -Last 1 }
+if (-not ((Test-Lib 'kernel32.lib') -and (Test-Lib 'ucrt.lib'))) {
+    if (-not (Find-WinSdk)) {
+        Write-Host "  The Windows SDK is missing; adding it to Visual Studio."
+        Write-Host "  Windows will ask for administrator permission; please allow it." -ForegroundColor Yellow
+        $vsSetup = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+        try { Start-Process $vsSetup -ArgumentList "modify --installPath `"$vsPath`" --add Microsoft.VisualStudio.Component.Windows11SDK.26100 --quiet --norestart" -Verb RunAs -Wait }
+        catch { Write-Host "  $_" }
+        Import-VcVars
+    }
+    $sdkLib = Find-WinSdk
+    if ($sdkLib -and -not ((Test-Lib 'kernel32.lib') -and (Test-Lib 'ucrt.lib'))) {
+        # Installed, but vcvars64.bat didn't pick it up: use it directly.
+        $ver = $sdkLib.Directory.Parent.Parent.Name
+        $env:LIB = "$env:LIB;$kits\Lib\$ver\um\x64;$kits\Lib\$ver\ucrt\x64"
+        $env:INCLUDE = "$env:INCLUDE;$kits\Include\$ver\ucrt;$kits\Include\$ver\um;$kits\Include\$ver\shared;$kits\Include\$ver\winrt;$kits\Include\$ver\cppwinrt"
+        $env:WindowsSdkDir = "$kits\"; $env:WindowsSDKVersion = "$ver\"; $env:UniversalCRTSdkDir = "$kits\"; $env:UCRTVersion = $ver
+    }
+    if (-not ((Test-Lib 'kernel32.lib') -and (Test-Lib 'ucrt.lib'))) {
+        Fail "The Windows SDK (kernel32.lib) was not found. Open the Visual Studio Installer, choose Modify, and tick 'Windows 11 SDK' under Individual components." 31
     }
 }
 Write-Host "  Using the C++ tools in $vsPath (MSVC $env:VCToolsVersion, Windows SDK $($env:WindowsSDKVersion.TrimEnd('\')))"
@@ -423,6 +463,34 @@ if (-not (Test-Path "$sdk\.version") -or (Get-Content "$sdk\.version") -ne $SdkP
     # recompiler (which may carry its bugs) is removed to be generated again.
     Remove-Item "$root\generated\default" -Recurse -Force -ErrorAction SilentlyContinue
 } else { Step "ReXGlue SDK already downloaded" }
+# The recompiler and the game read their own paths in the PC's ANSI code page, so in a folder
+# with other characters, like a Cyrillic user name, the recompiler can't open the project and
+# the game crashes at start (issue #15). There both run in UTF-8, set in their manifests; the
+# generated code is the same.
+$nonAscii = $root -match '[^\x00-\x7F]'
+function Set-Utf8CodePage($exe) {
+    $mt = Get-ChildItem "$kits\bin\10.*\x64\mt.exe" -ErrorAction SilentlyContinue | Sort-Object FullName | Select-Object -Last 1
+    if (-not $mt) { Fail "The install folder $root has letters the recompiler can't read, and the Windows SDK's mt.exe to fix that wasn't found. Move ssx-recomp.exe to a folder with only English letters, like C:\Games\SSX, and set SSX up there." }
+    $utf8 = "$env:TEMP\ssx-utf8.manifest"
+    Set-Content $utf8 -Encoding UTF8 -Value @'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+</assembly>
+'@
+    & $mt.FullName -nologo -manifest $utf8 "-updateresource:$exe;#1"
+    $failed = $LASTEXITCODE
+    Remove-Item $utf8
+    if ($failed) { Fail "The install folder $root has letters the recompiler can't read, and setting $exe to UTF-8 failed. Move ssx-recomp.exe to a folder with only English letters, like C:\Games\SSX, and set SSX up there." }
+}
+if ($nonAscii -and -not (Test-Path "$sdk\.utf8")) {
+    Set-Utf8CodePage "$sdk\bin\rexglue.exe"
+    Set-Content "$sdk\.utf8" 'rexglue.exe runs in UTF-8'
+}
 # Older versions of this builder compiled the SDK here; that copy and its build (~2 GB)
 # are no longer used.
 if (Test-Path "$root\tools\rexglue-src\.ssx-ready") {
@@ -433,6 +501,7 @@ if (Test-Path "$root\tools\rexglue-src\.ssx-ready") {
 Step "Recompiling SSX and building the PC version (this takes a while)"
 & "$root\scripts\package.ps1" -Preset ssx-player -Clang $clang
 if (-not (Test-Path "$root\dist\SSX\ssx.exe")) { Fail "The build failed. The details are in build-ssx.log." 50 }
+if ($nonAscii) { Set-Utf8CodePage "$root\dist\SSX\ssx.exe" }  # see Set-Utf8CodePage
 # The ReGPU renderer next to ssx.exe (the game's default). Without it the game uses the standard
 # renderer, so a failed download isn't fatal. Kept in tools\regpu like the SDK, so a rebuild
 # downloads it only when the package version changes.
