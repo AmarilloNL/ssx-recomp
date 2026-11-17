@@ -174,6 +174,8 @@ own ISO, by an installer script:
 > - **Tearing** (a horizontal cut through the picture) on a screen without G-Sync/FreeSync, like a
 >   handheld? Turn on **VSync** in **F1 → Display** and restart.
 > - **The game won't start after changing a setting?** Delete `ssx.toml` next to `ssx.exe`.
+> - **Portable:** put a `portable.txt` next to `ssx.exe` (or tick **Portable** in the installer) and
+>   saves, DLC and music live in a `userdata` folder there instead of `Documents\ssx`.
 
 <a id="graphics"></a>
 <a id="regpu"></a>
