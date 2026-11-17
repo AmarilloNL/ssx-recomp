@@ -91,7 +91,7 @@ static class Program {
   }
 
   static readonly string[] HeadlessOptions = {
-    "--game", "--iso", "--folder", "--title-update", "--dlc", "--portable", "--no-menu", "--prepare" };
+    "--game", "--iso", "--folder", "--title-update", "--dlc", "--portable", "--no-menu", "--prepare", "--accept-vs-license" };
 
   const string Usage = "Usage: ssx-recomp.exe [--prepare] --game <your SSX .iso, or its extracted folder> " +
                        "[--folder <folder>] [--title-update <file>] [--dlc <file>]...";
@@ -101,16 +101,18 @@ static class Program {
   // the build's output on stdout. Options take their value after a space or after = (--dlc=<file>).
   // --game (or --iso): the disc image, or the extracted disc's folder or its default.xex.
   // Exit codes: 0 the game is built, 2 wrong options, 1 something unexpected, else the builder's
-  // (scripts\build-ssx.ps1): 10-13 the copy of the game, 20-22 the title update, 30-31 the build
+  // (scripts\build-ssx.ps1): 10-13 the copy of the game, 20-22 the title update, 30-32 the build
   // tools, 40 a download, 50 the build.
   // --prepare (RecompLauncher's setup step, recomplauncher.json): prints only "progress <0-1> <step>"
   // lines (the build's output still goes to build-ssx.log) and, when it fails, the reason as its
   // last line; a --title-update or --dlc file that isn't there is skipped: the player didn't pick it.
+  // It installs the Visual Studio Build Tools only with --accept-vs-license (the setup screen's tick
+  // for their license); a PC that lacks them stops with 32 without it.
   static int Headless(string[] args) {
     string iso = null, titleUpdate = null;
     string folder = Install.Folder;
     var dlc = new List<string>();
-    bool prepare = false;
+    bool prepare = false, vsLicense = false;
     for (int i = 0; i < args.Length; i++) {
       string name = args[i], value = null;
       int eq = name.IndexOf('=');
@@ -126,6 +128,7 @@ static class Program {
       else if (name == "--title-update") titleUpdate = value;
       else if (name == "--dlc") dlc.Add(value);
       else if (name == "--prepare" && value == null) prepare = true;
+      else if (name == "--accept-vs-license" && value == null) vsLicense = true;
       else if (name == "--portable") { }  // always portable now; kept so older command lines still work
       else if (name == "--no-menu") { }  // (the Linux installer's option: one launcher command line for both)
       else { Console.Error.WriteLine(Usage); return 2; }
@@ -141,8 +144,10 @@ static class Program {
     try {
       folder = Path.GetFullPath(folder);
       InstallerForm.CopyDlc(dlc.ToArray(), Install.UserData(folder), line);
+      // Without --prepare (other launchers, scripts) as before: the builder installs what's missing.
       int code = InstallerForm.Build(Path.GetFullPath(iso), folder,
-                                     titleUpdate != null ? Path.GetFullPath(titleUpdate) : null, line, null);
+                                     titleUpdate != null ? Path.GetFullPath(titleUpdate) : null, line, null,
+                                     !prepare || vsLicense);
       if (code == 0 && Install.Built(folder)) {
         Install.MarkBuilt(folder);
         return 0;
@@ -1005,6 +1010,15 @@ class InstallerForm : Form {
       Tone = Th.Warn };
     card.Bounds = new Rectangle(x, Th.D(254), w, card.FitHeight(w));
     p.Controls.Add(card);
+    // The setup installs Microsoft's build tools when they're missing: say whose license that accepts.
+    const string tools = "A PC without Microsoft's Visual Studio Build Tools gets them installed: by installing " +
+                         "SSX you accept the Visual Studio license terms.";
+    var license = new LinkLabel { Text = tools, Font = Th.F(9.5f, FontStyle.Regular), BackColor = Th.Bg,
+                                  ForeColor = Th.Faint, LinkColor = Th.Accent, ActiveLinkColor = Th.AccentHover,
+                                  Bounds = new Rectangle(x, card.Bottom + Th.D(14), w, Th.D(40)) };
+    license.LinkArea = new LinkArea(tools.IndexOf("Visual Studio license terms"), "Visual Studio license terms".Length);
+    license.LinkClicked += delegate { Process.Start("https://visualstudio.microsoft.com/license-terms/"); };
+    p.Controls.Add(license);
   }
 
   void BuildGame(Panel p) {
@@ -1474,7 +1488,10 @@ class InstallerForm : Form {
   // (scripts\build-ssx.ps1), each output line to onLine; started gets the builder's process (to stop
   // it). Returns the builder's exit code. The port itself is never downloaded here; the builder
   // only downloads build tools and packages it doesn't have yet.
-  internal static int Build(string iso, string folder, string titleUpdate, Action<string> onLine, Action<Process> started) {
+  // vsLicense: the player accepted the Visual Studio Build Tools' license, so the builder may install
+  // them (without it, a PC that lacks them stops with 32; RecompLauncher's setup tick passes it).
+  internal static int Build(string iso, string folder, string titleUpdate, Action<string> onLine, Action<Process> started,
+                            bool vsLicense = true) {
     string source = Path.Combine(folder, "source");
     onLine("==> Unpacking the SSX PC port source (no game files)");
     Install.UnpackSource(folder, onLine);
@@ -1488,8 +1505,11 @@ class InstallerForm : Form {
     var info = new ProcessStartInfo(powershell,
         "-NoProfile -ExecutionPolicy RemoteSigned -File \"" + Path.Combine(source, "scripts\\build-ssx.ps1") +
         "\" -Iso \"" + iso + "\"" + (titleUpdate != null ? " -TitleUpdate \"" + titleUpdate + "\"" : "") +
-        " -NoPause");
+        " -NoPause" + (vsLicense ? "" : " -NoVsLicense"));
     info.UseShellExecute = false;
+    // Started from PowerShell 7 (pwsh), its module path would load PowerShell 7's modules into
+    // Windows PowerShell, whose own commands (Get-FileHash...) then fail: let it use its own.
+    info.EnvironmentVariables.Remove("PSModulePath");
     info.CreateNoWindow = true;
     info.RedirectStandardOutput = true;
     info.RedirectStandardError = true;

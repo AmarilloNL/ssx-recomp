@@ -12,10 +12,13 @@
 # -NoPause: don't wait for Enter at the end (when driven by the installer).
 # -NoReGpu: leave out the ReGPU renderer (the default renderer; F1 > Graphics > Renderer also has
 #   the standard one). Developers build it from source with scripts\build-regpu.ps1.
+# -NoVsLicense: the player hasn't accepted the Visual Studio Build Tools' license (RecompLauncher's
+#   setup tick, recomplauncher.json): stop with 32 instead of installing them. Already installed: fine.
 # Exit codes, by what went wrong (ssx-recomp.exe passes them on; recomplauncher.json's players see
-# the ERROR line): 10-13 the copy of the game, 20-22 the title update, 30-31 the build tools,
+# the ERROR line): 10-13 the copy of the game, 20-22 the title update, 30-32 the build tools,
 # 40 a download, 50 the build itself.
-param([Alias('Game')][string]$Iso, [string]$TitleUpdate, [switch]$NoTitleUpdate, [switch]$NoPause, [switch]$NoReGpu)
+param([Alias('Game')][string]$Iso, [string]$TitleUpdate, [switch]$NoTitleUpdate, [switch]$NoPause, [switch]$NoReGpu,
+      [switch]$NoVsLicense)
 
 $ErrorActionPreference = 'Continue'
 $root = (Resolve-Path "$PSScriptRoot\..").Path
@@ -348,6 +351,10 @@ function Test-Msvc { (Test-Path $vswhere) -and (& $vswhere @vsFilter -property i
 if (-not (Test-Msvc)) {
     if ((Test-Path $vswhere) -and (& $vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)) {
         Write-Host "  The Visual Studio found is older than 2022, too old for this build."
+    }
+    if ($NoVsLicense) {
+        Fail ("This PC needs Microsoft's Visual Studio Build Tools to build SSX. Tick the Visual Studio Build Tools " +
+              "option to accept their license and install them, then set SSX up again.") 32
     }
     Write-Host "  installing Visual Studio 2022 Build Tools (C++ libraries + Windows SDK)."
     Write-Host "  Windows will ask for administrator permission; please allow it." -ForegroundColor Yellow
