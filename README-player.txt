@@ -11,8 +11,8 @@ Starting
   it asks: pick the .iso, or default.xex inside the extracted disc folder. It
   remembers the choice.
   (You can also put the .iso, or a folder named "game", next to ssx.exe.)
-  To update SSX, add DLC or the title update: click Update / add DLC in
-  ssx-recomp.exe.
+  To update SSX: click Check for updates in ssx-recomp.exe (the only thing
+  that goes online). To add DLC or the title update: Add DLC / rebuild.
 
 Settings
   F1   Settings menu (F1 or Esc closes it). On a controller: Back + Start
@@ -50,7 +50,7 @@ Title update (optional, not included - you need it from your own Xbox 360)
   console it is
   in Content\0000000000000000\4541096D\000B0000\ (if there are two files, use
   the larger one).
-  Hold Shift while starting ssx-recomp.exe and add it with "Add files...": the game is
+  In ssx-recomp.exe click Add DLC / rebuild, then "Add files...": the game is
   rebuilt with it (the "update" folder next to ssx.exe). Saves work with and
   without it.
 

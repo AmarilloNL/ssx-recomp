@@ -78,8 +78,8 @@ code runs natively, and its Xbox 360 graphics are drawn with Direct3D 12 (on Lin
 5. 🏂 When it says **DONE**, click **Play SSX** or use the desktop shortcut.
 
 From then on **`ssx-recomp.exe` is the game's launcher**: it opens with **Play SSX**,
-**Update / add DLC** and **Open folder**. (`ssx-recomp.exe --play`, or any options for the game,
-starts the game straight away.)
+**Check for updates** and **Add DLC / rebuild**. (`ssx-recomp.exe --play`, or any options for the
+game, starts the game straight away.)
 
 > [!NOTE]
 > Needs **Windows 10/11 x64**, about **10 GB** free (mostly build tools that other software can
@@ -90,8 +90,14 @@ starts the game straight away.)
 > cache. Nothing goes to `Documents` or the registry; move or back up the folder as a whole. Every
 > install starts fresh, with its own saves.
 >
-> 🔄 **To update, click Update / add DLC**: it rebuilds from the latest source, only what changed,
-> and your saves and settings stay.
+> 🔄 **To update, click Check for updates**: it's the only thing that goes online for the port. If
+> there's a newer release, it replaces `ssx-recomp.exe` with that release's and rebuilds SSX (only
+> what changed); your saves and settings stay. Playing never downloads anything.
+>
+> 📦 **`ssx-recomp.exe` carries the port's source code**, so building never downloads the port: each
+> release builds exactly its own version. Only build tools and packages the PC doesn't have yet are
+> downloaded (the first time, or when a release needs newer ones), so rebuilding later, for example
+> to add the title update, works offline.
 
 <details>
 <summary><b>What the installer does on your PC</b></summary>
@@ -99,6 +105,7 @@ starts the game straight away.)
 
 Everything happens locally:
 
+- unpacks the port's source code, which `ssx-recomp.exe` carries, into `source`,
 - checks that the ISO is the supported release,
 - installs the build tools that are missing (CMake, Ninja, LLVM and the Visual Studio 2022 Build
   Tools) through `winget`, or from their official downloads if `winget` isn't available; Windows
