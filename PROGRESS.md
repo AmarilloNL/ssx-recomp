@@ -484,3 +484,11 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   update are in different console folders), the older update (~1 MB) is refused at once, a help
   text names the console folders, and a "Where do I find these?" link opens the README; window
   20 px taller.
+- 2026-11-16: intro and title menu at ~5 fps for ~3 minutes after every start (reported with
+  ReGPU at a 60 and a 144 fps cap). The GPU's warm-up in the first ~2 s gives ~190 ms frames;
+  SsxPaceFrameEnd took them for a GPU-bound pace (period 217 ms) and eased back 0.1% per frame,
+  which is ~6%/s at 60 fps but ~0.5%/s at 5 fps. Now frames over 100 ms (was 250) count as a
+  stall and reset the pacing, the average gets a second to settle after a stall (13 ms
+  average against 6.5 ms frames at the end of the warm-up paced the intro at ~73 of 144 fps
+  for ~20 s), and the ease-back rates apply per 1/60 s of frame time. Verified: two starts at
+  a 144 fps cap, 102-110 fps over the first 5 s (warm-up included), 144 from 10 s on.
