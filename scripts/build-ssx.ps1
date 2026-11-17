@@ -420,6 +420,34 @@ if (-not (Test-Path "$sdk\.version") -or (Get-Content "$sdk\.version") -ne $SdkP
     # recompiler (which may carry its bugs) is removed to be generated again.
     Remove-Item "$root\generated\default" -Recurse -Force -ErrorAction SilentlyContinue
 } else { Step "ReXGlue SDK already downloaded" }
+# The recompiler and the game read their own paths in the PC's ANSI code page, so in a folder
+# with other characters, like a Cyrillic user name, the recompiler can't open the project and
+# the game crashes at start (issue #15). There both run in UTF-8, set in their manifests; the
+# generated code is the same.
+$nonAscii = $root -match '[^\x00-\x7F]'
+function Set-Utf8CodePage($exe) {
+    $mt = Get-ChildItem "$kits\bin\10.*\x64\mt.exe" -ErrorAction SilentlyContinue | Sort-Object FullName | Select-Object -Last 1
+    if (-not $mt) { Fail "The install folder $root has letters the recompiler can't read, and the Windows SDK's mt.exe to fix that wasn't found. Install to a folder with only English letters, like C:\SSX-PC." }
+    $utf8 = "$env:TEMP\ssx-utf8.manifest"
+    Set-Content $utf8 -Encoding UTF8 -Value @'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+</assembly>
+'@
+    & $mt.FullName -nologo -manifest $utf8 "-updateresource:$exe;#1"
+    $failed = $LASTEXITCODE
+    Remove-Item $utf8
+    if ($failed) { Fail "The install folder $root has letters the recompiler can't read, and setting $exe to UTF-8 failed. Install to a folder with only English letters, like C:\SSX-PC." }
+}
+if ($nonAscii -and -not (Test-Path "$sdk\.utf8")) {
+    Set-Utf8CodePage "$sdk\bin\rexglue.exe"
+    Set-Content "$sdk\.utf8" 'rexglue.exe runs in UTF-8'
+}
 # Older versions of this builder compiled the SDK here; that copy and its build (~2 GB)
 # are no longer used.
 if (Test-Path "$root\tools\rexglue-src\.ssx-ready") {
@@ -430,6 +458,7 @@ if (Test-Path "$root\tools\rexglue-src\.ssx-ready") {
 Step "Recompiling SSX and building the PC version (this takes a while)"
 & "$root\scripts\package.ps1" -Preset ssx-player -Clang $clang
 if (-not (Test-Path "$root\dist\SSX\ssx.exe")) { Fail "The build failed." }
+if ($nonAscii) { Set-Utf8CodePage "$root\dist\SSX\ssx.exe" }  # see Set-Utf8CodePage
 # The ReGPU renderer next to ssx.exe (the game's default). Without it the game uses the standard
 # renderer, so a failed download isn't fatal.
 if (-not $NoReGpu) {
