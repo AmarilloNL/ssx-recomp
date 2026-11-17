@@ -490,7 +490,7 @@ says what happened:
 | 2 | wrong options |
 | 10 to 13 | your copy of the game: not found or not readable (10), not an Xbox 360 game (11), not the supported release (12), removed by an antivirus program (13) |
 | 20 to 22 | the title update: not found or not readable (20), not the supported one (21), incomplete (22) |
-| 30, 31 | the build tools couldn't be installed (30), or Visual Studio's are incomplete (31) |
+| 30 to 32 | the build tools couldn't be installed (30), Visual Studio's are incomplete (31), or the Visual Studio Build Tools are needed but their license wasn't accepted with `--accept-vs-license` (32; only with `--prepare`) |
 | 40 | a download failed |
 | 50 | the build failed (the details are in `source\build-ssx.log`) |
 | 1 | something unexpected |

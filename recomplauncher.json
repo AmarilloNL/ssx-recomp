@@ -54,6 +54,16 @@
     ],
     "label": "Recompiling SSX for your PC from your disc (10 to 30 minutes the first time)",
     "timeout": 7200,
+    "options": [
+      {
+        "id": "vs_build_tools",
+        "label": "Microsoft Visual Studio Build Tools",
+        "note": "Needed to build SSX on your PC: installed if this PC doesn't have them (Windows asks for permission).",
+        "os": ["windows"],
+        "args": ["--accept-vs-license"],
+        "license": { "name": "Microsoft Visual Studio license terms", "url": "https://visualstudio.microsoft.com/license-terms/" }
+      }
+    ],
     "version": "1.6.0",
     "done": ["{install}/source/dist/SSX/ssx.exe"]
   },
