@@ -52,7 +52,7 @@ code runs natively, and its Xbox 360 graphics are drawn with Direct3D 12 (on Lin
 | ⚙️ **Settings menu** | in game: **F1**, or **Back + Start** on a controller |
 | ⌨️ **Keyboard & controller** | key rebinding, vibration, deadzone |
 | 🪪 **Your name & picture** | instead of "User" and an empty square (settings → **Profile**) |
-| 💿 **Runs from your ISO** | saves stay in `Documents\ssx` (Linux: `~/.local/share/ssx`) |
+| 💿 **Runs from your ISO** | saves stay in your SSX folder (Linux: `~/.local/share/ssx`) |
 | 📦 **DLC** | Mt. Eddie, Japan and the other packs, from your own console ([how](#adding-dlc)) |
 | 📈 **Title update** | the game's last update, with the gear for levels 11 to 15 ([how](#title-update)), and [riders up to level 15](#level-15) |
 | 🎵 **Your own music** | your music folders as playlists in the game's Music menu, remixed live as you ride ([how](#your-music)) |
@@ -67,7 +67,9 @@ code runs natively, and its Xbox 360 graphics are drawn with Direct3D 12 (on Lin
 ### 🪟 Windows
 
 1. 💿 Make an ISO of **your own** SSX (USA) Xbox 360 disc.
-2. ⬇️ Download **`ssx-recomp.exe`** from the [latest release](../../releases/latest).
+2. ⬇️ Download **`ssx-recomp.exe`** from the [latest release](../../releases/latest) and put it in
+   an empty folder of its own, for example `C:\Games\SSX`. That folder is your SSX folder:
+   the game is built there and everything it keeps stays there.
 3. ▶️ Run it. SmartScreen may warn because it isn't code-signed: click
    **More info → Run anyway**. Its source is [`installer/SSXInstaller.cs`](installer/SSXInstaller.cs).
 4. ✅ The first time it opens the setup: click **Next**, select your ISO, optionally click
@@ -75,19 +77,21 @@ code runs natively, and its Xbox 360 graphics are drawn with Direct3D 12 (on Lin
    tick the ownership box, and click **Install**.
 5. 🏂 When it says **DONE**, click **Play SSX** or use the desktop shortcut.
 
-From then on **`ssx-recomp.exe` starts the game**: the setup puts itself in the install folder
-(`SSX-PC\ssx-recomp.exe`) and the desktop shortcut points at it. Hold **Shift** while starting it
-(or pass `--setup`) to open the setup again, to update SSX or add DLC.
+From then on **`ssx-recomp.exe` is the game's launcher**: it opens with **Play SSX**,
+**Update / add DLC** and **Open folder**. (`ssx-recomp.exe --play`, or any options for the game,
+starts the game straight away.)
 
 > [!NOTE]
 > Needs **Windows 10/11 x64**, about **10 GB** free (mostly build tools that other software can
 > share; the game folder itself is about 1 GB), an internet connection and **10–30 minutes** the
 > first time.
 >
-> 🔄 **To update, download the new `ssx-recomp.exe` and run it**: being newer than the installed one,
-> it opens the setup with your ISO and folder filled in, rebuilds only what changed, and your saves
-> and settings stay. (Or hold **Shift** while starting the installed one.) An install made by the
-> old `SSX-Installer.exe` is updated the same way.
+> 📁 **Everything stays in your SSX folder**: the build, saves, settings, DLC, music and the shader
+> cache. Nothing goes to `Documents` or the registry; move or back up the folder as a whole. Every
+> install starts fresh, with its own saves.
+>
+> 🔄 **To update, click Update / add DLC**: it rebuilds from the latest source, only what changed,
+> and your saves and settings stay.
 
 <details>
 <summary><b>What the installer does on your PC</b></summary>
@@ -102,10 +106,9 @@ Everything happens locally:
 - downloads the prebuilt ReXGlue recompiler SDK and the prebuilt ReGPU renderer (no game code; see
   [`scripts/build-sdk-package.ps1`](scripts/build-sdk-package.ps1) and
   [`scripts/build-regpu-package.ps1`](scripts/build-regpu-package.ps1)) and recompiles the game,
-- produces the playable folder `SSX-PC\source\dist\SSX` and puts `ssx-recomp.exe` in `SSX-PC`,
-  where it starts the game from then on.
+- produces the playable game in `source\dist\SSX` inside your SSX folder.
 
-If something goes wrong, the log is `build-ssx.log` in the install folder. Please attach it to an
+If something goes wrong, the log is `build-ssx.log` in the `source` folder. Please attach it to an
 issue.
 
 </details>
@@ -155,7 +158,7 @@ own ISO, by an installer script:
 <summary><b>Linux notes</b></summary>
 <br>
 
-- Where this README says `Documents\ssx`, Linux uses **`~/.local/share/ssx`** (saves, `dlc`,
+- Where this README says `userdata`, Linux uses **`~/.local/share/ssx`** (saves, `dlc`,
   `music`). Your own music needs `ffmpeg`.
 - The game uses **ReGPU**, as on Windows, drawing at your screen's resolution. If ReGPU can't be
   built on your PC, the script says so and the game uses the standard renderer, which runs at 1× on
@@ -185,8 +188,8 @@ own ISO, by an installer script:
 >   handheld? Turn on **VSync** in **F1 → Display**. It works with any frame rate (with the standard
 >   renderer, restart after turning it on).
 > - **The game won't start after changing a setting?** Delete `ssx.toml` next to `ssx.exe`.
-> - **Portable:** put a `portable.txt` next to `ssx.exe` (or tick **Portable** in the installer) and
->   saves, DLC and music live in a `userdata` folder there instead of `Documents\ssx`.
+> - **Everything stays in your SSX folder:** saves, DLC, music and the shader cache live in
+>   `source\dist\SSX\userdata` (called `userdata` below). Back up or move the folder as a whole.
 
 <a id="graphics"></a>
 <a id="regpu"></a>
@@ -275,7 +278,7 @@ there, so they add nothing new (installing them anyway does no harm).
 > [!TIP]
 > **Quick version:** in the installer, click **Add files...** on the *Your game* page and select
 > the files (DLC and the title update together; the picks add up). The installer shows what each
-> file is, or why it isn't an SSX package. DLC can also be copied to `Documents\ssx\dlc` by hand:
+> file is, or why it isn't an SSX package. DLC can also be copied to `userdata\dlc` by hand:
 > the game installs it the next time it starts.
 
 <details>
@@ -299,11 +302,11 @@ folder. Copy the package files themselves, not the folder.
 **Installing them by hand** (the installer's **Add files...** does the same):
 
 1. Close the game.
-2. Open the folder `Documents\ssx\dlc`. The game creates it the first time it starts, or you can
+2. Open the folder `userdata\dlc`. The game creates it the first time it starts, or you can
    create it yourself.
 3. Copy the package files (the long-named files) directly into it, not in a subfolder.
 4. Start the game. On startup it unpacks each new package into
-   `Documents\ssx\0000000000000000\4541096D\00000002\`. This happens once per package, and the
+   `userdata\0000000000000000\4541096D\00000002\`. This happens once per package, and the
    files in `dlc` can be deleted afterwards.
 
 **Checking it worked.** Mt. Eddie and Japan appear on the world map, and the classic riders and
@@ -329,9 +332,9 @@ rates, resolution, DLC, your name and picture) works the same.
   it's the supported update. Updating later keeps it; you only add it once.
 - **Saves** work with both versions: the update loads saves from the disc version, and the disc
   version loads saves the update wrote.
-- **Going back to the disc version:** run the builder with `-NoTitleUpdate`:
-  `powershell -ExecutionPolicy Bypass -File "%USERPROFILE%\SSX-PC\source\scripts\build-ssx.ps1" -NoTitleUpdate`
-  (or your own install folder instead of `%USERPROFILE%\SSX-PC`). It asks for your ISO again.
+- **Going back to the disc version:** run the builder in your SSX folder with `-NoTitleUpdate`:
+  `powershell -ExecutionPolicy Bypass -File "C:\Games\SSX\source\scripts\build-ssx.ps1" -NoTitleUpdate`
+  (with your own SSX folder instead of `C:\Games\SSX`). It asks for your ISO again.
 
 <a id="level-15"></a>
 
@@ -355,8 +358,8 @@ full XP bar at level 10 is enough). The same goes for every level up to 15, as o
 <br>
 
 A save from a console that has been online since mid-2012 carries EA's tuning update itself, and
-the game keeps using it. The port also keeps such an update aside (`Documents\ssx\tuning\update.bin`)
-and gives it to your other saves; a save file put in `Documents\ssx\tuning` is picked up the same
+the game keeps using it. The port also keeps such an update aside (`userdata\tuning\update.bin`)
+and gives it to your other saves; a save file put in `userdata\tuning` is picked up the same
 way.
 
 </details>
@@ -368,7 +371,7 @@ way.
 SSX can play your own music instead of its soundtrack, and remixes it live as you ride, like on
 the console:
 
-1. Put your music in `Documents\ssx\music`, one folder per playlist: for example
+1. Put your music in `userdata\music`, one folder per playlist: for example
    `music\Chill\` and `music\Punk\`. The folder name is the playlist's name; songs in subfolders
    count too. In races the game shuffles them. Music files right in `music\` form a playlist called
    *Music*. MP3, M4A/AAC, WMA, FLAC and WAV work.
@@ -461,7 +464,8 @@ ssx-linux-installer.sh  --iso <ISO> --folder <folder> [--title-update <file>] [-
 ```
 
 The build output goes to stdout; the exit code is 0 when the game was built (1: the build failed,
-2 on Windows: wrong options). The game ends up in `<folder>/source/dist/SSX/ssx.exe` (Windows) or
+2 on Windows: wrong options). On Windows `--folder` defaults to the folder `ssx-recomp.exe` is in.
+The game ends up in `<folder>/source/dist/SSX/ssx.exe` (Windows) or
 `<folder>/source/dist/SSX/ssx` (Linux), set up to read the ISO it was built from; a first build takes
 10–30 minutes, longer when build tools have to be installed. `--no-menu` leaves the player's own SSX
 app-menu entry alone (Linux; accepted and ignored on Windows, which makes no shortcut here). Without
