@@ -57,8 +57,9 @@
     "options": [
       {
         "id": "vs_build_tools",
+        "required": true,
         "label": "Microsoft Visual Studio Build Tools",
-        "note": "Needed to build SSX on your PC: installed if this PC doesn't have them (Windows asks for permission).",
+        "note": "Needed to build SSX on your PC: installed or repaired if this PC doesn't have them working (Windows asks for permission).",
         "os": ["windows"],
         "args": ["--accept-vs-license"],
         "license": { "name": "Microsoft Visual Studio license terms", "url": "https://visualstudio.microsoft.com/license-terms/" }
