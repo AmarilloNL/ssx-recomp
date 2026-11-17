@@ -6,12 +6,16 @@
 #
 # Usage: ssx-recomp.exe runs this. Manually:
 #   powershell -ExecutionPolicy Bypass -File scripts\build-ssx.ps1 [-Iso path] [-TitleUpdate path] [-NoPause]
+# -Iso (or -Game): your SSX disc image, or the extracted disc's folder (or its default.xex).
 # -TitleUpdate: the game's last title update (v0.0.3.2) from your own console, an Xbox 360
 #   package file. Once added, later builds keep using it; -NoTitleUpdate goes back to the disc version.
 # -NoPause: don't wait for Enter at the end (when driven by the installer).
 # -NoReGpu: leave out the ReGPU renderer (the default renderer; F1 > Graphics > Renderer also has
 #   the standard one). Developers build it from source with scripts\build-regpu.ps1.
-param([string]$Iso, [string]$TitleUpdate, [switch]$NoTitleUpdate, [switch]$NoPause, [switch]$NoReGpu)
+# Exit codes, by what went wrong (ssx-recomp.exe passes them on; recomplauncher.json's players see
+# the ERROR line): 10-13 the copy of the game, 20-22 the title update, 30-31 the build tools,
+# 40 a download, 50 the build itself.
+param([Alias('Game')][string]$Iso, [string]$TitleUpdate, [switch]$NoTitleUpdate, [switch]$NoPause, [switch]$NoReGpu)
 
 $ErrorActionPreference = 'Continue'
 $root = (Resolve-Path "$PSScriptRoot\..").Path
@@ -34,12 +38,12 @@ $ReGpuPackage = 'regpu-4'
 $ReGpuPackageUrl = "https://github.com/AmarilloNL/ssx-recomp/releases/download/$ReGpuPackage/rexgpu-regpu-4.zip"
 
 function Step($text) { Write-Host ""; Write-Host "==> $text" -ForegroundColor Cyan }
-function Fail($text) {
+function Fail($text, [int]$code = 50) {
     Write-Host ""; Write-Host "ERROR: $text" -ForegroundColor Red
     Write-Host "Details are in $log"
     Stop-Transcript | Out-Null
     if (-not $NoPause) { Read-Host "Press Enter to close" }
-    exit 1
+    exit $code
 }
 # Portable tools come first: the builder only downloads them when the PC's own copy is missing
 # or too old.
@@ -64,11 +68,21 @@ if (-not $Iso) {
     Add-Type -AssemblyName System.Windows.Forms
     $dialog = New-Object System.Windows.Forms.OpenFileDialog
     $dialog.Title = 'Select your own SSX (Xbox 360) disc image'
-    $dialog.Filter = 'Xbox 360 disc image (*.iso)|*.iso'
-    if ($dialog.ShowDialog() -ne 'OK') { Fail 'No ISO selected.' }
+    $dialog.Filter = 'SSX disc image or extracted default.xex (*.iso, default.xex)|*.iso;default.xex'
+    if ($dialog.ShowDialog() -ne 'OK') { Fail 'No ISO selected.' 10 }
     $Iso = $dialog.FileName
 }
-if (-not (Test-Path $Iso)) { Fail "ISO not found: $Iso" }
+if (-not (Test-Path $Iso)) { Fail "Your copy of SSX wasn't found: $Iso" 10 }
+# An extracted disc: its folder, or the default.xex in it. The game reads the folder as it runs.
+$GameFolder = $null
+if ((Split-Path $Iso -Leaf) -eq 'default.xex') { $Iso = Split-Path $Iso -Parent }
+if (Test-Path $Iso -PathType Container) {
+    if (-not (Test-Path (Join-Path $Iso 'default.xex'))) {
+        Fail "That folder has no default.xex: pick the extracted SSX disc's folder, or the disc image (.iso)." 11
+    }
+    $GameFolder = (Resolve-Path $Iso).Path
+    $Iso = $GameFolder  # what ssx.toml points the game at
+}
 Write-Host "Using $Iso"
 
 # Minimal XDVDFS reader: find default.xex in the disc's game partition and copy it out.
@@ -121,20 +135,24 @@ function Export-XdvdfsFile([string]$IsoPath, [string]$Name, [string]$OutPath) {
 $xex = "$root\game-dump\files\default.xex"
 New-Item -ItemType Directory -Force (Split-Path $xex) | Out-Null
 # Catch read errors here, or the checks below run on a missing file and report the wrong problem.
-try { $found = Export-XdvdfsFile $Iso 'default.xex' $xex }
-catch { Fail "Could not read default.xex from the ISO: $($_.Exception.GetBaseException().Message)" }
+if ($GameFolder) {
+    try { Copy-Item (Join-Path $GameFolder 'default.xex') $xex -Force; $found = $true }
+    catch { Fail "Could not read default.xex from that folder: $($_.Exception.GetBaseException().Message)" 10 }
+} else {
+    try { $found = Export-XdvdfsFile $Iso 'default.xex' $xex }
+    catch { Fail "Could not read default.xex from the ISO: $($_.Exception.GetBaseException().Message)" 10 }
+}
 if (-not $found) {
-    Fail "Could not find default.xex in that file. Is it an Xbox 360 disc image?"
+    Fail "Could not find default.xex in that file. Is it an Xbox 360 disc image?" 11
 }
 if (-not (Test-Path $xex)) {
-    Fail "default.xex was extracted to $xex but is gone. An antivirus program may have removed it; allow that folder and try again."
+    Fail "default.xex was extracted to $xex but is gone. An antivirus program may have removed it; allow that folder and try again." 13
 }
 $hash = (Get-FileHash $xex -Algorithm SHA256).Hash
 if ($hash -ne $ExpectedXexSha256) {
     Remove-Item $xex
-    Fail ("This ISO is not the supported SSX release.`n" +
-          "Supported: SSX (USA) for Xbox 360, title 4541096D, media ID 55ABAB6C.`n" +
-          "default.xex SHA-256 was $hash")
+    Fail ("This copy is not the supported SSX release: it needs SSX for Xbox 360 (USA, Europe and Australia disc, " +
+          "title 4541096D, media ID 55ABAB6C).`ndefault.xex SHA-256 was $hash") 12
 }
 Write-Host "SSX (USA) default.xex verified." -ForegroundColor Green
 
@@ -198,33 +216,33 @@ if ($NoTitleUpdate) {
     Remove-Item $xexp, $updateDir -Recurse -Force -ErrorAction SilentlyContinue
 } elseif ($TitleUpdate) {
     Step "Check the title update"
-    if (-not (Test-Path $TitleUpdate)) { Fail "Title update not found: $TitleUpdate" }
+    if (-not (Test-Path $TitleUpdate)) { Fail "Your title update wasn't found: $TitleUpdate" 20 }
     Write-Host "Using $TitleUpdate"
     Remove-Item $updateDir -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force $updateDir | Out-Null
     try {
         $hasXexp = Export-StfsFile $TitleUpdate 'default.xexp' "$updateDir\default.xexp"
         $hasPatch0 = Export-StfsFile $TitleUpdate 'patch0.big' "$updateDir\patch0.big"
-    } catch { Fail "Could not read the title update: $($_.Exception.GetBaseException().Message)" }
-    if (-not $hasXexp) { Fail "That file isn't an SSX title update (it has no default.xexp)." }
+    } catch { Fail "Could not read the title update: $($_.Exception.GetBaseException().Message)" 20 }
+    if (-not $hasXexp) { Fail "That file isn't an SSX title update (it has no default.xexp)." 21 }
     $xexpHash = (Get-FileHash "$updateDir\default.xexp" -Algorithm SHA256).Hash
     if ($xexpHash -eq $OlderXexpSha256) {
         Remove-Item $updateDir -Recurse -Force
         Fail ("This is an older SSX title update (0.0.1.2, about 1 MB). Use the latest one (0.0.3.2, about 9 MB, " +
-              "in the same console folder); it already contains this one.")
+              "in the same console folder); it already contains this one.") 21
     }
     if ($xexpHash -ne $ExpectedXexpSha256 -or -not $hasPatch0 -or
         (Get-FileHash "$updateDir\patch0.big" -Algorithm SHA256).Hash -ne $ExpectedPatch0Sha256) {
         Remove-Item $updateDir -Recurse -Force
         Fail ("This title update isn't the supported one.`nSupported: SSX title update 0.0.3.2 " +
-              "(title 4541096D).`ndefault.xexp SHA-256 was $xexpHash")
+              "(title 4541096D).`ndefault.xexp SHA-256 was $xexpHash") 21
     }
     Copy-Item "$updateDir\default.xexp" $xexp -Force
     Write-Host "SSX title update 0.0.3.2 verified." -ForegroundColor Green
 }
 $gameVersion = if (Test-Path $xexp) { '0.0.3.2' } else { '0.0.0.2' }
 if ($gameVersion -eq '0.0.3.2' -and -not (Test-Path "$updateDir\patch0.big")) {
-    Fail "The title update's files are incomplete. Start ssx-recomp.exe, click Add DLC / rebuild and add the title update."
+    Fail "The title update's files are incomplete. Start ssx-recomp.exe, click Add DLC / rebuild and add the title update." 22
 }
 Write-Host ("Building the game version $gameVersion" + $(if ($gameVersion -eq '0.0.3.2') { ' (with the title update).' } else { ' (the disc release).' }))
 # Code generated for the other version is removed, so it is generated again from scratch.
@@ -271,7 +289,7 @@ function Install-Tool($cmd, $wingetId, [scriptblock]$fallback) {
         try { & $fallback } catch { Write-Host "  $_" }
         Refresh-Path
     }
-    if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) { Fail "Installing $cmd failed." }
+    if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) { Fail "Installing $cmd failed. Windows may have asked for administrator permission: allow it, or install $cmd yourself." 30 }
 }
 
 $installPortableCMake = {
@@ -287,7 +305,7 @@ if ((Get-CMakeVersion) -lt [version]'3.25') {
     Write-Host "  cmake $(Get-CMakeVersion) is too old (3.25 or newer is needed); downloading a portable copy..."
     try { & $installPortableCMake } catch { Write-Host "  $_" }
     Refresh-Path
-    if ((Get-CMakeVersion) -lt [version]'3.25') { Fail "CMake 3.25 or newer is needed (found $(Get-CMakeVersion))." }
+    if ((Get-CMakeVersion) -lt [version]'3.25') { Fail "CMake 3.25 or newer is needed (found $(Get-CMakeVersion))." 30 }
 }
 Install-Tool 'ninja' 'Ninja-build.Ninja' {
     Expand-Portable (Get-Download (Get-ReleaseAsset 'ninja-build/ninja' '^ninja-win\.zip$')) 'ninja'
@@ -319,7 +337,7 @@ if (-not $clang) {
     } catch { Write-Host "  $_" }
     $clang = Find-Clang
 }
-if (-not $clang) { Fail "No suitable clang found: LLVM 20 or newer for Windows (x86_64-pc-windows-msvc) is needed." }
+if (-not $clang) { Fail "No suitable clang found: LLVM 20 or newer for Windows (x86_64-pc-windows-msvc) is needed." 30 }
 Write-Host "  clang: $clang"
 
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -342,7 +360,7 @@ if (-not (Test-Msvc)) {
         try { Start-Process (Get-Download 'https://aka.ms/vs/17/release/vs_BuildTools.exe') -ArgumentList $vsArgs -Verb RunAs -Wait }
         catch { Write-Host "  $_" }
     }
-    if (-not (Test-Msvc)) { Fail "Installing the Visual Studio Build Tools failed." }
+    if (-not (Test-Msvc)) { Fail "Installing the Visual Studio Build Tools failed. Windows may have asked for administrator permission: allow it, or install them yourself." 30 }
 } else { Write-Host "  Visual Studio C++ build tools: found" }
 # Use the C++ headers and libraries of that installation. Left alone, clang picks a Visual
 # Studio installation by itself (the newest), which may lack them: "could not open
@@ -350,7 +368,7 @@ if (-not (Test-Msvc)) {
 $vsPath = & $vswhere -latest @vsFilter -property installationPath
 $vcvars = "$vsPath\VC\Auxiliary\Build\vcvars64.bat"
 if (-not (Test-Path $vcvars)) {
-    Fail "The Visual Studio C++ build tools in $vsPath are incomplete ($vcvars is missing). Open the Visual Studio Installer and choose Repair."
+    Fail "The Visual Studio C++ build tools in $vsPath are incomplete ($vcvars is missing). Open the Visual Studio Installer and choose Repair." 31
 }
 cmd /c "`"$vcvars`" >nul 2>&1 && set" | ForEach-Object {
     if ($_ -match '^(INCLUDE|LIB|LIBPATH|VCToolsInstallDir|VCToolsVersion|VCINSTALLDIR|VSINSTALLDIR|WindowsSdkDir|WindowsSDKVersion|UniversalCRTSdkDir|UCRTVersion)=(.*)$') {
@@ -358,7 +376,7 @@ cmd /c "`"$vcvars`" >nul 2>&1 && set" | ForEach-Object {
     }
 }
 if (-not ($env:LIB -split ';' | Where-Object { $_ -and (Test-Path "$_\msvcrt.lib") })) {
-    Fail "The C++ libraries (msvcrt.lib) were not found in $vsPath. Open the Visual Studio Installer, choose Modify and tick 'MSVC v143 - VS 2022 C++ x64/x86 build tools' and a Windows SDK."
+    Fail "The C++ libraries (msvcrt.lib) were not found in $vsPath. Open the Visual Studio Installer, choose Modify and tick 'MSVC v143 - VS 2022 C++ x64/x86 build tools' and a Windows SDK." 31
 }
 Write-Host "  Using the C++ tools in $vsPath (MSVC $env:VCToolsVersion, Windows SDK $($env:WindowsSDKVersion.TrimEnd('\')))"
 
@@ -369,7 +387,7 @@ $sdk = "$root\tools\rexglue-sdk-ssx"
 if (-not (Test-Path "$sdk\.version") -or (Get-Content "$sdk\.version") -ne $SdkPackage) {
     Step "Downloading the ReXGlue recompiler SDK"
     $zip = "$env:TEMP\$SdkPackage.zip"
-    try { Invoke-WebRequest $SdkPackageUrl -OutFile $zip -UseBasicParsing } catch { Fail "Downloading the SDK failed: $_" }
+    try { Invoke-WebRequest $SdkPackageUrl -OutFile $zip -UseBasicParsing } catch { Fail "Downloading the recompiler SDK failed (is this PC online?): $_" 40 }
     if (Test-Path $sdk) { Remove-Item $sdk -Recurse -Force }
     Expand-Archive $zip $sdk -Force
     Remove-Item $zip
@@ -387,7 +405,7 @@ if (Test-Path "$root\tools\rexglue-src\.ssx-ready") {
 # ---------------------------------------------------------------- 4. recompile + build
 Step "Recompiling SSX and building the PC version (this takes a while)"
 & "$root\scripts\package.ps1" -Preset ssx-player -Clang $clang
-if (-not (Test-Path "$root\dist\SSX\ssx.exe")) { Fail "The build failed." }
+if (-not (Test-Path "$root\dist\SSX\ssx.exe")) { Fail "The build failed. The details are in build-ssx.log." 50 }
 # The ReGPU renderer next to ssx.exe (the game's default). Without it the game uses the standard
 # renderer, so a failed download isn't fatal. Kept in tools\regpu like the SDK, so a rebuild
 # downloads it only when the package version changes.

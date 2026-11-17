@@ -6,6 +6,7 @@
 #include "ssx_game_path.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cwctype>
 #include <string>
 
@@ -19,10 +20,15 @@
 #endif
 
 #include <rex/cvar.h>
+#include <rex/logging.h>
 
 #include "ssx_settings.h"
 
 namespace fs = std::filesystem;
+
+// The standard option for launchers, scripts and shortcuts (the Recomp Standards' --game <path>).
+REXCVAR_DEFINE_STRING(game, "", "SSX",
+                      "Your copy of SSX for this start: the disc image (.iso) or the extracted disc's folder");
 
 #ifndef _WIN32
 namespace {
@@ -135,7 +141,17 @@ void ShowMessage(const char* text, bool error) { SsxMessage(text, error); }
 
 }  // namespace
 
+void SsxExit(int code, const char* why) {
+  REXLOG_ERROR("{} (exit code {})", why, code);
+  rex::FlushLogging();
+  std::_Exit(code);
+}
+
 std::optional<fs::path> SsxLocateGame(const fs::path& exe_dir, const fs::path& config_path) {
+  if (!REXCVAR_GET(game).empty()) {
+    if (fs::path given = Validate(REXCVAR_GET(game)); !given.empty()) return given;  // not saved
+    REXLOG_WARN("--game {}: not an SSX disc image or a folder with default.xex", REXCVAR_GET(game));
+  }
   fs::path found = Validate(rex::cvar::GetFlagByName("game_data_root"));
   if (!found.empty()) return found;  // from ssx.toml or --game_data_root; nothing to save
   found = Validate(exe_dir / "game");

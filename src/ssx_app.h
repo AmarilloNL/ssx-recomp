@@ -79,20 +79,14 @@ class SsxApp : public rex::ReXApp {
     config_path_ = defaults.config_path;
     SsxWaitForPreviousInstance();
     auto game = SsxLocateGame(rex::filesystem::GetExecutableFolder(), config_path_);
-    if (!game) {
-      app_context().QuitFromUIThread();
-      return std::nullopt;
-    }
+    if (!game) SsxExit(kSsxExitNoGame, "No copy of SSX to start: none found, and none picked");
     rex::PathConfig paths = defaults;
 #ifdef SSX_TITLE_UPDATE
     // Built for the title update: the runtime applies its default.xexp from update: to the
     // disc's default.xex as it loads (the data must match the recompiled code), and the game
     // reads patch0.big from update:.
     auto update = SsxLocateUpdate(rex::filesystem::GetExecutableFolder());
-    if (!update) {
-      app_context().QuitFromUIThread();
-      return std::nullopt;
-    }
+    if (!update) SsxExit(kSsxExitNoUpdate, "Built for the title update, but its files are missing");
     paths.update_data_root = *update;
 #endif
     if (std::filesystem::is_directory(*game)) {

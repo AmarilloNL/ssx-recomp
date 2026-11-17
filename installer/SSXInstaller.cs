@@ -70,7 +70,7 @@ static class Program {
   [STAThread]
   static int Main(string[] args) {
     Install.RemoveReplacedExe();
-    if (args.Length > 0 && Array.IndexOf(HeadlessOptions, args[0]) >= 0) return Headless(args);
+    if (args.Length > 0 && Array.IndexOf(HeadlessOptions, args[0].Split('=')[0]) >= 0) return Headless(args);
     string folder = Install.Folder;
     // --rebuild: started by the Update button after replacing this exe; rebuilds with the ISO the game uses.
     bool rebuild = args.Length > 0 && args[0] == "--rebuild";
@@ -91,39 +91,53 @@ static class Program {
   }
 
   static readonly string[] HeadlessOptions = {
-    "--iso", "--folder", "--title-update", "--dlc", "--portable", "--no-menu", "--prepare" };
+    "--game", "--iso", "--folder", "--title-update", "--dlc", "--portable", "--no-menu", "--prepare" };
 
-  const string Usage = "Usage: ssx-recomp.exe [--prepare] --iso <your SSX ISO> [--folder <folder>] " +
-                       "[--title-update <file>] [--dlc <file>]...";
+  const string Usage = "Usage: ssx-recomp.exe [--prepare] --game <your SSX .iso, or its extracted folder> " +
+                       "[--folder <folder>] [--title-update <file>] [--dlc <file>]...";
 
   // Without a window, for a launcher: builds as the window does (into <folder>, by default the one
   // ssx-recomp.exe is in; the game ends up in <folder>\source\dist\SSX\ssx.exe; no desktop shortcut),
-  // the build's output on stdout. Exit code 0 when the game is there, 1 when the build failed, 2 for
-  // wrong options.
+  // the build's output on stdout. Options take their value after a space or after = (--dlc=<file>).
+  // --game (or --iso): the disc image, or the extracted disc's folder or its default.xex.
+  // Exit codes: 0 the game is built, 2 wrong options, 1 something unexpected, else the builder's
+  // (scripts\build-ssx.ps1): 10-13 the copy of the game, 20-22 the title update, 30-31 the build
+  // tools, 40 a download, 50 the build.
   // --prepare (RecompLauncher's setup step, recomplauncher.json): prints only "progress <0-1> <step>"
-  // lines (the build's output still goes to build-ssx.log), and a --title-update file that isn't
-  // there is skipped: the player didn't pick one.
+  // lines (the build's output still goes to build-ssx.log) and, when it fails, the reason as its
+  // last line; a --title-update or --dlc file that isn't there is skipped: the player didn't pick it.
   static int Headless(string[] args) {
     string iso = null, titleUpdate = null;
     string folder = Install.Folder;
     var dlc = new List<string>();
     bool prepare = false;
     for (int i = 0; i < args.Length; i++) {
-      string value = i + 1 < args.Length ? args[i + 1] : null;
-      if (args[i] == "--iso" && value != null) iso = args[++i];
-      else if (args[i] == "--folder" && value != null) folder = args[++i];
-      else if (args[i] == "--title-update" && value != null) titleUpdate = args[++i];
-      else if (args[i] == "--dlc" && value != null) dlc.Add(args[++i]);
-      else if (args[i] == "--prepare") prepare = true;
-      else if (args[i] == "--portable") { }  // always portable now; kept so older command lines still work
-      else if (args[i] == "--no-menu") { }  // (the Linux installer's option: one launcher command line for both)
+      string name = args[i], value = null;
+      int eq = name.IndexOf('=');
+      if (name.StartsWith("--") && eq > 2) {
+        value = name.Substring(eq + 1);
+        name = name.Substring(0, eq);
+      } else if (Array.IndexOf(new[] { "--game", "--iso", "--folder", "--title-update", "--dlc" }, name) >= 0) {
+        if (i + 1 >= args.Length) { Console.Error.WriteLine(Usage); return 2; }
+        value = args[++i];
+      }
+      if (name == "--iso" || name == "--game") iso = value;
+      else if (name == "--folder") folder = value;
+      else if (name == "--title-update") titleUpdate = value;
+      else if (name == "--dlc") dlc.Add(value);
+      else if (name == "--prepare" && value == null) prepare = true;
+      else if (name == "--portable") { }  // always portable now; kept so older command lines still work
+      else if (name == "--no-menu") { }  // (the Linux installer's option: one launcher command line for both)
       else { Console.Error.WriteLine(Usage); return 2; }
     }
-    if (iso == null || !File.Exists(iso)) { Console.Error.WriteLine("ISO not found: " + iso + "\n" + Usage); return 2; }
+    if (iso == null) { Console.Error.WriteLine(Usage); return 2; }
+    if (!File.Exists(iso) && !Directory.Exists(iso)) { Console.WriteLine("Your copy of SSX wasn't found: " + iso); return 10; }
     if (prepare && titleUpdate != null && !File.Exists(titleUpdate)) titleUpdate = null;
-    if (titleUpdate != null && !File.Exists(titleUpdate)) { Console.Error.WriteLine("Title update not found: " + titleUpdate); return 2; }
+    if (prepare) dlc.RemoveAll(f => !File.Exists(f));
+    if (titleUpdate != null && !File.Exists(titleUpdate)) { Console.WriteLine("Your title update wasn't found: " + titleUpdate); return 20; }
     Action<string> line = delegate(string text) { if (text != null) Console.WriteLine(text); };
-    if (prepare) line = new PrepareProgress().OnLine;
+    PrepareProgress progress = prepare ? new PrepareProgress() : null;
+    if (prepare) line = progress.OnLine;
     try {
       folder = Path.GetFullPath(folder);
       InstallerForm.CopyDlc(dlc.ToArray(), Install.UserData(folder), line);
@@ -133,10 +147,14 @@ static class Program {
         Install.MarkBuilt(folder);
         return 0;
       }
-      Console.Error.WriteLine("The build failed. The full log is build-ssx.log in " + Path.Combine(folder, "source"));
-      return 1;
+      // The builder's reason (its ERROR line), last: RecompLauncher shows the last line with the code.
+      Console.WriteLine(progress != null && progress.Error != null
+                            ? progress.Error
+                            : "The build failed. The full log is build-ssx.log in " + Path.Combine(folder, "source"));
+      return code >= 10 ? code : 50;
     } catch (Exception ex) {
       Console.Error.WriteLine(ex.ToString());
+      Console.WriteLine("Setting up SSX failed: " + ex.Message);
       return 1;
     }
   }
@@ -147,9 +165,12 @@ static class Program {
 class PrepareProgress {
   int stage;
   float shown = -1;
+  // The builder's last "ERROR: ..." line, without the prefix: why it stopped.
+  public string Error;
 
   public void OnLine(string text) {
     if (text == null) return;
+    if (text.StartsWith("ERROR: ")) { Error = text.Substring(7).Trim(); return; }
     float frac = 0;
     if (text.StartsWith("==> ")) {
       int s = InstallerForm.StageOf(text.Substring(4));
@@ -366,7 +387,19 @@ static class Install {
     return s.Append('\\', slashes * 2).Append('"').ToString();
   }
 
-  // The game's settings point at the ISO it was built from: the setup suggests it again when
+  // A copy of the game the builder takes: a disc image (.iso), or an extracted disc (its folder
+  // with default.xex, or that default.xex).
+  public static bool IsGameCopy(string path) {
+    if (string.IsNullOrEmpty(path)) return false;
+    try {
+      if (File.Exists(path)) return true;
+      return Directory.Exists(path) && File.Exists(Path.Combine(path, "default.xex"));
+    } catch (Exception) {
+      return false;
+    }
+  }
+
+  // The game's settings point at the copy it was built from: the setup suggests it again when
   // updating. Null if there is none.
   public static string IsoOf(string folder) {
     try {
@@ -377,8 +410,11 @@ static class Install {
         if (!m.Success) continue;
         // A TOML string escapes \ and ", but take a path written without escapes as well.
         string raw = m.Groups[1].Value, path = Regex.Replace(raw, "\\\\([\\\\\"])", "$1");
-        if (!File.Exists(path)) path = raw;
-        return path.EndsWith(".iso", StringComparison.OrdinalIgnoreCase) && File.Exists(path) ? path : null;
+        if (!IsGameCopy(path)) path = raw;
+        if (Directory.Exists(path)) path = Path.Combine(path, "default.xex");
+        return (path.EndsWith(".iso", StringComparison.OrdinalIgnoreCase) ||
+                Path.GetFileName(path).Equals("default.xex", StringComparison.OrdinalIgnoreCase)) && File.Exists(path)
+                   ? path : null;
       }
     } catch (Exception) { }
     return null;
@@ -964,7 +1000,7 @@ class InstallerForm : Form {
     p.Controls.Add(Th.Label("Pick the ISO you made from your own SSX disc. SSX is built in the folder this program is in.",
                             Th.F(10.5f, FontStyle.Regular), Th.Dim, x, Th.D(70), w, Th.D(24)));
 
-    isoHint = AddPathRow(p, "SSX disc image (.iso)", isoField, Th.D(104), "Browse...", BrowseIso);
+    isoHint = AddPathRow(p, "Your SSX: disc image (.iso) or extracted default.xex", isoField, Th.D(104), "Browse...", BrowseIso);
     // The folder is where ssx-recomp.exe is: to use another, move ssx-recomp.exe there.
     folderHint = AddPathRow(p, "SSX folder", folderField, Th.D(198), "Open",
                             delegate { Process.Start(new ProcessStartInfo("explorer.exe", "\"" + folder + "\"")); });
@@ -1208,7 +1244,7 @@ class InstallerForm : Form {
   }
 
   bool Valid() {
-    return DlcOnly() || File.Exists(isoField.Box.Text.Trim());
+    return DlcOnly() || Install.IsGameCopy(isoField.Box.Text.Trim());
   }
 
   // Only DLC picked for a game that is built and up to date: the DLC is copied for the game to
@@ -1255,7 +1291,10 @@ class InstallerForm : Form {
   void UpdateHints() {
     string iso = isoField.Box.Text.Trim();
     if (iso.Length == 0) {
-      SetHint(isoHint, "SSX (USA), title ID 4541096D. Other versions aren't supported yet.", Th.Faint);
+      SetHint(isoHint, "SSX (USA), title ID 4541096D: the disc image, or default.xex in the extracted disc's folder.",
+              Th.Faint);
+    } else if (File.Exists(iso) && Path.GetFileName(iso).Equals("default.xex", StringComparison.OrdinalIgnoreCase)) {
+      SetHint(isoHint, "Extracted disc found. It is verified before the build starts; keep the folder where it is.", Th.Good);
     } else if (File.Exists(iso)) {
       SetHint(isoHint, string.Format("Disc image found ({0:0.0} GB). It is verified before the build starts.",
                                      new FileInfo(iso).Length / 1e9), Th.Good);
@@ -1283,8 +1322,9 @@ class InstallerForm : Form {
   static void SetHint(Label l, string text, Color c) { l.Text = text; l.ForeColor = c; }
 
   void BrowseIso(object sender, EventArgs e) {
-    using (var dialog = new OpenFileDialog { Title = "Select your own SSX (Xbox 360) ISO",
-                                             Filter = "Xbox 360 disc image (*.iso)|*.iso|All files (*.*)|*.*" }) {
+    using (var dialog = new OpenFileDialog { Title = "Select your own SSX (Xbox 360): the disc image, or default.xex in the extracted disc",
+                                             Filter = "SSX disc image or extracted default.xex (*.iso, default.xex)|*.iso;default.xex|" +
+                                                      "All files (*.*)|*.*" }) {
       if (dialog.ShowDialog(this) == DialogResult.OK) isoField.Box.Text = dialog.FileName;
     }
   }
