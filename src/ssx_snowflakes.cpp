@@ -15,12 +15,15 @@
 #include "ssx_snowflakes.h"
 
 #include <algorithm>
+#include <iterator>
+#include <cstdio>
 #include <cstring>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <mutex>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -41,12 +44,14 @@ struct Drop {
   uint32_t key;      // fnv1_32("<code>_track")
   uint64_t base;     // key * 10^10
   std::unordered_set<uint32_t> ids;
+  bool listed = true;  // in the game's lists (its 599); else only known from collected ones
   std::vector<std::string> name_keys;  // of the drops (events) on this track
   std::string peak, name;  // in the game's language, once found
 };
 
 std::mutex mutex;
 std::vector<Drop> drops;
+int name_attempts = 0;  // of the name lookup; back to 0 when a drop is added
 uint32_t owner = 0;
 uint8_t* guest = nullptr;
 
@@ -60,7 +65,7 @@ void AddDrop(std::string_view file, std::string_view csv) {
   size_t end = file.find("_track");
   if (end == std::string_view::npos) return;
   uint32_t key = Fnv1(file.substr(0, end + 6));
-  Drop drop{std::string(file.substr(0, end)), key, uint64_t(key) * 10000000000ull, {}, {}, {}, {}};
+  Drop drop{std::string(file.substr(0, end)), key, uint64_t(key) * 10000000000ull, {}, true, {}, {}, {}};
   bool header = true;
   while (!csv.empty()) {
     size_t eol = csv.find('\n');
@@ -85,6 +90,31 @@ const struct { std::string_view prefix, name; } kRanges[] = {
     {"siberia", "Siberia"},  {"alaska", "Alaska"},     {"himwest", "Himalayas"},
     {"rockies", "Rockies"},  {"antarc", "Antarctica"}, {"newzeal", "New Zealand"},
 };
+
+// The range's place in the game's order (a code's first two digits), kRanges' size if unknown.
+size_t RangeIndex(const std::string& code) {
+  for (size_t i = 0; i < std::size(kRanges); ++i) {
+    if (code.rfind(kRanges[i].prefix, 0) == 0) return i;
+  }
+  return std::size(kRanges);
+}
+
+// Every drop code there could be (<range prefix><range number><drop number>), by the low 32 bits of
+// its ids, for collected ones on drops without a list.
+const std::unordered_map<uint32_t, std::string>& CandidateCodes() {
+  static const std::unordered_map<uint32_t, std::string> codes = [] {
+    std::unordered_map<uint32_t, std::string> out;
+    for (size_t r = 0; r < std::size(kRanges); ++r) {
+      for (int n = 1; n <= 40; ++n) {
+        char code[32];
+        std::snprintf(code, sizeof(code), "%s%02d%02d", std::string(kRanges[r].prefix).c_str(), int(r + 1), n);
+        out[uint32_t(uint64_t(Fnv1(std::string(code) + "_track")) * 10000000000ull)] = code;
+      }
+    }
+    return out;
+  }();
+  return codes;
+}
 
 // The game's localize, into a string object made here. The game's copy of the text is never freed
 // (a few hundred bytes, once). Runs guest code: game thread only.
@@ -133,18 +163,18 @@ uint32_t Be32(const uint8_t* p) { return uint32_t(p[0]) << 24 | p[1] << 16 | p[2
 void SsxSnowflakesTick(PPCContext& ctx, uint8_t* base) {
   using clock = std::chrono::steady_clock;
   static clock::time_point next;
-  static int attempts = 0;
-  if (attempts >= 24 || clock::now() < next) return;  // every 5 s, for 2 minutes at most
+  if (name_attempts >= 24 || clock::now() < next) return;  // every 5 s, for 2 minutes at most
   next = clock::now() + std::chrono::seconds(5);
   std::lock_guard<std::mutex> lock(mutex);
   uint32_t loc = REX_LOAD_U32(SSX_LOC_MANAGER_PTR);
   if (drops.empty() || !loc) return;
-  ++attempts;
+  ++name_attempts;
 
   // The drop records of each track: the track's key, and 0x20 on a pointer to the name's key. A track
   // can have several (World Tour and Explore drops, unused ones).
   std::unordered_map<uint32_t, Drop*> by_key;
   for (Drop& d : drops) {
+    if (!d.name.empty()) continue;
     d.name_keys.clear();
     by_key[d.key] = &d;
   }
@@ -166,10 +196,11 @@ void SsxSnowflakesTick(PPCContext& ctx, uint8_t* base) {
     });
   }
   for (const Drop& d : drops) {
-    if (d.name_keys.empty() && attempts < 24) return;  // the database isn't (all) loaded yet
+    if (d.name.empty() && d.name_keys.empty() && name_attempts < 24) return;  // database not (all) loaded yet
   }
-  attempts = 24;
+  name_attempts = 24;
   for (Drop& d : drops) {
+    if (!d.name.empty()) continue;
     for (const std::string& key : d.name_keys) {
       std::string name = TitleCase(Localize(ctx, base, loc, key));
       if (name.empty() || name == "Not Used" || d.name.find(name) != std::string::npos) continue;
@@ -206,42 +237,51 @@ std::vector<SsxSnowflakeDrop> SsxSnowflakeCounts() {
 
   // The collected set. The game may change it meanwhile (a pickup); a bounded walk over guest
   // heap addresses at worst miscounts until the next look.
-  std::unordered_map<uint32_t, size_t> by_low;  // low 32 bits of a drop's base -> drop
-  for (size_t i = 0; i < drops.size(); ++i) by_low[uint32_t(drops[i].base)] = i;
-  std::vector<int> collected(drops.size());
-  int unmatched = 0;
+  std::vector<uint64_t> ids;
   const uint32_t set = owner + 24, anchor = set + 4;
   std::vector<uint32_t> stack{REX_LOAD_U32(set + 12)};
   for (int visited = 0; !stack.empty() && visited < 4096; ++visited) {
     uint32_t node = stack.back();
     stack.pop_back();
     if (node < 0x40000000u || node >= 0xE0000000u || node == anchor) continue;
-    uint64_t id = REX_LOAD_U64(node + 16);
-    auto it = by_low.find(uint32_t(id));
-    if (it != by_low.end() && drops[it->second].ids.count(uint32_t((id - drops[it->second].base) >> 32))) {
-      ++collected[it->second];
-    } else {
-      ++unmatched;
-    }
+    ids.push_back(REX_LOAD_U64(node + 16));
     stack.push_back(REX_LOAD_U32(node + 0));
     stack.push_back(REX_LOAD_U32(node + 4));
   }
 
-  for (size_t i = 0; i < drops.size(); ++i) {
-    const Drop& d = drops[i];
+  // Collected ones on drops without a list (a save can hold some on rockies0706, which the game's
+  // own 599 leaves out but its "N collected" counts) get a drop of their own, found by code.
+  for (uint64_t id : ids) {
+    bool known = std::any_of(drops.begin(), drops.end(), [&](const Drop& d) { return uint32_t(d.base) == uint32_t(id); });
+    auto code = CandidateCodes().find(uint32_t(id));
+    if (known || code == CandidateCodes().end()) continue;
+    uint32_t key = Fnv1(code->second + "_track");
+    drops.push_back({code->second, key, uint64_t(key) * 10000000000ull, {}, false, {}, {}, {}});
+    name_attempts = 0;
+  }
+
+  for (const Drop& d : drops) {
     SsxSnowflakeDrop row;
-    row.range = d.code;
-    for (const auto& r : kRanges) {
-      if (d.code.rfind(r.prefix, 0) == 0) row.range = r.name;
-    }
+    size_t range = RangeIndex(d.code);
+    row.range = range < std::size(kRanges) ? std::string(kRanges[range].name) : d.code;
     row.peak = d.peak;
-    row.drop = !d.name.empty() ? d.name : "Drop " + (d.code.size() >= 2 ? d.code.substr(d.code.size() - 2) : d.code);
-    row.collected = collected[i];
+    row.drop = !d.name.empty() ? d.name : "Drop " + d.code.substr(d.code.size() - std::min<size_t>(2, d.code.size()));
+    row.listed = d.listed;
     row.total = int(d.ids.size());
+    for (uint64_t id : ids) {
+      if (uint32_t(id) == uint32_t(d.base) && (!d.listed || d.ids.count(uint32_t((id - d.base) >> 32)))) ++row.collected;
+    }
     out.push_back(std::move(row));
   }
-  // Collected ones on drops without a list (the profile has some on rockies0706, which the game's
-  // own count of 599 leaves out but its "N collected" includes).
-  if (unmatched) out.push_back({"Other", "", "", unmatched, 0});
+  // Range in the game's order, then peak and drop by name.
+  auto range_order = [](const std::string& name) {
+    for (size_t i = 0; i < std::size(kRanges); ++i) {
+      if (kRanges[i].name == name) return i;
+    }
+    return std::size(kRanges);
+  };
+  std::stable_sort(out.begin(), out.end(), [&](const SsxSnowflakeDrop& a, const SsxSnowflakeDrop& b) {
+    return std::make_tuple(range_order(a.range), a.peak, a.drop) < std::make_tuple(range_order(b.range), b.peak, b.drop);
+  });
   return out;
 }

@@ -584,28 +584,51 @@ void SsxSettingsDialog::DrawSnowflakesTab() {
   ImGui::Text("%d of %d snowflakes collected", collected, total);
   ImGui::TextColored(kTextDim, "From the loaded profile (shown once you're past the title screen).");
   ImGui::Spacing();
-  if (!ImGui::BeginTable("##snowflakes", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) return;
-  ImGui::TableSetupColumn("Range", ImGuiTableColumnFlags_WidthStretch, 0.16f);
-  ImGui::TableSetupColumn("Peak", ImGuiTableColumnFlags_WidthStretch, 0.24f);
-  ImGui::TableSetupColumn("Drop", ImGuiTableColumnFlags_WidthStretch, 0.46f);
-  ImGui::TableSetupColumn("Collected", ImGuiTableColumnFlags_WidthStretch, 0.14f);
-  ImGui::TableHeadersRow();
-  const std::string* range = nullptr;
-  for (const auto& d : drops) {
+  if (!ImGui::BeginTable("##snowflakes", 2, ImGuiTableFlags_SizingStretchProp)) return;
+  ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthStretch, 0.8f);
+  ImGui::TableSetupColumn("count", ImGuiTableColumnFlags_WidthStretch, 0.2f);
+  auto count = [](int got, int of, bool listed) {
+    if (!listed) {
+      ImGui::TextColored(kTextDim, "%d", got);
+    } else {
+      ImGui::TextColored(got == of ? kAccent : kText, "%d / %d", got, of);
+    }
+  };
+  // Ranges, each with its peaks and their drops (already in that order).
+  for (size_t r = 0; r < drops.size();) {
+    size_t r_end = r;
+    int got = 0, of = 0;
+    while (r_end < drops.size() && drops[r_end].range == drops[r].range) {
+      got += drops[r_end].collected, of += drops[r_end].total;
+      ++r_end;
+    }
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
-    if (!range || *range != d.range) ImGui::TextUnformatted(d.range.c_str());
-    range = &d.range;
+    if (r) ImGui::Spacing();
+    ImGui::TextColored(kAccent, "%s", drops[r].range.c_str());
     ImGui::TableNextColumn();
-    ImGui::TextUnformatted(d.peak.c_str());
-    ImGui::TableNextColumn();
-    ImGui::TextWrapped("%s", d.drop.c_str());  // a track can hold several drops
-    ImGui::TableNextColumn();
-    if (d.total) {
-      ImGui::TextColored(d.collected == d.total ? kAccent : kText, "%d of %d", d.collected, d.total);
-    } else {
-      ImGui::Text("%d", d.collected);
+    if (r) ImGui::Spacing();
+    count(got, of, true);
+    for (size_t p = r; p < r_end;) {
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::Indent();
+      ImGui::TextColored(kTextDim, "%s", drops[p].peak.empty() ? "-" : drops[p].peak.c_str());
+      ImGui::Unindent();
+      size_t p_end = p;
+      while (p_end < r_end && drops[p_end].peak == drops[p].peak) ++p_end;
+      for (; p < p_end; ++p) {
+        const SsxSnowflakeDrop& d = drops[p];
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::Indent(ImGui::GetStyle().IndentSpacing * 2.0f);
+        ImGui::TextWrapped("%s%s", d.drop.c_str(), d.listed ? "" : "  (not in the game's count)");
+        ImGui::Unindent(ImGui::GetStyle().IndentSpacing * 2.0f);
+        ImGui::TableNextColumn();
+        count(d.collected, d.total, d.listed);
+      }
     }
+    r = r_end;
   }
   ImGui::EndTable();
 }
