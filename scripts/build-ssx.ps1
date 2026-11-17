@@ -17,9 +17,14 @@ $ErrorActionPreference = 'Continue'
 $root = (Resolve-Path "$PSScriptRoot\..").Path
 $log = "$root\build-ssx.log"
 Start-Transcript -Path $log -Force | Out-Null
-# On some PCs Windows' own folders are missing from PATH, so cmd, msiexec and the tools that
-# vcvars64.bat runs aren't found by name (issue #15). Put them back for this build.
-foreach ($dir in "$env:SystemRoot\System32\WindowsPowerShell\v1.0", "$env:SystemRoot\System32\Wbem", "$env:SystemRoot\System32") {
+# On some PCs Windows' own folders are missing from PATH, and even SystemRoot/ComSpec can be
+# unset, so cmd, msiexec and the tools that vcvars64.bat runs aren't found (issue #15). Ask
+# Windows itself where its system folder is (that doesn't depend on any variable) and put
+# them back for this build.
+$sys = [Environment]::SystemDirectory
+if (-not $env:SystemRoot) { $env:SystemRoot = Split-Path $sys }
+if (-not $env:ComSpec) { $env:ComSpec = "$sys\cmd.exe" }
+foreach ($dir in "$sys\WindowsPowerShell\v1.0", "$sys\Wbem", $sys) {
     if (($env:Path -split ';' | ForEach-Object { $_.TrimEnd('\') }) -notcontains $dir) { $env:Path = "$dir;$env:Path" }
 }
 
@@ -357,7 +362,10 @@ $vcvars = "$vsPath\VC\Auxiliary\Build\vcvars64.bat"
 if (-not (Test-Path $vcvars)) {
     Fail "The Visual Studio C++ build tools in $vsPath are incomplete ($vcvars is missing). Open the Visual Studio Installer and choose Repair."
 }
-cmd /c "`"$vcvars`" >nul 2>&1 && set" | ForEach-Object {
+if (-not (Test-Path "$sys\cmd.exe")) {
+    Fail "Windows' command prompt ($sys\cmd.exe) is missing or blocked on this PC. Run 'sfc /scannow' as administrator to restore it."
+}
+& "$sys\cmd.exe" /c "`"$vcvars`" >nul 2>&1 && set" | ForEach-Object {
     if ($_ -match '^(INCLUDE|LIB|LIBPATH|VCToolsInstallDir|VCToolsVersion|VCINSTALLDIR|VSINSTALLDIR|WindowsSdkDir|WindowsSDKVersion|UniversalCRTSdkDir|UCRTVersion)=(.*)$') {
         Set-Item "env:$($Matches[1])" $Matches[2]
     }
