@@ -5,28 +5,64 @@
   "repo": "AmarilloNL/ssx-recomp",
   "min": "0.90.0-beta.51",
   "game": {
-    "kind": "iso",
-    "label": "Your disc image (.iso) of SSX for Xbox 360, from your own disc (serial EA-2413, the USA, Europe and Australia release).",
-    "check": { "xdvdfs": "default.xex" },
+    "kind": "iso_or_folder",
+    "label": "Your copy of SSX for Xbox 360, from your own disc (serial EA-2413, the USA, Europe and Australia release): its disc image (.iso), or the extracted disc's folder with default.xex. Keep it where it is: the game reads it as it runs.",
+    "check": { "file": "default.xex", "xdvdfs": "default.xex" },
     "dumps": [
       { "name": "USA, Europe and Australia", "size": 7838695424, "crc32": "72791ccd" }
-    ],
-    "update": {
-      "into": "titleupdate",
-      "name": "ssx-title-update",
-      "label": "Your SSX title update 0.0.3.2 (about 9 MB, from Content\\0000000000000000\\4541096D\\000B0000 on your Xbox 360; if there are two files, the larger one). It adds the gear for levels 11 to 15.",
-      "accepts": "file",
-      "optional": true
-    }
+    ]
   },
+  "inputs": [
+    {
+      "id": "titleupdate", "role": "update", "optional": true,
+      "label": "Title update 0.0.3.2 (about 9 MB, in Content\\0000000000000000\\4541096D\\000B0000 on your Xbox 360; if there are two files, the larger one): the gear for levels 11 to 15",
+      "formats": [{ "type": "file", "extensions": [] }]
+    },
+    {
+      "id": "dlc-mounteddie", "role": "dlc", "optional": true,
+      "label": "SSX Mount Eddie (about 250 MB): the Mt. Eddie region and the classic riders",
+      "formats": [{ "type": "file", "extensions": [] }]
+    },
+    {
+      "id": "dlc-presell", "role": "dlc", "optional": true,
+      "label": "SSX Presell Pack (about 9 MB): Japan, Eddie and Mac's Ultimate Board",
+      "formats": [{ "type": "file", "extensions": [] }]
+    },
+    {
+      "id": "dlc-japan", "role": "dlc", "optional": true,
+      "label": "SSX Japan Range (about 9 MB, already in the Presell Pack)",
+      "formats": [{ "type": "file", "extensions": [] }]
+    },
+    {
+      "id": "dlc-eddie", "role": "dlc", "optional": true,
+      "label": "SSX Eddie Pack (under 1 MB, already in the Presell Pack)",
+      "formats": [{ "type": "file", "extensions": [] }]
+    },
+    {
+      "id": "dlc-macboard", "role": "dlc", "optional": true,
+      "label": "SSX Mac Board Pack (under 1 MB, already in the Presell Pack)",
+      "formats": [{ "type": "file", "extensions": [] }]
+    }
+  ],
   "prepare": {
     "program": ["ssx-recomp.exe"],
-    "args": ["--prepare", "--iso", "{game}", "--title-update", "{install}/titleupdate/ssx-title-update"],
+    "args": [
+      "--prepare", "--game", "{game}",
+      "--title-update={input:titleupdate}",
+      "--dlc={input:dlc-mounteddie}", "--dlc={input:dlc-presell}", "--dlc={input:dlc-japan}",
+      "--dlc={input:dlc-eddie}", "--dlc={input:dlc-macboard}"
+    ],
     "label": "Recompiling SSX for your PC from your disc (10 to 30 minutes the first time)",
     "timeout": 7200,
     "version": "1.6.0",
     "done": ["{install}/source/dist/SSX/ssx.exe"]
   },
+  "saves": [
+    "{install}/source/dist/SSX/userdata/B13EBABEBABEBABE/4541096D/00000001",
+    "{install}/source/dist/SSX/userdata/tuning",
+    "{install}/source/dist/SSX/userdata/achievements/4541096D.toml",
+    "{install}/source/dist/SSX/ssx.toml"
+  ],
   "start": {
     "program": ["source/dist/SSX/ssx.exe", "ssx-recomp.exe"]
   },
@@ -44,18 +80,21 @@
     "game": [{ "path": "{install}/source/dist/SSX" }]
   },
   "exit_codes": {
-    "1": "SSX stopped because it couldn't start or couldn't read your copy of the game. Check it's the complete disc image and pick it again on the game's page."
+    "1": "SSX couldn't start or couldn't read a file from your copy of the game. If it says nothing more, check your copy is complete (the setup checks it against the verified disc) and set it up again.",
+    "10": "SSX didn't find your copy of the game. Pick it again on the game's page; it has to stay where it was when you set SSX up.",
+    "11": "This build of SSX is made for the title update, but the update's files are missing. Set SSX up again with the title update."
   },
   "groups": [{ "id": "Advanced", "advanced": true }],
   "settings": [
     {
-      "id": "window", "label": "Fullscreen", "group": "Display",
-      "help": "Off plays in a window.",
+      "id": "window", "label": "Window", "group": "Display",
+      "help": "Automatic is fullscreen in Big Picture and a window on the desktop, unless you set Fullscreen in the game's own menu (F1).",
       "choices": [
-        { "label": "On", "set": { "fullscreen": "true" } },
-        { "label": "Off", "set": { "fullscreen": "false" } }
+        { "label": "Automatic", "set": { "ssx_window": "\"auto\"" } },
+        { "label": "Fullscreen", "set": { "ssx_window": "\"fullscreen\"" } },
+        { "label": "Windowed", "set": { "ssx_window": "\"windowed\"" } }
       ],
-      "defaults": { "fullscreen": "true" }
+      "defaults": { "ssx_window": "\"auto\"" }
     },
     {
       "id": "framerate", "label": "Frame rate", "group": "Display",

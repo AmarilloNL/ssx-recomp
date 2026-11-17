@@ -68,6 +68,12 @@ Your own music
   trick, survive or menu music. The game remixes it as you ride.
 
 Saves, settings, DLC, music and shader cache all live in this folder (the
-userdata folder and ssx.toml here): nothing is kept anywhere else.
+userdata folder and ssx.toml here): nothing is kept anywhere else. The saves
+themselves are in userdata\B13EBABEBABEBABE\4541096D\00000001 (back up that
+folder, userdata\tuning, userdata\achievements and ssx.toml).
+Window: fullscreen by default (F1 > Display). Started from RecompLauncher, SSX
+opens fullscreen in its Big Picture mode and in a window on the desktop,
+unless you set Fullscreen yourself (ssx_window in ssx.toml: auto, fullscreen
+or windowed).
 If a setting stops the game from starting, delete ssx.toml next to ssx.exe
 to go back to the defaults (you will be asked for the game once more).

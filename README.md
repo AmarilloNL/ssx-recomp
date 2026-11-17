@@ -68,13 +68,15 @@ code runs natively, and its Xbox 360 graphics are drawn with Direct3D 12 (on Lin
 
 ### 🪟 Windows
 
-1. 💿 Make an ISO of **your own** SSX (USA) Xbox 360 disc.
+1. 💿 Make an ISO of **your own** SSX (USA) Xbox 360 disc (an extracted copy of the disc, the folder
+   with `default.xex`, works too).
 2. ⬇️ Download **`ssx-recomp.exe`** from the [latest release](../../releases/latest) and put it in
    an empty folder of its own, for example `C:\Games\SSX`. That folder is your SSX folder:
    the game is built there and everything it keeps stays there.
 3. ▶️ Run it. SmartScreen may warn because it isn't code-signed: click
    **More info → Run anyway**. Its source is [`installer/SSXInstaller.cs`](installer/SSXInstaller.cs).
-4. ✅ The first time it opens the setup: click **Next**, select your ISO, optionally click
+4. ✅ The first time it opens the setup: click **Next**, select your ISO (or the extracted disc's
+   `default.xex`), optionally click
    **Add files...** for DLC and the title update from your own console ([which files](#adding-dlc)),
    and click **Install**.
 5. 🏂 When it says **DONE**, click **Play SSX** or use the desktop shortcut.
@@ -472,12 +474,31 @@ in `tools/rexglue-src`.
 Both installers also run without a window, for a launcher that installs the game for the player:
 
 ```
-ssx-recomp.exe          --iso <ISO> --folder <folder> [--title-update <file>] [--no-menu]
+ssx-recomp.exe          --game <ISO or extracted folder> [--folder <folder>] [--title-update <file>] [--dlc <file>]...
 ssx-linux-installer.sh  --iso <ISO> --folder <folder> [--title-update <file>] [--no-menu]
 ```
 
-The build output goes to stdout; the exit code is 0 when the game was built (1: the build failed,
-2 on Windows: wrong options). On Windows `--folder` defaults to the folder `ssx-recomp.exe` is in.
+On Windows `--game` (or `--iso`) takes the disc image or the extracted disc's folder, every option
+also takes its value after `=` (`--dlc=<file>`), and `--folder` defaults to the folder
+`ssx-recomp.exe` is in. `--prepare` prints only `progress <0-1> <step>` lines and, when it fails,
+the reason as its last line (it's [RecompLauncher's](recomplauncher.json) setup step). The exit code
+says what happened:
+
+| Code | |
+|---|---|
+| 0 | the game is built |
+| 2 | wrong options |
+| 10 to 13 | your copy of the game: not found or not readable (10), not an Xbox 360 game (11), not the supported release (12), removed by an antivirus program (13) |
+| 20 to 22 | the title update: not found or not readable (20), not the supported one (21), incomplete (22) |
+| 30, 31 | the build tools couldn't be installed (30), or Visual Studio's are incomplete (31) |
+| 40 | a download failed |
+| 50 | the build failed (the details are in `source\build-ssx.log`) |
+| 1 | something unexpected |
+
+The game itself (`ssx.exe`) takes `--game <ISO or folder>` too, for that start only. It exits with
+10 when it has no copy of the game to start, 11 when it's built for the title update but the
+update's files are missing, and ReXGlue's 1 when it couldn't start or read the disc.
+
 The game ends up in `<folder>/source/dist/SSX/ssx.exe` (Windows) or
 `<folder>/source/dist/SSX/ssx` (Linux), set up to read the ISO it was built from; a first build takes
 10–30 minutes, longer when build tools have to be installed. `--no-menu` leaves the player's own SSX
