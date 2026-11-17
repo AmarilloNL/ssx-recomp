@@ -496,5 +496,7 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   sub_824D06E0 (key from its r4). Disc: the per-list count is sub_825057F8 (same layout; no 1000 cap).
   F1 > Snowflakes (src/ssx_snowflakes.cpp) shows collected / total per drop; a save can hold ids of
   rockies0706, which has no list (the game's "N of 599" counts them), shown as Other. Drop names:
-  localization keys are TXT_NM_DRP_<RANGE>_<peak>_<n> (sub_82535200 = localize(mgr, out, key, 1));
-  their link to the drop codes wasn't found yet, so the tab says "Rockies, Drop 05".
+  each drop's database record (sub_82375690 looks one up by its key) has fnv1_32("<code>_track") at +4
+  and a pointer to TXT_NM_DRP_<RANGE>_<peak>_<n> at +0x24 (peak: TXT_NM_PEA_<RANGE>_<peak>); a track
+  has several (World Tour, Explore, "NOT USED"). Found by a heap scan, named by the game's localize
+  (sub_82535200 / disc sub_8256A878, manager at 0x838AFFFC / 0x838CCB4C) on the main loop's tick.

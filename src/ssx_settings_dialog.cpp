@@ -584,10 +584,11 @@ void SsxSettingsDialog::DrawSnowflakesTab() {
   ImGui::Text("%d of %d snowflakes collected", collected, total);
   ImGui::TextColored(kTextDim, "From the loaded profile (shown once you're past the title screen).");
   ImGui::Spacing();
-  if (!ImGui::BeginTable("##snowflakes", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) return;
-  ImGui::TableSetupColumn("Range", ImGuiTableColumnFlags_WidthStretch, 0.35f);
-  ImGui::TableSetupColumn("Drop", ImGuiTableColumnFlags_WidthStretch, 0.25f);
-  ImGui::TableSetupColumn("Collected", ImGuiTableColumnFlags_WidthStretch, 0.40f);
+  if (!ImGui::BeginTable("##snowflakes", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) return;
+  ImGui::TableSetupColumn("Range", ImGuiTableColumnFlags_WidthStretch, 0.16f);
+  ImGui::TableSetupColumn("Peak", ImGuiTableColumnFlags_WidthStretch, 0.24f);
+  ImGui::TableSetupColumn("Drop", ImGuiTableColumnFlags_WidthStretch, 0.46f);
+  ImGui::TableSetupColumn("Collected", ImGuiTableColumnFlags_WidthStretch, 0.14f);
   ImGui::TableHeadersRow();
   const std::string* range = nullptr;
   for (const auto& d : drops) {
@@ -596,7 +597,9 @@ void SsxSettingsDialog::DrawSnowflakesTab() {
     if (!range || *range != d.range) ImGui::TextUnformatted(d.range.c_str());
     range = &d.range;
     ImGui::TableNextColumn();
-    ImGui::TextUnformatted(d.drop.c_str());
+    ImGui::TextUnformatted(d.peak.c_str());
+    ImGui::TableNextColumn();
+    ImGui::TextWrapped("%s", d.drop.c_str());  // a track can hold several drops
     ImGui::TableNextColumn();
     if (d.total) {
       ImGui::TextColored(d.collected == d.total ? kAccent : kText, "%d of %d", d.collected, d.total);

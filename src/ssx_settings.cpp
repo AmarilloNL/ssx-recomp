@@ -6,6 +6,7 @@
 
 #include "ssx_settings.h"
 #include "ssx_guest.h"
+#include "ssx_snowflakes.h"
 
 #include <algorithm>
 #include <atomic>
@@ -287,6 +288,8 @@ REX_HOOK_RAW(SSX_FN_TASK_TICK) {
     REX_STORE_U64(task + 72, uint64_t(std::max<int64_t>(period, 1000000000 / fps)));
 
   }
+  // F1 menu work that runs game code, on the main loop's thread (other tasks tick on other threads).
+  if (REX_LOAD_U32(task) == SSX_VTABLE_MAIN_LOOP_TASK) SsxSnowflakesTick(ctx, base);
   SSX_FN_TASK_TICK_IMP(ctx, base);
 }
 

@@ -7,10 +7,15 @@
 //   id = (Id << 32) + fnv1_32("<drop>_track") * 10^10   (mod 2^64),
 // an rb-tree (root at +12, node: right +0, left +4, key +16) at +24 of the object the counting function
 // gets in r3, its size at +44. Nothing here writes to the game.
+//
+// Names: each drop's database record holds fnv1_32("<drop>_track") at +4 and, at +0x24, a pointer to the
+// key of its name (TXT_NM_DRP_<RANGE>_<peak>_<drop>; the peak's is TXT_NM_PEA_<RANGE>_<peak>). The
+// records are found by a scan of the game's heap, the names by the game's own localize.
 
 #include "ssx_snowflakes.h"
 
 #include <algorithm>
+#include <cstring>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -20,16 +25,24 @@
 #include <unordered_set>
 
 #include <rex/hook.h>
+#include <rex/logging.h>
+#include <rex/system/kernel_state.h>
 
 #include "generated/default/ssx_pch.h"
 #include "ssx_guest.h"
+#include "ssx_guest_memory.h"
+
+REX_EXTERN(SSX_FN_LOCALIZE);
 
 namespace {
 
 struct Drop {
   std::string code;  // e.g. rockies0705
-  uint64_t base;     // fnv1_32("<code>_track") * 10^10
+  uint32_t key;      // fnv1_32("<code>_track")
+  uint64_t base;     // key * 10^10
   std::unordered_set<uint32_t> ids;
+  std::vector<std::string> name_keys;  // of the drops (events) on this track
+  std::string peak, name;  // in the game's language, once found
 };
 
 std::mutex mutex;
@@ -46,7 +59,8 @@ uint32_t Fnv1(std::string_view s) {
 void AddDrop(std::string_view file, std::string_view csv) {
   size_t end = file.find("_track");
   if (end == std::string_view::npos) return;
-  Drop drop{std::string(file.substr(0, end)), uint64_t(Fnv1(file.substr(0, end + 6))) * 10000000000ull, {}};
+  uint32_t key = Fnv1(file.substr(0, end + 6));
+  Drop drop{std::string(file.substr(0, end)), key, uint64_t(key) * 10000000000ull, {}, {}, {}, {}};
   bool header = true;
   while (!csv.empty()) {
     size_t eol = csv.find('\n');
@@ -72,7 +86,103 @@ const struct { std::string_view prefix, name; } kRanges[] = {
     {"rockies", "Rockies"},  {"antarc", "Antarctica"}, {"newzeal", "New Zealand"},
 };
 
+// The game's localize, into a string object made here. The game's copy of the text is never freed
+// (a few hundred bytes, once). Runs guest code: game thread only.
+std::string Localize(PPCContext& ctx, uint8_t* base, uint32_t loc, const std::string& key) {
+  if (key.empty() || key.size() > 60) return {};
+  const PPCContext saved = ctx;
+  ctx.r1.u32 = saved.r1.u32 - 512;  // a frame of our own below the caller's
+  const uint32_t s = ctx.r1.u32 + 128, empty = s + 16, k = s + 32;
+  REX_STORE_U8(empty, 0);
+  for (size_t i = 0; i <= key.size(); ++i) REX_STORE_U8(k + i, i < key.size() ? uint8_t(key[i]) : 0);
+  REX_STORE_U32(s, empty);  // eastl string: begin, end, capacity end, allocator
+  REX_STORE_U32(s + 4, empty);
+  REX_STORE_U32(s + 8, empty + 1);
+  REX_STORE_U32(s + 12, 0);
+  ctx.r3.u64 = loc;
+  ctx.r4.u64 = s;
+  ctx.r5.u64 = k;
+  ctx.r6.u64 = 1;
+  SSX_FN_LOCALIZE(ctx, base);
+  uint32_t b = REX_LOAD_U32(s), e = REX_LOAD_U32(s + 4);
+  std::string text = e > b && e - b < 256 ? std::string(reinterpret_cast<const char*>(base + b), e - b) : "";
+  ctx = saved;
+  return text == key ? "" : text;  // (a key without text comes back as itself)
+}
+
+// "BROKEN PASS" -> "Broken Pass" (the game's text is in capitals; its menus show it in another font).
+// Words with a digit stay as they are ("JT2").
+std::string TitleCase(std::string s) {
+  size_t word = 0;
+  for (size_t i = 0; i <= s.size(); ++i) {
+    if (i < s.size() && s[i] != ' ' && s[i] != '-' && s[i] != '/') continue;
+    if (std::none_of(s.begin() + word, s.begin() + i, [](char c) { return c >= '0' && c <= '9'; })) {
+      for (size_t k = word + 1; k < i; ++k) {
+        if (s[k] >= 'A' && s[k] <= 'Z') s[k] = char(s[k] - 'A' + 'a');
+      }
+    }
+    word = i + 1;
+  }
+  return s;
+}
+
+uint32_t Be32(const uint8_t* p) { return uint32_t(p[0]) << 24 | p[1] << 16 | p[2] << 8 | p[3]; }
+
 }  // namespace
+
+void SsxSnowflakesTick(PPCContext& ctx, uint8_t* base) {
+  using clock = std::chrono::steady_clock;
+  static clock::time_point next;
+  static int attempts = 0;
+  if (attempts >= 24 || clock::now() < next) return;  // every 5 s, for 2 minutes at most
+  next = clock::now() + std::chrono::seconds(5);
+  std::lock_guard<std::mutex> lock(mutex);
+  uint32_t loc = REX_LOAD_U32(SSX_LOC_MANAGER_PTR);
+  if (drops.empty() || !loc) return;
+  ++attempts;
+
+  // The drop records of each track: the track's key, and 0x20 on a pointer to the name's key. A track
+  // can have several (World Tour and Explore drops, unused ones).
+  std::unordered_map<uint32_t, Drop*> by_key;
+  for (Drop& d : drops) {
+    d.name_keys.clear();
+    by_key[d.key] = &d;
+  }
+  rex::memory::Memory* memory = rex::system::kernel_memory();
+  for (uint32_t heap : {0xA0000000u, 0x40000000u}) {
+    SsxScanGuestHeap(memory, heap, 0x24, [&](uint32_t, const uint8_t* chunk, uint32_t n) {
+      for (uint32_t at = 0; at + 0x24 <= n && at < (1u << 20); at += 4) {
+        auto it = by_key.find(Be32(chunk + at));
+        if (it == by_key.end()) continue;
+        char text[64] = {};
+        uint32_t address = Be32(chunk + at + 0x20);
+        std::vector<std::string>& keys = it->second->name_keys;
+        if (SsxGuestReadable(memory, address, sizeof(text) - 1) &&
+            SsxCopyHost(text, memory->TranslateVirtual<const char*>(address), sizeof(text) - 1) &&
+            std::strncmp(text, "TXT_NM_DRP_", 11) == 0 && std::find(keys.begin(), keys.end(), text) == keys.end()) {
+          keys.push_back(text);
+        }
+      }
+    });
+  }
+  for (const Drop& d : drops) {
+    if (d.name_keys.empty() && attempts < 24) return;  // the database isn't (all) loaded yet
+  }
+  attempts = 24;
+  for (Drop& d : drops) {
+    for (const std::string& key : d.name_keys) {
+      std::string name = TitleCase(Localize(ctx, base, loc, key));
+      if (name.empty() || name == "Not Used" || d.name.find(name) != std::string::npos) continue;
+      d.name += (d.name.empty() ? "" : " / ") + name;
+      // The peak: TXT_NM_PEA_<RANGE>_<peak>, from TXT_NM_DRP_<RANGE>_<peak>_<drop>.
+      if (d.peak.empty()) {
+        std::string peak = key.substr(0, key.rfind('_'));
+        d.peak = TitleCase(Localize(ctx, base, loc, peak.replace(0, 11, "TXT_NM_PEA_")));
+      }
+    }
+    REXLOG_DEBUG("Snowflakes: {} = {} / {}", d.code, d.peak, d.name);
+  }
+}
 
 // The game's count of one snowflake list: r3 the geotag lists (owner of the collected set), r4/r5
 // the list's text; the caller's frame holds the file name at +352 (both game versions).
@@ -124,13 +234,14 @@ std::vector<SsxSnowflakeDrop> SsxSnowflakeCounts() {
     for (const auto& r : kRanges) {
       if (d.code.rfind(r.prefix, 0) == 0) row.range = r.name;
     }
-    row.drop = "Drop " + (d.code.size() >= 2 ? d.code.substr(d.code.size() - 2) : d.code);
+    row.peak = d.peak;
+    row.drop = !d.name.empty() ? d.name : "Drop " + (d.code.size() >= 2 ? d.code.substr(d.code.size() - 2) : d.code);
     row.collected = collected[i];
     row.total = int(d.ids.size());
     out.push_back(std::move(row));
   }
   // Collected ones on drops without a list (the profile has some on rockies0706, which the game's
   // own count of 599 leaves out but its "N collected" includes).
-  if (unmatched) out.push_back({"Other", "", unmatched, 0});
+  if (unmatched) out.push_back({"Other", "", "", unmatched, 0});
   return out;
 }

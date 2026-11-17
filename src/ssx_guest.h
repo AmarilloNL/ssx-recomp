@@ -38,5 +38,9 @@
 #define SSX_FN_GEOTAG_COUNT SSX_GUEST(sub_825057F8, sub_824CFF78)
 #define SSX_FN_GEOTAG_COUNT_IMP SSX_GUEST(__imp__sub_825057F8, __imp__sub_824CFF78)
 
+// The game's localize(manager, eastl string* out, const char* key, 1), and its manager (issue #9).
+#define SSX_FN_LOCALIZE SSX_GUEST(sub_8256A878, sub_82535200)
+#define SSX_LOC_MANAGER_PTR SSX_GUEST(0x838CCB4Cu, 0x838AFFFCu)
+
 // Vtable of the main loop's periodic task.
 #define SSX_VTABLE_MAIN_LOOP_TASK SSX_GUEST(0x82007738u, 0x82007840u)
