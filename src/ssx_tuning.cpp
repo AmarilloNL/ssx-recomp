@@ -39,6 +39,7 @@
 
 #include "generated/default/ssx_pch.h"
 #include "ssx_guest.h"
+#include "ssx_guest_memory.h"
 
 namespace {
 std::filesystem::path tuning_dir;
@@ -154,41 +155,11 @@ const std::vector<LevelTable>& LevelTables() {
 
 constexpr uint32_t kDiscLevels = 10;
 
-// Copies `size` bytes of this process's memory; false if any of it can't be read. On Linux the runtime
-// can report guest memory as committed and readable while the host page behind it isn't (reading it
-// raised SIGBUS in the heap scan, now and then), so the hook's reads of the game's heap go through here.
-bool CopyHost(void* dst, const void* src, size_t size) {
-#ifdef _WIN32
-  std::memcpy(dst, src, size);
-  return true;
-#else
-  iovec local{dst, size}, remote{const_cast<void*>(src), size};
-  return process_vm_readv(getpid(), &local, 1, &remote, 1, 0) == ssize_t(size);
-#endif
-}
-
-// Whether `size` bytes at a guest address can be read.
-bool Readable(rex::memory::Memory* memory, uint32_t address, uint32_t size) {
-  rex::memory::BaseHeap* heap = address ? memory->LookupHeap(address) : nullptr;
-  rex::memory::HeapAllocationInfo info{};
-  if (!heap || !heap->QueryRegionInfo(address, &info) || !(info.state & rex::memory::kMemoryAllocationCommit) ||
-      !(info.protect & rex::memory::kMemoryProtectRead) ||
-      uint64_t(address) + size > uint64_t(info.base_address) + info.region_size) {
-    return false;
-  }
-#ifdef _WIN32
-  return true;
-#else
-  std::vector<uint8_t> probe(size);
-  return CopyHost(probe.data(), memory->TranslateVirtual<const uint8_t*>(address), size);
-#endif
-}
-
 // The array a table's node points at, if it is the disc's: ten entries of the table's size.
 const uint8_t* DiscArray(rex::memory::Memory* memory, const uint8_t* node, const LevelTable& table) {
   uint32_t address = Be32(node + 4);
   uint32_t bytes = 8 + kDiscLevels * table.entry_bytes;
-  if ((address & 1) || !Readable(memory, address, bytes)) return nullptr;
+  if ((address & 1) || !SsxGuestReadable(memory, address, bytes)) return nullptr;
   const uint8_t* array = memory->TranslateVirtual<const uint8_t*>(address);
   return Be16(array) == kDiscLevels && Be16(array + 2) == kDiscLevels && Be16(array + 4) == table.entry_bytes
              ? array
@@ -205,44 +176,23 @@ std::vector<uint8_t*> FindXpNodes(rex::memory::Memory* memory, bool* longer_seen
   const LevelTable& xp = LevelTables()[0];
   uint8_t key[4] = {uint8_t(xp.key >> 24), uint8_t(xp.key >> 16), uint8_t(xp.key >> 8), uint8_t(xp.key)};
   for (uint32_t start : {0xA0000000u, 0x40000000u}) {
-    rex::memory::BaseHeap* heap = memory->LookupHeap(start);
-    if (!heap) continue;
-    uint64_t end = uint64_t(heap->heap_base()) + heap->heap_size();
-    for (uint64_t address = heap->heap_base(); address < end;) {
-      rex::memory::HeapAllocationInfo info{};
-      if (!heap->QueryRegionInfo(uint32_t(address), &info) || !info.region_size) {
-        address += heap->page_size();
-        continue;
-      }
-      if ((info.state & rex::memory::kMemoryAllocationCommit) && (info.protect & rex::memory::kMemoryProtectRead)) {
-        uint8_t* region = memory->TranslateVirtual<uint8_t*>(info.base_address);
-        // A megabyte at a time, from a copy (CopyHost), plus the 12 bytes a node at its end needs.
-        // Note: a megabyte with one unreadable page is skipped whole; per page if a table is ever
-        // missed because of that.
-        constexpr uint32_t kChunk = 1u << 20;
-        std::vector<uint8_t> chunk(kChunk + 12);
-        for (uint32_t offset = 0; offset + 12 <= info.region_size; offset += kChunk) {
-          uint32_t n = std::min<uint32_t>(kChunk + 12, info.region_size - offset);
-          if (!CopyHost(chunk.data(), region + offset, n)) continue;
-          for (uint32_t at = 0; at < kChunk && at + 12 <= n; at += 4) {
-            const uint8_t* copy = chunk.data() + at;
-            if (std::memcmp(copy, key, 4) != 0) continue;
-            uint8_t* node = region + offset + at;
-            const uint8_t* array = DiscArray(memory, copy, xp);
-            if (array && Be32(array + 8) == 6000) {
-              found.push_back(node);
-            } else if (uint32_t longer = Be32(copy + 4); !(longer & 1) && Readable(memory, longer, 16)) {
-              // A table that is long already: a tuning update's, or one we made longer before.
-              const uint8_t* other = memory->TranslateVirtual<const uint8_t*>(longer);
-              if (Be16(other + 2) > kDiscLevels && Be16(other + 4) == xp.entry_bytes && Be32(other + 8) == 6000) {
-                *longer_seen = true;
-              }
-            }
+    SsxScanGuestHeap(memory, start, 12, [&](uint32_t address, const uint8_t* chunk, uint32_t n) {
+      for (uint32_t at = 0; at + 12 <= n && at < (1u << 20); at += 4) {
+        const uint8_t* copy = chunk + at;
+        if (std::memcmp(copy, key, 4) != 0) continue;
+        uint8_t* node = memory->TranslateVirtual<uint8_t*>(address + at);
+        const uint8_t* array = DiscArray(memory, copy, xp);
+        if (array && Be32(array + 8) == 6000) {
+          found.push_back(node);
+        } else if (uint32_t longer = Be32(copy + 4); !(longer & 1) && SsxGuestReadable(memory, longer, 16)) {
+          // A table that is long already: a tuning update's, or one we made longer before.
+          const uint8_t* other = memory->TranslateVirtual<const uint8_t*>(longer);
+          if (Be16(other + 2) > kDiscLevels && Be16(other + 4) == xp.entry_bytes && Be32(other + 8) == 6000) {
+            *longer_seen = true;
           }
         }
       }
-      address = uint64_t(info.base_address) + info.region_size;
-    }
+    });
     if (!found.empty()) break;
   }
   return found;
@@ -286,7 +236,7 @@ void ExtendLevelTables() {
       for (int step = -256; step <= 256 && !found; ++step) {
         uint8_t* node = xp_node + step * 12;
         uint32_t address = memory->HostToGuestVirtual(node);
-        if (Readable(memory, address, 12) && Be32(node) == table.key && DiscArray(memory, node, table)) found = node;
+        if (SsxGuestReadable(memory, address, 12) && Be32(node) == table.key && DiscArray(memory, node, table)) found = node;
       }
       if (!found) break;
       nodes.push_back(found);
@@ -318,7 +268,7 @@ void ExtendLevelTables() {
 // Whether a database file (.vlt) being loaded is the one with the level tables.
 bool HoldsLevelTables(uint32_t data, uint32_t size) {
   rex::memory::Memory* memory = rex::system::kernel_memory();
-  if (size < 16 || size > (16u << 20) || !Readable(memory, data, size)) return false;
+  if (size < 16 || size > (16u << 20) || !SsxGuestReadable(memory, data, size)) return false;
   const uint8_t* file = memory->TranslateVirtual<const uint8_t*>(data);
   uint32_t key = LevelTables()[0].key;
   const uint8_t bytes[4] = {uint8_t(key >> 24), uint8_t(key >> 16), uint8_t(key >> 8), uint8_t(key)};

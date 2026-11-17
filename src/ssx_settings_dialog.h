@@ -50,6 +50,7 @@ class SsxSettingsDialog : public rex::ui::ImGuiDialog {
   void DrawAudioTab();
   void DrawControlsTab();
   void DrawProfileTab();
+  void DrawSnowflakesTab();
   void DrawScaleWarning();
 
   rex::input::InputSystem* input_;

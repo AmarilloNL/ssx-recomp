@@ -492,3 +492,24 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   average against 6.5 ms frames at the end of the warm-up paced the intro at ~73 of 144 fps
   for ~20 s), and the ease-back rates apply per 1/60 s of frame time. Verified: two starts at
   a 144 fps cap, 102-110 fps over the first 5 s (warm-up included), 144 from 10 s on.
+- 2026-11-17: Snowflakes (issue #9) are EA's offline geotags ("Geotag Collected! You just collected a
+  Snowflake ... 44 of 599 collected"). Title update addresses: the geotag manager is built by
+  sub_8240A040 (this); its total (599) is at this+48184, counted by sub_824D03E0 from
+  data\common\geocaches\manifest.txt, one CSV per drop (`<drop>_track_geotagdb.csv`, 36 drops, columns
+  Id,Quality,Level,XPos,YPos,ZPos, one header line; sub_824CFF78 counts the lines). The collected
+  offline ones are an rb-tree set of u64 at this+56 (root at +12, node: right +0, left +4, key +16;
+  size at +20 = this+76), filled from the save once the profile loads (after Start on the title).
+  sub_824D0330(set owner this+32, type 3, id) adds one; sub_8240F030 handles a pickup.
+  Id of a snowflake = (Id << 32) + fnv1_32("<drop>_track") * 10^10 (mod 2^64), built in
+  sub_824D06E0 (key from its r4). Disc: the per-list count is sub_825057F8 (same layout; no 1000 cap).
+  F1 > Snowflakes (src/ssx_snowflakes.cpp) shows collected / total per drop; a save can hold ids of
+  rockies0706, which has no list (the game's "N of 599" counts them), shown as Other. Drop names:
+  each drop's database record (sub_82375690 looks one up by its key) has fnv1_32("<code>_track") at +4
+  and a pointer to TXT_NM_DRP_<RANGE>_<peak>_<n> at +0x24 (peak: TXT_NM_PEA_<RANGE>_<peak>); a track
+  has several (World Tour, Explore, "NOT USED"). Found by a heap scan, named by the game's localize
+  (sub_82535200 / disc sub_8256A878, manager at 0x838AFFFC / 0x838CCB4C) on the main loop's tick.
+  localize's last argument 1 gives the text in capitals (as the HUD shows it); the menus pass 0. Mount
+  Eddie (DLC, track rockies0706, peak asset mnt_eddie_peak) has 31 snowflakes in a list inside its
+  archive that the game only loads on its drops; its drops' keys say ROCKIES_4 (The Helmet), its peak
+  is TXT_NM_PEA_MNTEDDIE_1 (Eddie's Peak). The base game also has developer test records for that
+  track (ranges rangetest1/2), skipped.
