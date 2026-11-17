@@ -558,6 +558,10 @@ void SsxSettingsDialog::DrawProfileTab() {
     if (ImGui::Button("Remove")) Set("ssx_player_picture", "");
     ImGui::TextDisabled("%s", std::filesystem::path(picture).filename().string().c_str());
   }
+  Row("Online-only badges", "Explore (ghost credits, friends' records, uncollected geotags), Gear "
+      "(placing geotags) and all Global Events badges need EA's servers. On: they show as earned "
+      "(your save isn't changed).");
+  Checkbox("##online_badges", "ssx_online_badges");
   ImGui::EndTable();
 }
 

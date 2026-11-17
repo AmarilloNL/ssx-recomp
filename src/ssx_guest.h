@@ -34,5 +34,10 @@
 #define SSX_FN_LOAD_DATABASE sub_8312AB50
 #define SSX_FN_LOAD_DATABASE_IMP __imp__sub_8312AB50
 
+// Whether the profile has a flag (r3 profile stats, r4 key, r5 kind: 2 for a badge, key
+// {fnv1_32(badge name), 1}); returns a bool. Issue #11, ssx_badges.cpp.
+#define SSX_FN_PROFILE_HAS SSX_GUEST(sub_82586810, sub_825518B8)
+#define SSX_FN_PROFILE_HAS_IMP SSX_GUEST(__imp__sub_82586810, __imp__sub_825518B8)
+
 // Vtable of the main loop's periodic task.
 #define SSX_VTABLE_MAIN_LOOP_TASK SSX_GUEST(0x82007738u, 0x82007840u)
