@@ -74,7 +74,7 @@ code runs natively, and its Xbox 360 graphics are drawn with Direct3D 12 (on Lin
    **More info → Run anyway**. Its source is [`installer/SSXInstaller.cs`](installer/SSXInstaller.cs).
 4. ✅ The first time it opens the setup: click **Next**, select your ISO, optionally click
    **Add files...** for DLC and the title update from your own console ([which files](#adding-dlc)),
-   tick the ownership box, and click **Install**.
+   and click **Install**.
 5. 🏂 When it says **DONE**, click **Play SSX** or use the desktop shortcut.
 
 From then on **`ssx-recomp.exe` is the game's launcher**: it opens with **Play SSX**,

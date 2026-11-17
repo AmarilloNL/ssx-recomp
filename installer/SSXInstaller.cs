@@ -804,7 +804,6 @@ class InstallerForm : Form {
   readonly Field isoField = new Field();
   readonly Field folderField = new Field();
   Label isoHint, folderHint;
-  readonly Check ownCheck = new Check("I own SSX for Xbox 360 and made this ISO from my own disc.");
   // DLC packages from the player's own console, copied to Documents\ssx\dlc when the install
   // starts; the game installs them from there on its next start.
   readonly List<string> dlcFiles = new List<string>();
@@ -875,12 +874,8 @@ class InstallerForm : Form {
       ShowPage(0);
     } else if (setup) {
       ShowPage(1);
-      // After an update: rebuild right away from the ISO the game was built from (its ownership
-      // was confirmed for that build).
-      if (rebuild && iso != null) {
-        ownCheck.Checked = true;
-        Shown += delegate { if (Valid()) StartBuild(); };
-      }
+      // After an update: rebuild right away from the ISO the game was built from.
+      if (rebuild && iso != null) Shown += delegate { if (Valid()) StartBuild(); };
     } else {
       ShowPlayStatus();
       ShowPage(3);
@@ -962,9 +957,6 @@ class InstallerForm : Form {
                      "update in 000B0000 (if there are two, the larger one). Add them once: later updates keep them.",
             Th.Faint);
 
-    ownCheck.Bounds = new Rectangle(x, Th.D(410), w, Th.D(40));
-    ownCheck.CheckedChanged += delegate { UpdateFooter(); };
-    p.Controls.Add(ownCheck);
     UpdateHints();
   }
 
@@ -1179,7 +1171,7 @@ class InstallerForm : Form {
   }
 
   bool Valid() {
-    return DlcOnly() || (ownCheck.Checked && File.Exists(isoField.Box.Text.Trim()));
+    return DlcOnly() || File.Exists(isoField.Box.Text.Trim());
   }
 
   // Only DLC picked for a game that is built and up to date: the DLC is copied for the game to
