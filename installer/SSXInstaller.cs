@@ -90,32 +90,40 @@ static class Program {
     return 0;
   }
 
-  static readonly string[] HeadlessOptions = { "--iso", "--folder", "--title-update", "--dlc", "--portable", "--no-menu" };
+  static readonly string[] HeadlessOptions = {
+    "--iso", "--folder", "--title-update", "--dlc", "--portable", "--no-menu", "--prepare" };
 
-  const string Usage = "Usage: ssx-recomp.exe --iso <your SSX ISO> [--folder <folder>] " +
+  const string Usage = "Usage: ssx-recomp.exe [--prepare] --iso <your SSX ISO> [--folder <folder>] " +
                        "[--title-update <file>] [--dlc <file>]...";
 
   // Without a window, for a launcher: builds as the window does (into <folder>, by default the one
   // ssx-recomp.exe is in; the game ends up in <folder>\source\dist\SSX\ssx.exe; no desktop shortcut),
   // the build's output on stdout. Exit code 0 when the game is there, 1 when the build failed, 2 for
   // wrong options.
+  // --prepare (RecompLauncher's setup step, recomplauncher.json): prints only "progress <0-1> <step>"
+  // lines (the build's output still goes to build-ssx.log), and a --title-update file that isn't
+  // there is skipped: the player didn't pick one.
   static int Headless(string[] args) {
     string iso = null, titleUpdate = null;
     string folder = Install.Folder;
     var dlc = new List<string>();
+    bool prepare = false;
     for (int i = 0; i < args.Length; i++) {
       string value = i + 1 < args.Length ? args[i + 1] : null;
       if (args[i] == "--iso" && value != null) iso = args[++i];
       else if (args[i] == "--folder" && value != null) folder = args[++i];
       else if (args[i] == "--title-update" && value != null) titleUpdate = args[++i];
       else if (args[i] == "--dlc" && value != null) dlc.Add(args[++i]);
+      else if (args[i] == "--prepare") prepare = true;
       else if (args[i] == "--portable") { }  // always portable now; kept so older command lines still work
       else if (args[i] == "--no-menu") { }  // (the Linux installer's option: one launcher command line for both)
       else { Console.Error.WriteLine(Usage); return 2; }
     }
     if (iso == null || !File.Exists(iso)) { Console.Error.WriteLine("ISO not found: " + iso + "\n" + Usage); return 2; }
+    if (prepare && titleUpdate != null && !File.Exists(titleUpdate)) titleUpdate = null;
     if (titleUpdate != null && !File.Exists(titleUpdate)) { Console.Error.WriteLine("Title update not found: " + titleUpdate); return 2; }
     Action<string> line = delegate(string text) { if (text != null) Console.WriteLine(text); };
+    if (prepare) line = new PrepareProgress().OnLine;
     try {
       folder = Path.GetFullPath(folder);
       InstallerForm.CopyDlc(dlc.ToArray(), Install.UserData(folder), line);
@@ -131,6 +139,35 @@ static class Program {
       Console.Error.WriteLine(ex.ToString());
       return 1;
     }
+  }
+}
+
+// --prepare's output: the build's steps and its ninja counts as RecompLauncher progress lines
+// ("progress 0.42 Recompile the Xbox 360 code"), the same progress the setup window shows.
+class PrepareProgress {
+  int stage;
+  float shown = -1;
+
+  public void OnLine(string text) {
+    if (text == null) return;
+    float frac = 0;
+    if (text.StartsWith("==> ")) {
+      int s = InstallerForm.StageOf(text.Substring(4));
+      if (s <= stage && shown >= 0) return;
+      if (s > stage) stage = s;
+    } else {
+      Match m = InstallerForm.NinjaStep.Match(text);
+      if (!m.Success || (stage != 4 && stage != 5)) return;
+      float total = float.Parse(m.Groups[2].Value);
+      if (total < 20) return;
+      frac = float.Parse(m.Groups[1].Value) / total;
+    }
+    float value = Math.Min(.99f, InstallerForm.StageStart[stage] +
+                                 (InstallerForm.StageStart[stage + 1] - InstallerForm.StageStart[stage]) * frac);
+    if (value < shown + .005f) return;  // a line for each half percent at most
+    shown = value;
+    Console.WriteLine(string.Format(System.Globalization.CultureInfo.InvariantCulture, "progress {0:0.000} {1}",
+                                    value, InstallerForm.Stages[stage]));
   }
 }
 
@@ -789,12 +826,12 @@ class InstallerForm : Form {
 
   [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 
-  static readonly string[] Stages = {
+  internal static readonly string[] Stages = {
     "Unpack the port's source code", "Check your ISO", "Install the build tools",
     "Download the recompiler SDK", "Recompile the Xbox 360 code", "Build the PC version" };
   // Where each stage starts on the overall bar (the last entry is the end).
-  static readonly float[] StageStart = { 0f, .02f, .04f, .10f, .18f, .36f, 1f };
-  static readonly Regex NinjaStep = new Regex(@"^\[(\d+)/(\d+)\]");
+  internal static readonly float[] StageStart = { 0f, .02f, .04f, .10f, .18f, .36f, 1f };
+  internal static readonly Regex NinjaStep = new Regex(@"^\[(\d+)/(\d+)\]");
 
   readonly StepRail rail = new StepRail();
   readonly Panel[] pages = new Panel[4];
@@ -1451,7 +1488,7 @@ class InstallerForm : Form {
     }
   }
 
-  static int StageOf(string text) {
+  internal static int StageOf(string text) {
     if (text.StartsWith("Unpacking the SSX")) return 0;
     if (text.StartsWith("Select your SSX")) return 1;
     if (text.StartsWith("Checking build tools")) return 2;
