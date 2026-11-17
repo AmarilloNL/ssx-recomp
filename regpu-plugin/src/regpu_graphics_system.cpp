@@ -96,6 +96,13 @@ uint32_t TargetFps()
     return uint32_t(std::clamp(fps, 30, 360));
 }
 
+// SSX's VSync setting (ssx_vsync): ReGPU then presents on the display's refresh (no tearing) and caps
+// the frame rate at it; a lower frame rate setting still applies (issue #14).
+bool Vsync()
+{
+    return rex::cvar::GetFlagByName("ssx_vsync") == "true";
+}
+
 // The drawing resolution (regpu_resolution): "screen" is the display mode of the monitor the game
 // window is on (its real pixels, whatever the Windows scaling), else WIDTHxHEIGHT; 1280x720 if neither.
 #ifdef _WIN32
@@ -148,6 +155,7 @@ void DrawingSize(uint32_t& width, uint32_t& height)
 void FollowSettings()
 {
     static uint32_t lastFps = 0;
+    static bool lastVsync = false;
     static int32_t lastAniso = -2;
     static uint64_t lastSize = 0;
     uint32_t width, height;
@@ -161,9 +169,10 @@ void FollowSettings()
         }
         lastSize = size;
     }
-    if (const uint32_t fps = TargetFps(); fps != lastFps)
+    if (const uint32_t fps = TargetFps(); fps != lastFps || Vsync() != lastVsync)
     {
-        regpu::SetFrameLimit(fps, false);
+        lastVsync = Vsync();
+        regpu::SetFrameLimit(fps, lastVsync);
         lastFps = fps;
     }
     if (const int32_t aniso = REXCVAR_GET(anisotropic_override); aniso != lastAniso)
@@ -386,7 +395,7 @@ X_STATUS ReGpuGraphicsSystem::SetupGuestGpu(rex::runtime::FunctionDispatcher* di
         config.upscaler = regpu::Config::Upscaler::Fsr1;
     if (const char* q = std::getenv("SSX_REGPU_QUALITY"))
         config.quality = uint32_t(std::atoi(q));
-    config.vsync = false;
+    config.vsync = Vsync();
     config.maxFps = TargetFps();
     config.windowTitle = L"SSX (ReGPU)";
     // ReXGlue calls InitializeShaderStorage after this, so the cache root comes from its setting.
