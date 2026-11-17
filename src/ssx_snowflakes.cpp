@@ -8,15 +8,18 @@
 // an rb-tree (root at +12, node: right +0, left +4, key +16) at +24 of the object the counting function
 // gets in r3, its size at +44. Nothing here writes to the game.
 //
-// Names: each drop's database record holds fnv1_32("<drop>_track") at +4 and, at +0x24, a pointer to the
-// key of its name (TXT_NM_DRP_<RANGE>_<peak>_<drop>; the peak's is TXT_NM_PEA_<RANGE>_<peak>). The
-// records are found by a scan of the game's heap, the names by the game's own localize.
+// Names: each drop's database record holds fnv1_32("<drop>_track") at +4, a pointer to its peak's asset
+// name at +0x1c (<range>_peak_<n>; Mount Eddie, DLC on a Rockies track: mnt_eddie_peak) and one to the
+// key of its name at +0x24 (TXT_NM_DRP_<RANGE>_<peak>_<drop>; the peak's is TXT_NM_PEA_<RANGE>_<peak>,
+// the range's TXT_NM_RNG_<RANGE>). The records are found by a scan of the game's heap, the names by the
+// game's own localize.
 
 #include "ssx_snowflakes.h"
 
 #include <algorithm>
 #include <iterator>
 #include <cstdio>
+#include <cctype>
 #include <cstring>
 #include <atomic>
 #include <chrono>
@@ -44,6 +47,7 @@ struct Drop {
   uint64_t base;     // key * 10^10
   std::unordered_set<uint32_t> ids;
   bool listed = true;  // in the game's lists (its 599); else only known from collected ones
+  std::string range;   // its record's range (asset name), once found
   std::vector<std::string> name_keys;  // of the drops (events) on this track
   std::vector<std::pair<std::string, std::string>> drops;  // peak and drop names, once found
 };
@@ -64,7 +68,7 @@ void AddDrop(std::string_view file, std::string_view csv) {
   size_t end = file.find("_track");
   if (end == std::string_view::npos) return;
   uint32_t key = Fnv1(file.substr(0, end + 6));
-  Drop drop{std::string(file.substr(0, end)), key, uint64_t(key) * 10000000000ull, {}, true, {}, {}};
+  Drop drop{std::string(file.substr(0, end)), key, uint64_t(key) * 10000000000ull, {}, true, {}, {}, {}};
   bool header = true;
   while (!csv.empty()) {
     size_t eol = csv.find('\n');
@@ -83,17 +87,23 @@ void AddDrop(std::string_view file, std::string_view csv) {
   std::sort(drops.begin(), drops.end(), [&](const Drop& a, const Drop& b) { return digits(a) < digits(b); });
 }
 
-// Range names by the drop codes' prefix.
-const struct { std::string_view prefix, name; } kRanges[] = {
-    {"alps", "Alps"},        {"patagon", "Patagonia"}, {"africa", "Africa"},
-    {"siberia", "Siberia"},  {"alaska", "Alaska"},     {"himwest", "Himalayas"},
-    {"rockies", "Rockies"},  {"antarc", "Antarctica"}, {"newzeal", "New Zealand"},
+// The ranges in the game's order: drop code prefix (the code's next two digits are the range's number),
+// the range in the database's asset names, and its English name (when the game has no text for it).
+const struct { std::string_view prefix, range, name; } kRanges[] = {
+    {"alps", "alps", "Alps"},          {"patagon", "patagonia", "Patagonia"},
+    {"africa", "africa", "Africa"},     {"siberia", "siberia", "Siberia"},
+    {"alaska", "alaska", "Alaska"},     {"himwest", "himalayas", "Himalayas"},
+    {"rockies", "rockies", "Rockies"},  {"antarc", "antarctica", "Antarctica"},
+    {"newzeal", "new_zealand", "New Zealand"}, {"", "mnt_eddie", "Mount Eddie"},
 };
+std::unordered_map<std::string, std::string> range_names;  // asset range -> its name in the game's language
 
-// The range's place in the game's order (a code's first two digits), kRanges' size if unknown.
-size_t RangeIndex(const std::string& code) {
+// The drop's range in kRanges (by its record's range, else its code), kRanges' size if unknown.
+size_t RangeIndex(const Drop& d) {
   for (size_t i = 0; i < std::size(kRanges); ++i) {
-    if (code.rfind(kRanges[i].prefix, 0) == 0) return i;
+    if (d.range.empty() ? !kRanges[i].prefix.empty() && d.code.rfind(kRanges[i].prefix, 0) == 0 : d.range == kRanges[i].range) {
+      return i;
+    }
   }
   return std::size(kRanges);
 }
@@ -104,6 +114,7 @@ const std::unordered_map<uint32_t, std::string>& CandidateCodes() {
   static const std::unordered_map<uint32_t, std::string> codes = [] {
     std::unordered_map<uint32_t, std::string> out;
     for (size_t r = 0; r < std::size(kRanges); ++r) {
+      if (kRanges[r].prefix.empty()) continue;
       for (int n = 1; n <= 40; ++n) {
         char code[32];
         std::snprintf(code, sizeof(code), "%s%02d%02d", std::string(kRanges[r].prefix).c_str(), int(r + 1), n);
@@ -190,6 +201,13 @@ void SsxSnowflakesTick(PPCContext& ctx, uint8_t* base) {
             SsxCopyHost(text, memory->TranslateVirtual<const char*>(address), sizeof(text) - 1) &&
             std::strncmp(text, "TXT_NM_DRP_", 11) == 0 && std::find(keys.begin(), keys.end(), text) == keys.end()) {
           keys.push_back(text);
+          char asset[48] = {};
+          uint32_t at_asset = Be32(chunk + at + 0x18);
+          if (it->second->range.empty() && SsxGuestReadable(memory, at_asset, sizeof(asset) - 1) &&
+              SsxCopyHost(asset, memory->TranslateVirtual<const char*>(at_asset), sizeof(asset) - 1)) {
+            std::string range(asset);
+            it->second->range = range.substr(0, range.find("_peak"));
+          }
         }
       }
     });
@@ -198,6 +216,13 @@ void SsxSnowflakesTick(PPCContext& ctx, uint8_t* base) {
     if (d.drops.empty() && d.name_keys.empty() && name_attempts < 24) return;  // database not (all) loaded yet
   }
   name_attempts = 24;
+  for (const Drop& d : drops) {
+    if (d.range.empty() || range_names.count(d.range)) continue;
+    std::string key = "TXT_NM_RNG_" + d.range;
+    std::transform(key.begin(), key.end(), key.begin(), [](char c) { return char(std::toupper(uint8_t(c))); });
+    range_names[d.range] = TitleCase(Localize(ctx, base, loc, key));
+    REXLOG_DEBUG("Snowflakes: range {} = {}", d.range, range_names[d.range]);
+  }
   for (Drop& d : drops) {
     if (!d.drops.empty()) continue;
     for (const std::string& key : d.name_keys) {
@@ -207,7 +232,7 @@ void SsxSnowflakesTick(PPCContext& ctx, uint8_t* base) {
       std::string peak_key = key.substr(0, key.rfind('_'));
       std::pair<std::string, std::string> drop{TitleCase(Localize(ctx, base, loc, peak_key.replace(0, 11, "TXT_NM_PEA_"))), name};
       if (std::find(d.drops.begin(), d.drops.end(), drop) == d.drops.end()) d.drops.push_back(drop);
-      REXLOG_DEBUG("Snowflakes: {} = {} / {}", d.code, drop.first, drop.second);
+      REXLOG_DEBUG("Snowflakes: {} {} = {} / {}", d.code, key, drop.first, drop.second);
     }
   }
 }
@@ -252,22 +277,29 @@ SsxSnowflakes SsxSnowflakeCounts() {
     auto code = CandidateCodes().find(uint32_t(id));
     if (known || code == CandidateCodes().end()) continue;
     uint32_t key = Fnv1(code->second + "_track");
-    drops.push_back({code->second, key, uint64_t(key) * 10000000000ull, {}, false, {}, {}});
+    drops.push_back({code->second, key, uint64_t(key) * 10000000000ull, {}, false, {}, {}, {}});
     name_attempts = 0;
   }
 
   // Each track's count goes to its range once and to every drop on it.
   SsxSnowflakes out;
+  std::unordered_map<std::string, size_t> range_order;  // range name -> place in kRanges
   out.collected = int(ids.size());
   for (const Drop& d : drops) {
     int got = 0;
     for (uint64_t id : ids) {
       if (uint32_t(id) == uint32_t(d.base) && (!d.listed || d.ids.count(uint32_t((id - d.base) >> 32)))) ++got;
     }
-    size_t r = RangeIndex(d.code);
-    std::string range_name = r < std::size(kRanges) ? std::string(kRanges[r].name) : d.code;
+    size_t r = RangeIndex(d);
+    auto localized = range_names.find(d.range);
+    std::string range_name = localized != range_names.end() && !localized->second.empty() ? localized->second
+                             : r < std::size(kRanges)                                    ? std::string(kRanges[r].name)
+                                                                                         : d.code;
     auto range = std::find_if(out.ranges.begin(), out.ranges.end(), [&](auto& x) { return x.name == range_name; });
-    if (range == out.ranges.end()) range = out.ranges.insert(out.ranges.end(), SsxSnowflakeRange{range_name});
+    if (range == out.ranges.end()) {
+      range = out.ranges.insert(out.ranges.end(), SsxSnowflakeRange{range_name});
+      range_order[range_name] = r;
+    }
     range->collected += got;
     range->total += int(d.ids.size());
     out.total += int(d.ids.size());
@@ -284,13 +316,7 @@ SsxSnowflakes SsxSnowflakeCounts() {
     }
   }
   // Ranges in the game's order, peaks and drops by name.
-  auto range_order = [](const SsxSnowflakeRange& x) {
-    for (size_t i = 0; i < std::size(kRanges); ++i) {
-      if (kRanges[i].name == x.name) return i;
-    }
-    return std::size(kRanges);
-  };
-  std::sort(out.ranges.begin(), out.ranges.end(), [&](auto& a, auto& b) { return range_order(a) < range_order(b); });
+  std::sort(out.ranges.begin(), out.ranges.end(), [&](auto& a, auto& b) { return range_order[a.name] < range_order[b.name]; });
   for (auto& range : out.ranges) {
     std::sort(range.peaks.begin(), range.peaks.end(), [](auto& a, auto& b) { return a.name < b.name; });
     for (auto& peak : range.peaks) {

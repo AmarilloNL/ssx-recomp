@@ -581,8 +581,8 @@ void SsxSettingsDialog::DrawSnowflakesTab() {
   }
   ImGui::Text("%d of %d snowflakes collected", snowflakes.collected, snowflakes.total);
   ImGui::PushStyleColor(ImGuiCol_Text, kTextDim);
-  ImGui::TextWrapped("From the loaded profile (shown once you're past the title screen). Drops that share a "
-                     "track share its snowflakes.");
+  ImGui::TextWrapped("From the loaded profile (shown once you're past the title screen). Some drops are raced "
+                     "on the same track and share the same snowflakes.");
   ImGui::PopStyleColor();
   ImGui::Spacing();
   if (!ImGui::BeginTable("##snowflakes", 2, ImGuiTableFlags_SizingStretchProp)) return;
