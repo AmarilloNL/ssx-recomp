@@ -34,5 +34,20 @@
 #define SSX_FN_LOAD_DATABASE sub_8312AB50
 #define SSX_FN_LOAD_DATABASE_IMP __imp__sub_8312AB50
 
+// The HUD (issue #10). The HUD's data provider holds named fields the HUD screens read; the game sets
+// its booleans with SetBool(provider, field id, const bool* value). At the start of a ride the HUD setup
+// turns the panels on for the event: none of the main ones (score, time, speed, descent) in freeride.
+#define SSX_FN_HUD_MODE_SETUP SSX_GUEST(sub_8238BB00, sub_82397658)
+#define SSX_FN_HUD_MODE_SETUP_IMP SSX_GUEST(__imp__sub_8238BB00, __imp__sub_82397658)
+#define SSX_FN_HUD_SET_BOOL SSX_GUEST(sub_82382588, sub_82391818)
+#define SSX_FN_HUD_SET_BOOL_IMP SSX_GUEST(__imp__sub_82382588, __imp__sub_82391818)
+#define SSX_HUD_PROVIDER_PTR SSX_GUEST(0x838AB660u, 0x8388F3F0u)
+// Field ids: HUD_ScoreActive (the scoring panel: score, tricky and boost meters), HUD_TimeActive,
+// HUD_SpeedActive, HUD_DescentActive.
+#define SSX_HUD_SCORE_ACTIVE SSX_GUEST(305u, 309u)
+#define SSX_HUD_TIME_ACTIVE SSX_GUEST(316u, 320u)
+#define SSX_HUD_SPEED_ACTIVE SSX_GUEST(311u, 315u)
+#define SSX_HUD_DESCENT_ACTIVE SSX_GUEST(234u, 238u)
+
 // Vtable of the main loop's periodic task.
 #define SSX_VTABLE_MAIN_LOOP_TASK SSX_GUEST(0x82007738u, 0x82007840u)

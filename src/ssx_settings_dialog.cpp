@@ -437,6 +437,8 @@ void SsxSettingsDialog::DrawDisplayTab() {
   }
   Row("Show FPS counter", "In the top-left corner.");
   Checkbox("##fps", "ssx_show_fps");
+  Row("Boost meter in freeride", "Shows the score panel with the boost and tricky meters in freeride. From the next ride.");
+  Checkbox("##freeride_hud", "ssx_freeride_hud");
   ImGui::EndTable();
 }
 
