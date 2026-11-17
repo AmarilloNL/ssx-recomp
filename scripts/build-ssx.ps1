@@ -365,13 +365,42 @@ if (-not (Test-Path $vcvars)) {
 if (-not (Test-Path "$sys\cmd.exe")) {
     Fail "Windows' command prompt ($sys\cmd.exe) is missing or blocked on this PC. Run 'sfc /scannow' as administrator to restore it."
 }
-& "$sys\cmd.exe" /c "`"$vcvars`" >nul 2>&1 && set" | ForEach-Object {
-    if ($_ -match '^(INCLUDE|LIB|LIBPATH|VCToolsInstallDir|VCToolsVersion|VCINSTALLDIR|VSINSTALLDIR|WindowsSdkDir|WindowsSDKVersion|UniversalCRTSdkDir|UCRTVersion)=(.*)$') {
-        Set-Item "env:$($Matches[1])" $Matches[2]
+function Import-VcVars {
+    & "$sys\cmd.exe" /c "`"$vcvars`" >nul 2>&1 && set" | ForEach-Object {
+        if ($_ -match '^(INCLUDE|LIB|LIBPATH|VCToolsInstallDir|VCToolsVersion|VCINSTALLDIR|VSINSTALLDIR|WindowsSdkDir|WindowsSDKVersion|UniversalCRTSdkDir|UCRTVersion)=(.*)$') {
+            Set-Item "env:$($Matches[1])" $Matches[2]
+        }
     }
 }
-if (-not ($env:LIB -split ';' | Where-Object { $_ -and (Test-Path "$_\msvcrt.lib") })) {
+function Test-Lib($name) { [bool]($env:LIB -split ';' | Where-Object { $_ -and (Test-Path "$_\$name") }) }
+Import-VcVars
+if (-not (Test-Lib 'msvcrt.lib')) {
     Fail "The C++ libraries (msvcrt.lib) were not found in $vsPath. Open the Visual Studio Installer, choose Modify and tick 'MSVC v143 - VS 2022 C++ x64/x86 build tools' and a Windows SDK."
+}
+# The Windows SDK (kernel32.lib, ucrt.lib, ...) can be missing from a Visual Studio that has the
+# C++ tools, or be installed where vcvars64.bat doesn't find it (issue #15).
+$kits = "${env:ProgramFiles(x86)}\Windows Kits\10"
+function Find-WinSdk { Get-ChildItem "$kits\Lib\10.*\um\x64\kernel32.lib" -ErrorAction SilentlyContinue | Sort-Object FullName | Select-Object -Last 1 }
+if (-not ((Test-Lib 'kernel32.lib') -and (Test-Lib 'ucrt.lib'))) {
+    if (-not (Find-WinSdk)) {
+        Write-Host "  The Windows SDK is missing; adding it to Visual Studio."
+        Write-Host "  Windows will ask for administrator permission; please allow it." -ForegroundColor Yellow
+        $vsSetup = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+        try { Start-Process $vsSetup -ArgumentList "modify --installPath `"$vsPath`" --add Microsoft.VisualStudio.Component.Windows11SDK.26100 --quiet --norestart" -Verb RunAs -Wait }
+        catch { Write-Host "  $_" }
+        Import-VcVars
+    }
+    $sdkLib = Find-WinSdk
+    if ($sdkLib -and -not ((Test-Lib 'kernel32.lib') -and (Test-Lib 'ucrt.lib'))) {
+        # Installed, but vcvars64.bat didn't pick it up: use it directly.
+        $ver = $sdkLib.Directory.Parent.Parent.Name
+        $env:LIB = "$env:LIB;$kits\Lib\$ver\um\x64;$kits\Lib\$ver\ucrt\x64"
+        $env:INCLUDE = "$env:INCLUDE;$kits\Include\$ver\ucrt;$kits\Include\$ver\um;$kits\Include\$ver\shared;$kits\Include\$ver\winrt;$kits\Include\$ver\cppwinrt"
+        $env:WindowsSdkDir = "$kits\"; $env:WindowsSDKVersion = "$ver\"; $env:UniversalCRTSdkDir = "$kits\"; $env:UCRTVersion = $ver
+    }
+    if (-not ((Test-Lib 'kernel32.lib') -and (Test-Lib 'ucrt.lib'))) {
+        Fail "The Windows SDK (kernel32.lib) was not found. Open the Visual Studio Installer, choose Modify, and tick 'Windows 11 SDK' under Individual components."
+    }
 }
 Write-Host "  Using the C++ tools in $vsPath (MSVC $env:VCToolsVersion, Windows SDK $($env:WindowsSDKVersion.TrimEnd('\')))"
 
