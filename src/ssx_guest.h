@@ -55,6 +55,10 @@
 // The game's localize(manager, eastl string* out, const char* key, 1), and its manager (issue #9).
 #define SSX_FN_LOCALIZE SSX_GUEST(sub_8256A878, sub_82535200)
 #define SSX_LOC_MANAGER_PTR SSX_GUEST(0x838CCB4Cu, 0x838AFFFCu)
+// Whether the profile has a flag (r3 profile stats, r4 key, r5 kind: 2 for a badge, key
+// {fnv1_32(badge name), 1}); returns a bool. Issue #11, ssx_badges.cpp.
+#define SSX_FN_PROFILE_HAS SSX_GUEST(sub_82586810, sub_825518B8)
+#define SSX_FN_PROFILE_HAS_IMP SSX_GUEST(__imp__sub_82586810, __imp__sub_825518B8)
 
 // Vtable of the main loop's periodic task.
 #define SSX_VTABLE_MAIN_LOOP_TASK SSX_GUEST(0x82007738u, 0x82007840u)

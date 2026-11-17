@@ -513,3 +513,12 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   archive that the game only loads on its drops; its drops' keys say ROCKIES_4 (The Helmet), its peak
   is TXT_NM_PEA_MNTEDDIE_1 (Eddie's Peak). The base game also has developer test records for that
   track (ranges rangetest1/2), skipped.
+- 2026-11-17: Online-only badges (issue #11). Badges are defined by init_badges.lua through InitBadge
+  (handler sub_823BD288 -> badge manager add sub_82452718; disc 0x824895A0), key {fnv1_32(name), 1};
+  177 badges. DO_AwardBadge ends in sub_82451B38 (disc 0x824889C0), which asks sub_825518B8 (disc
+  sub_82586810: profile stats, key, kind 2) whether the profile has it. Awarding for real only lasts if
+  the game saves afterwards, and the profile object exists (empty) seconds before the save is loaded
+  into it, so the port answers that question instead: with ssx_online_badges on, the 48 online-only
+  badges (Explore 7-10, Gear 2, Global Events) read as earned; the save isn't changed. The game derives
+  the "Collect all ... Global Events Badges" achievements (Bronze/Silver/Gold Spender) from badges, so
+  those unlock too. Localize: sub_82535200(*(0x838AFFFC), &eastl string, key, 1).
