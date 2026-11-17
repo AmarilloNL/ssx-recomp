@@ -14,5 +14,5 @@ build*.log
 bench-*.log
 configure*.log
 package.log
-installer/SSX-Installer.exe
+installer/ssx-recomp.exe
 build-ssx.log
