@@ -171,6 +171,19 @@ class PrepareProgress {
   public void OnLine(string text) {
     if (text == null) return;
     if (text.StartsWith("ERROR: ")) { Error = text.Substring(7).Trim(); return; }
+    // A build tool being installed (CMake, Ninja, LLVM, Visual Studio's Build Tools): it can take
+    // minutes and Windows asks for permission (UAC), so the step says which one.
+    Match tool = Regex.Match(text, @"^\s+installing (.+?)(?: \(.*\))?(?: with winget| from its official download)?(?:\.\.\.|\.)?$");
+    if (tool.Success && stage == 2) {
+      string name = tool.Groups[1].Value;
+      if (name == "Kitware.CMake" || name == "cmake") name = "CMake";
+      else if (name == "Ninja-build.Ninja" || name == "ninja") name = "Ninja";
+      else if (name == "LLVM.LLVM") name = "LLVM";
+      Console.WriteLine(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                                      "progress {0:0.000} Installing {1}: Windows may ask for permission",
+                                      Math.Max(shown, InstallerForm.StageStart[2]), name));
+      return;
+    }
     float frac = 0;
     if (text.StartsWith("==> ")) {
       int s = InstallerForm.StageOf(text.Substring(4));
