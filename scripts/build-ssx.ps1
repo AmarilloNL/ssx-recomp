@@ -17,6 +17,11 @@ $ErrorActionPreference = 'Continue'
 $root = (Resolve-Path "$PSScriptRoot\..").Path
 $log = "$root\build-ssx.log"
 Start-Transcript -Path $log -Force | Out-Null
+# On some PCs Windows' own folders are missing from PATH, so cmd, msiexec and the tools that
+# vcvars64.bat runs aren't found by name (issue #15). Put them back for this build.
+foreach ($dir in "$env:SystemRoot\System32\WindowsPowerShell\v1.0", "$env:SystemRoot\System32\Wbem", "$env:SystemRoot\System32") {
+    if (($env:Path -split ';' | ForEach-Object { $_.TrimEnd('\') }) -notcontains $dir) { $env:Path = "$dir;$env:Path" }
+}
 
 # The recompilation config (function addresses, patches) matches exactly this default.xex:
 # SSX (USA) for Xbox 360, title 4541096D, media ID 55ABAB6C, version 0.0.0.2.
