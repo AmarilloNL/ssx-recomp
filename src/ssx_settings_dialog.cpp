@@ -611,10 +611,6 @@ void SsxSettingsDialog::DrawSnowflakesTab() {
         ImGui::TableNextColumn();
         ImGui::Indent(indent * 2.0f);
         ImGui::TextUnformatted(drop.name.c_str());
-        if (!drop.listed) {
-          ImGui::SameLine();
-          ImGui::TextColored(kTextDim, "(not in the game's count)");
-        }
         ImGui::Unindent(indent * 2.0f);
         ImGui::TableNextColumn();
         if (drop.total) {

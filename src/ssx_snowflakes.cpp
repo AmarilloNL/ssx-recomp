@@ -152,7 +152,7 @@ std::string Localize(PPCContext& ctx, uint8_t* base, uint32_t loc, const std::st
   ctx.r3.u64 = loc;
   ctx.r4.u64 = s;
   ctx.r5.u64 = k;
-  ctx.r6.u64 = 1;
+  ctx.r6.u64 = 0;  // as written (1: in capitals, as the HUD shows text)
   SSX_FN_LOCALIZE(ctx, base);
   uint32_t b = REX_LOAD_U32(s), e = REX_LOAD_U32(s + 4);
   std::string text = e > b && e - b < 256 ? std::string(reinterpret_cast<const char*>(base + b), e - b) : "";
@@ -160,19 +160,8 @@ std::string Localize(PPCContext& ctx, uint8_t* base, uint32_t loc, const std::st
   return text == key ? "" : text;  // (a key without text comes back as itself)
 }
 
-// "BROKEN PASS" -> "Broken Pass" (the game's text is in capitals; its menus show it in another font).
-// Words with a digit stay as they are ("JT2").
-std::string TitleCase(std::string s) {
-  size_t word = 0;
-  for (size_t i = 0; i <= s.size(); ++i) {
-    if (i < s.size() && s[i] != ' ' && s[i] != '-' && s[i] != '/') continue;
-    if (std::none_of(s.begin() + word, s.begin() + i, [](char c) { return c >= '0' && c <= '9'; })) {
-      for (size_t k = word + 1; k < i; ++k) {
-        if (s[k] >= 'A' && s[k] <= 'Z') s[k] = char(s[k] - 'A' + 'a');
-      }
-    }
-    word = i + 1;
-  }
+std::string Upper(std::string s) {
+  std::transform(s.begin(), s.end(), s.begin(), [](char c) { return char(std::toupper(uint8_t(c))); });
   return s;
 }
 
@@ -199,7 +188,7 @@ void SsxSnowflakesTick(PPCContext& ctx, uint8_t* base) {
   // The drop records of each track: the track's key; 0x18 on, a pointer to its peak's asset name (the
   // range); 0x20 on, one to the key of the drop's name. A track has several (World Tour and Explore
   // drops, unused ones); DLC records appear once the DLC's database is loaded.
-  std::unordered_map<uint32_t, std::vector<std::pair<std::string, std::string>>> records;  // name key, range
+  std::unordered_map<uint32_t, std::vector<std::pair<std::string, std::string>>> records;  // name key, peak asset
   for (const Drop& d : drops) records[d.key];
   rex::memory::Memory* memory = rex::system::kernel_memory();
   auto text_at = [&](uint32_t address, char* out, uint32_t size) {
@@ -214,8 +203,7 @@ void SsxSnowflakesTick(PPCContext& ctx, uint8_t* base) {
         char name[64] = {}, asset[48] = {};
         if (!text_at(Be32(chunk + at + 0x20), name, sizeof(name)) || std::strncmp(name, "TXT_NM_DRP_", 11) != 0) continue;
         text_at(Be32(chunk + at + 0x18), asset, sizeof(asset));
-        std::string range(asset);
-        std::pair<std::string, std::string> record{name, range.substr(0, range.find("_peak"))};
+        std::pair<std::string, std::string> record{name, asset};
         if (std::find(it->second.begin(), it->second.end(), record) == it->second.end()) it->second.push_back(record);
       }
     });
@@ -229,27 +217,35 @@ void SsxSnowflakesTick(PPCContext& ctx, uint8_t* base) {
   static std::unordered_map<std::string, std::string> texts;
   auto text = [&](const std::string& key) {
     auto found = texts.find(key);
-    return found != texts.end() ? found->second : texts[key] = TitleCase(Localize(ctx, base, loc, key));
+    return found != texts.end() ? found->second : texts[key] = Localize(ctx, base, loc, key);
   };
   for (Drop& d : drops) {
     d.drops.clear();
     d.range.clear();
-    for (const auto& [key, range] : records[d.key]) {
-      // (The game also has developer test records, ranges "rangetest1" and the like.)
+    for (const auto& [key, asset] : records[d.key]) {
+      // The range: the peak asset's name up to "_peak" (<range>_peak_<n>). The game also has developer
+      // test records (ranges "rangetest1" and the like).
+      std::string range = asset.substr(0, asset.find("_peak"));
       bool real_range = std::any_of(std::begin(kRanges), std::end(kRanges), [&](auto& r) { return r.range == range; });
       std::string name = real_range ? text(key) : "";
-      if (name.empty() || name == "Not Used") continue;
+      if (name.empty() || Upper(name) == "NOT USED") continue;
       if (d.range.empty()) d.range = range;
-      // The peak: TXT_NM_PEA_<RANGE>_<peak>, from TXT_NM_DRP_<RANGE>_<peak>_<drop>.
-      std::string peak_key = key.substr(0, key.rfind('_'));
-      std::pair<std::string, std::string> drop{text(peak_key.replace(0, 11, "TXT_NM_PEA_")), name};
+      // The peak: TXT_NM_PEA_<RANGE>_<peak>, from TXT_NM_DRP_<RANGE>_<peak>_<drop>. A DLC's drops have
+      // the keys of the range their track came from (Mount Eddie's say ROCKIES_4, The Helmet); its own
+      // peak's key is TXT_NM_PEA_<its range without "_">_<n> (TXT_NM_PEA_MNTEDDIE_1, Eddie's Peak).
+      std::string peak_key = key.substr(0, key.rfind('_')).replace(0, 11, "TXT_NM_PEA_");
+      std::string token = Upper(range);
+      token.erase(std::remove(token.begin(), token.end(), '_'), token.end());
+      if (key.compare(11, token.size() + 1, token + "_") != 0) {
+        size_t n = asset.find("_peak_");
+        peak_key = "TXT_NM_PEA_" + token + "_" + (n == std::string::npos ? "1" : asset.substr(n + 6));
+      }
+      std::pair<std::string, std::string> drop{text(peak_key), name};
       if (std::find(d.drops.begin(), d.drops.end(), drop) == d.drops.end()) d.drops.push_back(drop);
-      REXLOG_DEBUG("Snowflakes: {} {} ({}) = {} / {}", d.code, key, range, drop.first, drop.second);
+      REXLOG_DEBUG("Snowflakes: {} {} ({}, {}) = {} / {}", d.code, key, asset, peak_key, drop.first, drop.second);
     }
     if (!d.range.empty() && !range_names.count(d.range)) {
-      std::string key = "TXT_NM_RNG_" + d.range;
-      std::transform(key.begin(), key.end(), key.begin(), [](char c) { return char(std::toupper(uint8_t(c))); });
-      range_names[d.range] = text(key);
+      range_names[d.range] = text("TXT_NM_RNG_" + Upper(d.range));
     }
   }
 }
@@ -301,7 +297,6 @@ SsxSnowflakes SsxSnowflakeCounts() {
   // Each track's count goes to its range once and to every drop on it.
   SsxSnowflakes out;
   std::unordered_map<std::string, size_t> range_order;  // range name -> place in kRanges
-  out.collected = int(ids.size());
   for (const Drop& d : drops) {
     int got = 0;
     for (uint64_t id : ids) {
@@ -322,7 +317,8 @@ SsxSnowflakes SsxSnowflakeCounts() {
     }
     range->collected += got;
     range->total += int(d.ids.size());
-    if (d.listed) out.total += int(d.ids.size());
+    out.collected += got;
+    out.total += int(d.ids.size());
     std::vector<std::pair<std::string, std::string>> names = d.drops;
     if (names.empty()) names.push_back({"", "Drop " + d.code.substr(d.code.size() - std::min<size_t>(2, d.code.size()))});
     for (const auto& [peak_name, drop_name] : names) {
@@ -332,15 +328,14 @@ SsxSnowflakes SsxSnowflakeCounts() {
       if (drop == peak->drops.end()) drop = peak->drops.insert(peak->drops.end(), SsxSnowflakeDrop{drop_name});
       drop->collected += got;
       drop->total += int(d.ids.size());
-      drop->listed = drop->listed && d.listed;
     }
   }
   // Ranges in the game's order, peaks and drops by name.
   std::sort(out.ranges.begin(), out.ranges.end(), [&](auto& a, auto& b) { return range_order[a.name] < range_order[b.name]; });
   for (auto& range : out.ranges) {
-    std::sort(range.peaks.begin(), range.peaks.end(), [](auto& a, auto& b) { return a.name < b.name; });
+    std::sort(range.peaks.begin(), range.peaks.end(), [](auto& a, auto& b) { return Upper(a.name) < Upper(b.name); });
     for (auto& peak : range.peaks) {
-      std::sort(peak.drops.begin(), peak.drops.end(), [](auto& a, auto& b) { return a.name < b.name; });
+      std::sort(peak.drops.begin(), peak.drops.end(), [](auto& a, auto& b) { return Upper(a.name) < Upper(b.name); });
     }
   }
   return out;

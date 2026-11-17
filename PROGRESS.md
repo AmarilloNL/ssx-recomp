@@ -500,3 +500,8 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   and a pointer to TXT_NM_DRP_<RANGE>_<peak>_<n> at +0x24 (peak: TXT_NM_PEA_<RANGE>_<peak>); a track
   has several (World Tour, Explore, "NOT USED"). Found by a heap scan, named by the game's localize
   (sub_82535200 / disc sub_8256A878, manager at 0x838AFFFC / 0x838CCB4C) on the main loop's tick.
+  localize's last argument 1 gives the text in capitals (as the HUD shows it); the menus pass 0. Mount
+  Eddie (DLC, track rockies0706, peak asset mnt_eddie_peak) has 31 snowflakes in a list inside its
+  archive that the game only loads on its drops; its drops' keys say ROCKIES_4 (The Helmet), its peak
+  is TXT_NM_PEA_MNTEDDIE_1 (Eddie's Peak). The base game also has developer test records for that
+  track (ranges rangetest1/2), skipped.

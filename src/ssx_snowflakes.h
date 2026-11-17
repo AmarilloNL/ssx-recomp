@@ -9,7 +9,6 @@
 // snowflakes are those of its track(s); a track can be shared by several drops.
 struct SsxSnowflakeDrop {
   std::string name;   // in the game's language ("Drop 05" until found)
-  bool listed = true;  // false: on a track the game's own count leaves out (its total isn't known)
   int collected = 0;
   int total = 0;
 };
@@ -23,7 +22,7 @@ struct SsxSnowflakeRange {
   std::vector<SsxSnowflakePeak> peaks;  // by name
 };
 struct SsxSnowflakes {
-  int collected = 0, total = 0;  // as the game counts them ("N of 599")
+  int collected = 0, total = 0;  // of all tracks listed (the game's own "N of 599" leaves out DLC)
   std::vector<SsxSnowflakeRange> ranges;  // in the game's order
 };
 
