@@ -484,3 +484,13 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   update are in different console folders), the older update (~1 MB) is refused at once, a help
   text names the console folders, and a "Where do I find these?" link opens the README; window
   20 px taller.
+- 2026-11-17: Snowflakes (issue #9) are EA's offline geotags ("Geotag Collected! You just collected a
+  Snowflake ... 44 of 599 collected"). Title update addresses: the geotag manager is built by
+  sub_8240A040 (this); its total (599) is at this+48184, counted by sub_824D03E0 from
+  data\common\geocaches\manifest.txt, one CSV per drop (`<drop>_track_geotagdb.csv`, 36 drops, columns
+  Id,Quality,Level,XPos,YPos,ZPos, one header line; sub_824CFF78 counts the lines). The collected
+  offline ones are an rb-tree set of u64 at this+56 (root at +12, node: right +0, left +4, key +16;
+  size at +20 = this+76), filled from the save once the profile loads (after Start on the title).
+  sub_824D0330(set owner this+32, type 3, id) adds one; sub_8240F030 handles a pickup.
+  Id of a snowflake = (Id << 32) + fnv1_32("<drop>_track") * 10^10 (mod 2^64), built in
+  sub_824D06E0 (key from its r4). Display names of drops still to find (GLOBE_DropName).
