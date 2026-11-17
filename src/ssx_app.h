@@ -60,6 +60,18 @@ class SsxApp : public rex::ReXApp {
   }
 
  protected:
+  // Portable (issue #12): a portable.txt next to the exe keeps saves, DLC, music, tuning and the
+  // shader cache in a userdata folder there instead of Documents\ssx. --user_data_root still wins.
+  void OnConfigurePaths(rex::PathConfig& paths) override {
+    const auto exe_dir = rex::filesystem::GetExecutableFolder();
+    if (!std::filesystem::exists(exe_dir / "portable.txt") ||
+        !rex::cvar::GetFlagByName("user_data_root").empty()) {
+      return;
+    }
+    if (rex::cvar::GetFlagByName("cache_root").empty()) paths.cache_root = exe_dir / "userdata" / "cache";
+    paths.user_data_root = exe_dir / "userdata";
+  }
+
   // Find the game; an .iso is mounted later (OnLoadXexImage), so the runtime
   // gets an empty placeholder folder for its host mount.
   std::optional<rex::PathConfig> OnFinalizePaths(

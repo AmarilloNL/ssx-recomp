@@ -60,5 +60,7 @@ Your own music
   trick, survive or menu music. The game remixes it as you ride.
 
 Saves, DLC and shader cache live in Documents\ssx.
+Portable: put an empty portable.txt next to ssx.exe and they live in the
+userdata folder here instead.
 If a setting stops the game from starting, delete ssx.toml next to ssx.exe
 to go back to the defaults (you will be asked for the game once more).

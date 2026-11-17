@@ -71,7 +71,7 @@ static class Program {
   }
 
   const string Usage = "Usage: SSX-Installer.exe --iso <your SSX ISO> [--folder <install folder>] " +
-                       "[--title-update <file>] [--dlc <file>]...";
+                       "[--title-update <file>] [--dlc <file>]... [--portable]";
 
   // Without a window, for a launcher: builds as the window does (the game ends up in
   // <folder>\source\dist\SSX\ssx.exe; no desktop shortcut), the build's output on stdout. Exit code 0
@@ -80,12 +80,14 @@ static class Program {
     string iso = null, titleUpdate = null;
     string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "SSX-PC");
     var dlc = new List<string>();
+    bool portable = false;
     for (int i = 0; i < args.Length; i++) {
       string value = i + 1 < args.Length ? args[i + 1] : null;
       if (args[i] == "--iso" && value != null) iso = args[++i];
       else if (args[i] == "--folder" && value != null) folder = args[++i];
       else if (args[i] == "--title-update" && value != null) titleUpdate = args[++i];
       else if (args[i] == "--dlc" && value != null) dlc.Add(args[++i]);
+      else if (args[i] == "--portable") portable = true;
       else if (args[i] == "--no-menu") { }  // (the Linux installer's option: one launcher command line for both)
       else { Console.Error.WriteLine(Usage); return 2; }
     }
@@ -94,7 +96,7 @@ static class Program {
     Action<string> line = delegate(string text) { if (text != null) Console.WriteLine(text); };
     try {
       folder = Path.GetFullPath(folder);
-      InstallerForm.CopyDlc(dlc.ToArray(), line);
+      InstallerForm.CopyDlc(dlc.ToArray(), InstallerForm.UserDataDir(folder, portable), line);
       int code = InstallerForm.Build(Path.GetFullPath(iso), folder,
                                      titleUpdate != null ? Path.GetFullPath(titleUpdate) : null, line, null);
       if (code == 0 && File.Exists(Path.Combine(folder, "source\\dist\\SSX\\ssx.exe"))) return 0;
@@ -581,6 +583,7 @@ class InstallerForm : Form {
 
   Label doneSub;
   readonly Check shortcutCheck = new Check("Create a desktop shortcut");
+  readonly Check portableCheck = new Check("Portable: keep saves, DLC and music in the install folder");
 
   readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
   readonly object sync = new object();
@@ -595,7 +598,7 @@ class InstallerForm : Form {
   public InstallerForm() {
     Text = "SSX PC Port Setup";
     AutoScaleMode = AutoScaleMode.None;
-    ClientSize = new Size(Th.D(900), Th.D(660));
+    ClientSize = new Size(Th.D(900), Th.D(690));
     FormBorderStyle = FormBorderStyle.FixedSingle;
     MaximizeBox = false;
     StartPosition = FormStartPosition.CenterScreen;
@@ -692,7 +695,9 @@ class InstallerForm : Form {
                      "update in 000B0000 (if there are two, the larger one). Add them once: later updates keep them.",
             Th.Faint);
 
-    ownCheck.Bounds = new Rectangle(x, Th.D(400), w, Th.D(40));
+    portableCheck.Bounds = new Rectangle(x, Th.D(400), w, Th.D(30));
+    p.Controls.Add(portableCheck);
+    ownCheck.Bounds = new Rectangle(x, Th.D(430), w, Th.D(40));
     ownCheck.CheckedChanged += delegate { UpdateFooter(); };
     p.Controls.Add(ownCheck);
     UpdateHints();
@@ -755,7 +760,7 @@ class InstallerForm : Form {
     var tips = new Card {
       Title = "Good to know",
       Body = "F1 (or Back + Start) opens the settings: frame rate, resolution, FSR, controls.\r\n" +
-             "Saves are kept in Documents\\ssx. DLC you added is installed when the game starts.\r\n" +
+             "Saves are kept in Documents\\ssx (portable: in the game folder). DLC you added is installed when the game starts.\r\n" +
              "Run this setup again any time to update SSX to the latest version.",
       Tone = Th.Accent };
     tips.Bounds = new Rectangle(x, Th.D(112), w, tips.FitHeight(w));
@@ -923,8 +928,8 @@ class InstallerForm : Form {
       } else {
         SetHint(dlcHint, string.Join(", ", names.ToArray()) +
                          (titleUpdateFile != null ? ": the game is built with the title update" +
-                                                    (dlcFiles.Count > 0 ? ", the DLC goes to Documents\\ssx\\dlc." : ".")
-                                                  : ": copied to Documents\\ssx\\dlc when you install.") +
+                                                    (dlcFiles.Count > 0 ? ", the DLC goes to the game's saves folder." : ".")
+                                                  : ": copied to the game's saves folder when you install.") +
                          " Files in another folder? Click Add files... again.",
                 Th.Good);
       }
@@ -971,6 +976,7 @@ class InstallerForm : Form {
     string iso = isoField.Box.Text.Trim(), folder = folderField.Box.Text.Trim();
     string[] dlc = dlcFiles.ToArray();
     string titleUpdate = titleUpdateFile;
+    bool portable = portableCheck.Checked;
     lock (sync) { stage = 0; stageFrac = 0; pendingLog.Length = 0; }
     running = true;
     failed = cancelled = false;
@@ -984,16 +990,30 @@ class InstallerForm : Form {
     clock = Stopwatch.StartNew();
     ShowPage(2);
     timer.Start();
-    var worker = new Thread(delegate() { CopyDlc(dlc, OnLine); RunBuild(iso, folder, titleUpdate); });
+    var worker = new Thread(delegate() { CopyDlc(dlc, UserDataDir(folder, portable), OnLine); RunBuild(iso, folder, titleUpdate); });
     worker.IsBackground = true;
     worker.Start();
   }
 
-  // Copies the chosen DLC packages to Documents\ssx\dlc (the same Documents folder the game uses),
-  // where the game installs them on its next start. A failed copy doesn't stop the install.
-  internal static void CopyDlc(string[] files, Action<string> onLine) {
+  // Where the game keeps saves, DLC and music: Documents\ssx, or for a portable install (a portable.txt
+  // next to ssx.exe, issue #12) the userdata folder there. Writes portable.txt when asked; an install that
+  // is already portable stays portable.
+  internal static string UserDataDir(string folder, bool portable) {
+    string game = Path.Combine(folder, "source\\dist\\SSX"), marker = Path.Combine(game, "portable.txt");
+    if (portable && !File.Exists(marker)) {
+      Directory.CreateDirectory(game);
+      File.WriteAllText(marker, "Saves, DLC and music are kept in the userdata folder here instead of Documents\\ssx.\r\n" +
+                                "Delete this file to use Documents\\ssx again.\r\n");
+    }
+    return File.Exists(marker) ? Path.Combine(game, "userdata")
+                               : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "ssx");
+  }
+
+  // Copies the chosen DLC packages to <userData>\dlc, where the game installs them on its next start.
+  // A failed copy doesn't stop the install.
+  internal static void CopyDlc(string[] files, string userData, Action<string> onLine) {
     if (files.Length == 0) return;
-    string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "ssx", "dlc");
+    string dir = Path.Combine(userData, "dlc");
     foreach (string file in files) {
       try {
         Directory.CreateDirectory(dir);

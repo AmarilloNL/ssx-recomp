@@ -10,6 +10,8 @@
 #   --title-update: the game's last title update (v0.0.3.2) from your own console, an Xbox 360
 #     package file. Once added, later builds keep using it; --no-title-update goes back to the disc version.
 #   --no-menu: no SSX entry in the app menu (for a launcher that installs and starts the game itself).
+#   --portable: saves, DLC and music go in DIST/userdata next to the game instead of ~/.local/share/ssx
+#     (a portable.txt there; later builds keep it).
 # Without a terminal (a launcher running it), missing build tools are installed through the desktop's
 # password prompt (pkexec) instead of sudo.
 set -uo pipefail
@@ -52,13 +54,14 @@ as_root() {
   if [ -t 0 ] || sudo -n true 2>/dev/null || ! command -v pkexec >/dev/null; then sudo "$@"; else pkexec "$@"; fi
 }
 
-iso= title_update= no_title_update= no_menu=
+iso= title_update= no_title_update= no_menu= portable=
 while [ $# -gt 0 ]; do
   case "$1" in
     --iso) iso=${2:-}; shift 2 ;;
     --title-update) title_update=${2:-}; shift 2 ;;
     --no-title-update) no_title_update=1; shift ;;
     --no-menu) no_menu=1; shift ;;
+    --portable) portable=1; shift ;;
     *) fail "Unknown option: $1 (see the top of this script)" ;;
   esac
 done
@@ -416,6 +419,10 @@ if [ ! -f "$dist/ssx.toml" ]; then
   printf '# SSX settings - written by the game. Edit in-game with F1.\ngame_data_root = "%s"\n' \
     "$(printf '%s' "$iso" | sed 's/\\/\\\\/g; s/"/\\"/g')" > "$dist/ssx.toml"
 fi
+if [ -n "$portable" ] && [ ! -f "$dist/portable.txt" ]; then
+  printf '%s\n' 'Saves, DLC and music are kept in the userdata folder here instead of ~/.local/share/ssx.' \
+    'Delete this file to use ~/.local/share/ssx again.' > "$dist/portable.txt"
+fi
 # Start menu entry (not with --no-menu: a launcher's install leaves the player's own entry alone).
 if [ -z "$no_menu" ]; then
   apps="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
@@ -436,4 +443,5 @@ echo
 printf '\033[32mDONE. Your game is in: %s\033[0m\n' "$dist"
 if [ -z "$no_menu" ]; then echo "Start it from your app menu (SSX) or with $dist/ssx (F1 opens the settings)."
 else echo "Start it with $dist/ssx (F1 opens the settings)."; fi
-echo "Saves are in ${XDG_DATA_HOME:-$HOME/.local/share}/ssx."
+if [ -f "$dist/portable.txt" ]; then echo "Saves are in $dist/userdata (portable)."
+else echo "Saves are in ${XDG_DATA_HOME:-$HOME/.local/share}/ssx."; fi
