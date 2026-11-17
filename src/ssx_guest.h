@@ -42,7 +42,6 @@
 #define SSX_FN_HUD_SET_BOOL SSX_GUEST(sub_82382588, sub_82391818)
 #define SSX_FN_HUD_SET_BOOL_IMP SSX_GUEST(__imp__sub_82382588, __imp__sub_82391818)
 #define SSX_HUD_PROVIDER_PTR SSX_GUEST(0x838AB660u, 0x8388F3F0u)
-#define SSX_GAME_STATE_PTR SSX_GUEST(0x838CCEA0u, 0x838B0000u)
 // Field ids: HUD_ScoreActive (the scoring panel: score, tricky and boost meters), HUD_TimeActive,
 // HUD_SpeedActive, HUD_DescentActive.
 #define SSX_HUD_SCORE_ACTIVE SSX_GUEST(305u, 309u)
