@@ -12,13 +12,12 @@
 # -NoPause: don't wait for Enter at the end (when driven by the installer).
 # -NoReGpu: leave out the ReGPU renderer (the default renderer; F1 > Graphics > Renderer also has
 #   the standard one). Developers build it from source with scripts\build-regpu.ps1.
-# -NoVsLicense: the player hasn't accepted the Visual Studio Build Tools' license (RecompLauncher's
-#   setup tick, recomplauncher.json): stop with 32 instead of installing them. Already installed: fine.
+# Missing build tools are installed; a Visual Studio whose C++ tools are missing or broken has them
+# added or repaired by its own installer (Windows asks for permission).
 # Exit codes, by what went wrong (ssx-recomp.exe passes them on; recomplauncher.json's players see
-# the ERROR line): 10-13 the copy of the game, 20-22 the title update, 30-32 the build tools,
+# the ERROR line): 10-13 the copy of the game, 20-22 the title update, 30-31 the build tools,
 # 40 a download, 50 the build itself.
-param([Alias('Game')][string]$Iso, [string]$TitleUpdate, [switch]$NoTitleUpdate, [switch]$NoPause, [switch]$NoReGpu,
-      [switch]$NoVsLicense)
+param([Alias('Game')][string]$Iso, [string]$TitleUpdate, [switch]$NoTitleUpdate, [switch]$NoPause, [switch]$NoReGpu)
 
 $ErrorActionPreference = 'Continue'
 $root = (Resolve-Path "$PSScriptRoot\..").Path
@@ -348,18 +347,30 @@ $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.e
 # uses, like <bit> and <span> (issue #3). They can stay installed next to it.
 $vsFilter = '-products', '*', '-version', '17.0', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64'
 function Test-Msvc { (Test-Path $vswhere) -and (& $vswhere @vsFilter -property installationPath) }
+$vsComponents = '--add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 ' +
+                '--add Microsoft.VisualStudio.Component.Windows11SDK.26100'
+$vsInstaller = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+# Visual Studio's own installer on an installation there: modify adds the C++ tools it lacks, repair
+# puts back broken or missing files. Windows asks for permission once.
+function Invoke-VsInstaller([string]$Verb, [string]$Path) {
+    if (-not (Test-Path $vsInstaller) -or -not $Path) { return }
+    Write-Host "  installing Visual Studio C++ build tools ($Verb of $Path)."
+    Write-Host "  Windows will ask for administrator permission; please allow it." -ForegroundColor Yellow
+    $a = "$Verb --installPath `"$Path`" --quiet --norestart" + $(if ($Verb -eq 'modify') { " $vsComponents" } else { '' })
+    try { Start-Process $vsInstaller -ArgumentList $a -Verb RunAs -Wait } catch { Write-Host "  $_" }
+}
 if (-not (Test-Msvc)) {
     if ((Test-Path $vswhere) -and (& $vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)) {
         Write-Host "  The Visual Studio found is older than 2022, too old for this build."
     }
-    if ($NoVsLicense) {
-        Fail ("This PC needs Microsoft's Visual Studio Build Tools to build SSX. Tick the Visual Studio Build Tools " +
-              "option to accept their license and install them, then set SSX up again.") 32
-    }
+    # Visual Studio 2022 or newer without its C++ tools (another workload, or they were removed): they're
+    # added to it, rather than a second installation next to it.
+    if (Test-Path $vswhere) { Invoke-VsInstaller 'modify' (& $vswhere -products * -version 17.0 -latest -property installationPath) }
+}
+if (-not (Test-Msvc)) {
     Write-Host "  installing Visual Studio 2022 Build Tools (C++ libraries + Windows SDK)."
     Write-Host "  Windows will ask for administrator permission; please allow it." -ForegroundColor Yellow
-    $vsArgs = '--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools ' +
-              '--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows11SDK.26100'
+    $vsArgs = "--quiet --wait --norestart $vsComponents"
     if ($hasWinget) {
         winget install --id Microsoft.VisualStudio.2022.BuildTools -e --accept-source-agreements --accept-package-agreements --override $vsArgs
     }
@@ -374,16 +385,25 @@ if (-not (Test-Msvc)) {
 # 'msvcrtd.lib'" (issue #2). INCLUDE, LIB and VCToolsInstallDir take precedence for clang/lld.
 $vsPath = & $vswhere -latest @vsFilter -property installationPath
 $vcvars = "$vsPath\VC\Auxiliary\Build\vcvars64.bat"
-if (-not (Test-Path $vcvars)) {
-    Fail "The Visual Studio C++ build tools in $vsPath are incomplete ($vcvars is missing). Open the Visual Studio Installer and choose Repair." 31
-}
-cmd /c "`"$vcvars`" >nul 2>&1 && set" | ForEach-Object {
-    if ($_ -match '^(INCLUDE|LIB|LIBPATH|VCToolsInstallDir|VCToolsVersion|VCINSTALLDIR|VSINSTALLDIR|WindowsSdkDir|WindowsSDKVersion|UniversalCRTSdkDir|UCRTVersion)=(.*)$') {
-        Set-Item "env:$($Matches[1])" $Matches[2]
+# The installation's C++ environment, and whether its C++ libraries are there.
+function Use-VcVars {
+    if (-not (Test-Path $vcvars)) { return $false }
+    cmd /c "`"$vcvars`" >nul 2>&1 && set" | ForEach-Object {
+        if ($_ -match '^(INCLUDE|LIB|LIBPATH|VCToolsInstallDir|VCToolsVersion|VCINSTALLDIR|VSINSTALLDIR|WindowsSdkDir|WindowsSDKVersion|UniversalCRTSdkDir|UCRTVersion)=(.*)$') {
+            Set-Item "env:$($Matches[1])" $Matches[2]
+        }
     }
+    return [bool]($env:LIB -split ';' | Where-Object { $_ -and (Test-Path "$_\msvcrt.lib") })
 }
-if (-not ($env:LIB -split ';' | Where-Object { $_ -and (Test-Path "$_\msvcrt.lib") })) {
-    Fail "The C++ libraries (msvcrt.lib) were not found in $vsPath. Open the Visual Studio Installer, choose Modify and tick 'MSVC v143 - VS 2022 C++ x64/x86 build tools' and a Windows SDK." 31
+# Installed but incomplete or broken: what's missing is added, then the installation repaired, before giving up.
+if (-not (Use-VcVars)) {
+    Write-Host "  The Visual Studio C++ build tools in $vsPath are incomplete; adding what's missing." -ForegroundColor Yellow
+    Invoke-VsInstaller 'modify' $vsPath
+    if (-not (Use-VcVars)) { Invoke-VsInstaller 'repair' $vsPath }
+    if (-not (Use-VcVars)) {
+        Fail ("The Visual Studio C++ build tools in $vsPath are incomplete and couldn't be repaired. Open the Visual Studio " +
+              "Installer, choose Modify and tick 'MSVC v143 - VS 2022 C++ x64/x86 build tools' and a Windows SDK.") 31
+    }
 }
 Write-Host "  Using the C++ tools in $vsPath (MSVC $env:VCToolsVersion, Windows SDK $($env:WindowsSDKVersion.TrimEnd('\')))"
 
