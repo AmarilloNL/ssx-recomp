@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <fstream>
 #include <set>
 #include <string>
@@ -329,7 +330,7 @@ REX_HOOK_RAW(SSX_FN_FENCE_BLOCK) {
 
 void SsxPaceFrameEnd() {
   using clock = std::chrono::steady_clock;
-  static clock::time_point last = clock::now(), hold_until = clock::now(), floor_time;
+  static clock::time_point last = clock::now(), hold_until = clock::now(), floor_time, settle_until;
   static double frame_avg = 0.0, period = 0.0, floor_period = 0.0;
   static uint32_t bound_frames = 0;
   auto now = clock::now();
@@ -337,9 +338,18 @@ void SsxPaceFrameEnd() {
   last = now;
   double wait = double(gpu_wait_ns.exchange(0, std::memory_order_relaxed));
   double target = 1e9 / SsxTargetFps();
-  if (SsxTargetFps() <= 30 || frame > 250e6) {  // vblank pacing, or a loading hitch
+  // vblank pacing, or a stall: a loading hitch, or the GPU's warm-up in the first seconds
+  // (~190 ms frames). Pacing to a stall paced the intro and title menu at ~5 fps.
+  if (SsxTargetFps() <= 30 || frame > 100e6) {
     period = target;
     frame_avg = 0.0;
+    settle_until = now + std::chrono::seconds(1);
+  } else if (now < settle_until) {
+    // Right after a stall the average still holds its slow frames (13 ms against 6.5 ms ones
+    // at the end of the warm-up, which paced the intro at ~73 of 144 fps for ~20 s): let it
+    // settle for a second before judging the GPU.
+    frame_avg = frame_avg > 0.0 ? frame_avg * 0.9 + frame * 0.1 : frame;
+    period = target;
   } else {
     auto floor_memory = floor_period > target * 1.15 ? std::chrono::seconds(10) : std::chrono::seconds(2);
     // A frame over 2.2x the pace (or the average frame time, when the GPU is slower than the
@@ -387,7 +397,10 @@ void SsxPaceFrameEnd() {
       hold_until = now + std::chrono::seconds(1);
     } else if (now > hold_until) {
       bool floor_fresh = now - floor_time < floor_memory;
-      period *= period > floor_period * 1.04 || !floor_fresh ? 0.999 : 0.99995;
+      // The rates are per 1/60 s, applied for this frame's length: per frame, a slow pace
+      // also eased back slowly (0.5%/s at 5 fps instead of ~6%/s).
+      double rate = period > floor_period * 1.04 || !floor_fresh ? 0.999 : 0.99995;
+      period *= std::pow(rate, frame / (1e9 / 60));
     }
     period = std::max(period, target);
     // Only pace below 150 fps: faster, the hitch is too short to feel and pacing costs
