@@ -34,5 +34,9 @@
 #define SSX_FN_LOAD_DATABASE sub_8312AB50
 #define SSX_FN_LOAD_DATABASE_IMP __imp__sub_8312AB50
 
+// Counts the snowflakes (offline geotags) in one drop's list at startup (issue #9, ssx_snowflakes.cpp).
+#define SSX_FN_GEOTAG_COUNT SSX_GUEST(sub_825057F8, sub_824CFF78)
+#define SSX_FN_GEOTAG_COUNT_IMP SSX_GUEST(__imp__sub_825057F8, __imp__sub_824CFF78)
+
 // Vtable of the main loop's periodic task.
 #define SSX_VTABLE_MAIN_LOOP_TASK SSX_GUEST(0x82007738u, 0x82007840u)

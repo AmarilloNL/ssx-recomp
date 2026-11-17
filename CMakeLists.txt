@@ -30,6 +30,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
 set(SSX_SOURCES
     src/main.cpp
     src/ssx_hooks.cpp
+    src/ssx_snowflakes.cpp
     src/ssx_input_lock.cpp
     src/ssx_dlc.cpp
     src/ssx_frame_stats.cpp

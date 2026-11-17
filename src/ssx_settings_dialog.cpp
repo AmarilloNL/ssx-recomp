@@ -32,6 +32,7 @@
 #include "ssx_frame_stats.h"
 #include "ssx_input_lock.h"
 #include "ssx_settings.h"
+#include "ssx_snowflakes.h"
 
 REXCVAR_DEFINE_BOOL(ssx_show_fps, false, "SSX", "Show the frame rate in the top-left corner");
 
@@ -99,7 +100,7 @@ const Bind kBinds[] = {
     {"Start", "keybind_start"},              {"Back", "keybind_back"},
 };
 
-const char* const kTabs[] = {"Display", "Graphics", "Audio", "Controls", "Profile"};
+const char* const kTabs[] = {"Display", "Graphics", "Audio", "Controls", "Profile", "Snowflakes"};
 
 // X_INPUT_GAMEPAD button bits -> ImGui gamepad keys (ImGui's nav: A activates, B cancels).
 const struct {
@@ -571,6 +572,41 @@ void SsxSettingsDialog::DrawAudioTab() {
   ImGui::EndTable();
 }
 
+// Snowflakes (offline geotags) collected per drop: the game itself never shows where they're missing.
+void SsxSettingsDialog::DrawSnowflakesTab() {
+  std::vector<SsxSnowflakeDrop> drops = SsxSnowflakeCounts();
+  if (drops.empty()) {
+    ImGui::TextColored(kTextDim, "The game hasn't loaded its snowflakes yet.");
+    return;
+  }
+  int collected = 0, total = 0;
+  for (const auto& d : drops) collected += d.collected, total += d.total;
+  ImGui::Text("%d of %d snowflakes collected", collected, total);
+  ImGui::TextColored(kTextDim, "From the loaded profile (shown once you're past the title screen).");
+  ImGui::Spacing();
+  if (!ImGui::BeginTable("##snowflakes", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) return;
+  ImGui::TableSetupColumn("Range", ImGuiTableColumnFlags_WidthStretch, 0.35f);
+  ImGui::TableSetupColumn("Drop", ImGuiTableColumnFlags_WidthStretch, 0.25f);
+  ImGui::TableSetupColumn("Collected", ImGuiTableColumnFlags_WidthStretch, 0.40f);
+  ImGui::TableHeadersRow();
+  const std::string* range = nullptr;
+  for (const auto& d : drops) {
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    if (!range || *range != d.range) ImGui::TextUnformatted(d.range.c_str());
+    range = &d.range;
+    ImGui::TableNextColumn();
+    ImGui::TextUnformatted(d.drop.c_str());
+    ImGui::TableNextColumn();
+    if (d.total) {
+      ImGui::TextColored(d.collected == d.total ? kAccent : kText, "%d of %d", d.collected, d.total);
+    } else {
+      ImGui::Text("%d", d.collected);
+    }
+  }
+  ImGui::EndTable();
+}
+
 void SsxSettingsDialog::DrawControlsTab() {
   if (BeginRows("##controls")) {
     Row("Keyboard controls", "Play without a controller.");
@@ -687,7 +723,8 @@ void SsxSettingsDialog::OnDraw(ImGuiIO& io) {
     case 1: DrawGraphicsTab(); break;
     case 2: DrawAudioTab(); break;
     case 3: DrawControlsTab(); break;
-    default: DrawProfileTab(); break;
+    case 4: DrawProfileTab(); break;
+    default: DrawSnowflakesTab(); break;
   }
   ImGui::EndChild();
 
