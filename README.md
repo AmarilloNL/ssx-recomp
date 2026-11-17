@@ -11,6 +11,8 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge)](LICENSE)
 <a href="https://playported.com/ports/1191-ssx/"><img src="https://playported.com/badge.svg" alt="Listed on PlayPorted" height="28"></a>
 
+<a href="https://recomplauncher.com/game/ssx-recomp"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a>
+
 [**⬇️ Download**](../../releases/latest) · [🎬 Gameplay](#gameplay) · [✨ Features](#features) · [🛠️ Install](#installing) · [🐧 Linux](#linux) · [🎮 Controls](#playing) · [🖥️ Graphics](#graphics) · [📦 DLC & update](#adding-dlc) · [🎵 Music](#your-music) · [🗺️ Roadmap](#roadmap)
 
 </div>
@@ -80,6 +82,10 @@ code runs natively, and its Xbox 360 graphics are drawn with Direct3D 12 (on Lin
 From then on **`ssx-recomp.exe` is the game's launcher**: it opens with **Play SSX**,
 **Check for updates** and **Add DLC / rebuild**. (`ssx-recomp.exe --play`, or any options for the
 game, starts the game straight away.)
+
+**Or with [RecompLauncher](https://recomplauncher.com/game/ssx-recomp):** install SSX there, drop in
+your ISO (and the title update if you have it) and it builds the game for you, checks your disc
+against Redump, and shows the main settings on the game's page. Updates rebuild the game the same way.
 
 > [!NOTE]
 > Needs **Windows 10/11 x64**, about **10 GB** free (mostly build tools that other software can

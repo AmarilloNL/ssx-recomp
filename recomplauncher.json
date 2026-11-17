@@ -1,0 +1,199 @@
+{
+  "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+  "format": 1,
+  "name": "SSX",
+  "repo": "AmarilloNL/ssx-recomp",
+  "min": "0.90.0-beta.51",
+  "game": {
+    "kind": "iso",
+    "label": "Your disc image (.iso) of SSX for Xbox 360, from your own disc (serial EA-2413, the USA, Europe and Australia release).",
+    "check": { "xdvdfs": "default.xex" },
+    "dumps": [
+      { "name": "USA, Europe and Australia", "size": 7838695424, "crc32": "72791ccd" }
+    ],
+    "update": {
+      "into": "titleupdate",
+      "name": "ssx-title-update",
+      "label": "Your SSX title update 0.0.3.2 (about 9 MB, from Content\\0000000000000000\\4541096D\\000B0000 on your Xbox 360; if there are two files, the larger one). It adds the gear for levels 11 to 15.",
+      "accepts": "file",
+      "optional": true
+    }
+  },
+  "prepare": {
+    "program": ["ssx-recomp.exe"],
+    "args": ["--prepare", "--iso", "{game}", "--title-update", "{install}/titleupdate/ssx-title-update"],
+    "label": "Recompiling SSX for your PC from your disc (10 to 30 minutes the first time)",
+    "timeout": 7200,
+    "version": "1.6.0",
+    "done": ["{install}/source/dist/SSX/ssx.exe"]
+  },
+  "start": {
+    "program": ["source/dist/SSX/ssx.exe", "ssx-recomp.exe"]
+  },
+  "config": [
+    {
+      "id": "main",
+      "format": "toml",
+      "file": [{ "path": "{install}/source/dist/SSX/ssx.toml" }],
+      "game_path": "game_data_root"
+    }
+  ],
+  "folders": {
+    "logs": [{ "path": "{install}/source/dist/SSX/logs" }],
+    "data": [{ "path": "{install}/source/dist/SSX/userdata" }],
+    "game": [{ "path": "{install}/source/dist/SSX" }]
+  },
+  "exit_codes": {
+    "1": "SSX stopped because it couldn't start or couldn't read your copy of the game. Check it's the complete disc image and pick it again on the game's page."
+  },
+  "groups": [{ "id": "Advanced", "advanced": true }],
+  "settings": [
+    {
+      "id": "window", "label": "Fullscreen", "group": "Display",
+      "help": "Off plays in a window.",
+      "choices": [
+        { "label": "On", "set": { "fullscreen": "true" } },
+        { "label": "Off", "set": { "fullscreen": "false" } }
+      ],
+      "defaults": { "fullscreen": "true" }
+    },
+    {
+      "id": "framerate", "label": "Frame rate", "group": "Display",
+      "help": "30 is the console's. Gameplay keeps real-time speed at any rate.",
+      "choices": [
+        { "label": "30 (original)", "set": { "ssx_framerate": "30" } },
+        { "label": "60", "set": { "ssx_framerate": "60" } },
+        { "label": "120", "set": { "ssx_framerate": "120" } },
+        { "label": "144", "set": { "ssx_framerate": "144" } },
+        { "label": "165", "set": { "ssx_framerate": "165" } },
+        { "label": "240", "set": { "ssx_framerate": "240" } },
+        { "label": "300", "set": { "ssx_framerate": "300" } },
+        { "label": "Match my screen", "set": { "ssx_framerate": "0" } }
+      ],
+      "defaults": { "ssx_framerate": "60" }
+    },
+    {
+      "id": "vsync", "label": "VSync", "group": "Display",
+      "help": "No tearing on screens without G-Sync or FreeSync, like handhelds.",
+      "choices": [
+        { "label": "Off", "set": { "ssx_vsync": "false" } },
+        { "label": "On", "set": { "ssx_vsync": "true" } }
+      ],
+      "defaults": { "ssx_vsync": "false" }
+    },
+    {
+      "id": "fps", "label": "Show FPS", "group": "Display",
+      "help": "The frame rate in the top-left corner.",
+      "choices": [
+        { "label": "Off", "set": { "ssx_show_fps": "false" } },
+        { "label": "On", "set": { "ssx_show_fps": "true" } }
+      ],
+      "defaults": { "ssx_show_fps": "false" }
+    },
+    {
+      "id": "freeride_hud", "label": "Boost meter in freeride", "group": "Display",
+      "help": "The boost and tricky meters while you freeride.",
+      "choices": [
+        { "label": "Off", "set": { "ssx_freeride_hud": "false" } },
+        { "label": "On", "set": { "ssx_freeride_hud": "true" } }
+      ],
+      "defaults": { "ssx_freeride_hud": "false" }
+    },
+    {
+      "id": "resolution", "label": "Resolution", "group": "Graphics",
+      "help": "How many pixels the game is drawn with: higher is sharper, but heavier on the graphics card.",
+      "choices": [
+        { "label": "Match my screen", "set": { "regpu_resolution": "\"screen\"" } },
+        { "label": "720p", "set": { "regpu_resolution": "\"1280x720\"" } },
+        { "label": "1080p", "set": { "regpu_resolution": "\"1920x1080\"" } },
+        { "label": "1440p", "set": { "regpu_resolution": "\"2560x1440\"" } },
+        { "label": "4K", "set": { "regpu_resolution": "\"3840x2160\"" } }
+      ],
+      "defaults": { "regpu_resolution": "\"screen\"", "ssx_renderer": "\"regpu\"" },
+      "when": { "ssx_renderer": "\"regpu\"" }
+    },
+    {
+      "id": "filtering", "label": "Texture filtering", "group": "Graphics",
+      "help": "Sharper textures on the slopes at steep angles. Costs next to nothing.",
+      "choices": [
+        { "label": "Game's own", "set": { "anisotropic_override": "-1" } },
+        { "label": "Off", "set": { "anisotropic_override": "0" } },
+        { "label": "2x", "set": { "anisotropic_override": "2" } },
+        { "label": "4x", "set": { "anisotropic_override": "3" } },
+        { "label": "8x", "set": { "anisotropic_override": "4" } },
+        { "label": "16x", "set": { "anisotropic_override": "5" } }
+      ],
+      "defaults": { "anisotropic_override": "3" }
+    },
+    {
+      "id": "render_size", "label": "3D render size", "group": "Graphics",
+      "help": "High is the sharpest size the game's renderer supports without glitches.",
+      "choices": [
+        { "label": "High (1200 x 640)", "set": { "ssx_render_resolution": "\"high\"" } },
+        { "label": "Original (1120 x 584)", "set": { "ssx_render_resolution": "\"original\"" } }
+      ],
+      "defaults": { "ssx_render_resolution": "\"high\"" }
+    },
+    {
+      "id": "volume", "label": "Volume", "group": "Audio",
+      "slider": { "key": "ssx_volume", "min": 0, "max": 100, "step": 5, "format": "%d" },
+      "defaults": { "ssx_volume": "100" }
+    },
+    {
+      "id": "online_badges", "label": "Online-only badges", "group": "Profile",
+      "help": "Shows the badges that needed EA's servers as earned.",
+      "choices": [
+        { "label": "Off", "set": { "ssx_online_badges": "false" } },
+        { "label": "On", "set": { "ssx_online_badges": "true" } }
+      ],
+      "defaults": { "ssx_online_badges": "false" }
+    },
+    {
+      "id": "renderer", "label": "Renderer", "group": "Advanced",
+      "help": "ReGPU is faster and sharper, up to 4K. Standard is the previous renderer, if something looks wrong.",
+      "choices": [
+        { "label": "ReGPU (recommended)", "set": { "ssx_renderer": "\"regpu\"" } },
+        { "label": "Standard", "set": { "ssx_renderer": "\"standard\"" } }
+      ],
+      "defaults": { "ssx_renderer": "\"regpu\"" }
+    },
+    {
+      "id": "scale", "label": "Resolution scale", "group": "Advanced",
+      "help": "Standard renderer: N x N times as many pixels. 2x is sharp; 3x is about 4K and holds 60 FPS at most.",
+      "choices": [
+        { "label": "1x (fastest)", "set": { "resolution_scale": "1" } },
+        { "label": "2x", "set": { "resolution_scale": "2" } },
+        { "label": "3x", "set": { "resolution_scale": "3" } }
+      ],
+      "defaults": { "resolution_scale": "1", "ssx_renderer": "\"regpu\"" },
+      "when": { "ssx_renderer": "\"standard\"" }
+    },
+    {
+      "id": "upscaling", "label": "Upscaling", "group": "Advanced",
+      "help": "Standard renderer: how the picture is fitted to your screen. FSR is sharpest at 1x.",
+      "choices": [
+        { "label": "AMD FSR 1", "set": { "present_effect": "\"fsr\"" } },
+        { "label": "AMD CAS", "set": { "present_effect": "\"cas\"" } },
+        { "label": "Bilinear", "set": { "present_effect": "\"bilinear\"" } }
+      ],
+      "defaults": { "present_effect": "\"fsr\"", "ssx_renderer": "\"regpu\"" },
+      "when": { "ssx_renderer": "\"standard\"" }
+    },
+    {
+      "id": "aa", "label": "Anti-aliasing", "group": "Advanced",
+      "help": "Standard renderer: smooths jagged edges after drawing.",
+      "choices": [
+        { "label": "Off", "set": { "swap_post_effect": "\"none\"" } },
+        { "label": "FXAA", "set": { "swap_post_effect": "\"fxaa\"" } },
+        { "label": "FXAA (strong)", "set": { "swap_post_effect": "\"fxaa_extreme\"" } }
+      ],
+      "defaults": { "swap_post_effect": "\"none\"", "ssx_renderer": "\"regpu\"" },
+      "when": { "ssx_renderer": "\"standard\"" }
+    }
+  ],
+  "actions": [
+    { "id": "data", "label": "Saves, DLC and music", "help": "Put DLC packages in its dlc folder and your music in its music folder.", "open": "data" },
+    { "id": "logs", "label": "Logs", "help": "The game's logs, for a bug report.", "open": "logs" },
+    { "id": "shaders", "label": "Shader cache", "help": "Shaders the game has built, so later runs don't stutter. Clearing only helps if graphics look wrong after an update.", "clear": "game/shadercache" }
+  ]
+}
