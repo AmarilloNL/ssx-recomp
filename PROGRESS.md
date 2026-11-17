@@ -502,8 +502,7 @@ using the ReXGlue SDK (prebuilt nightly 0.10.0.24 in `tools/rexglue-sdk/win-amd6
   sub_824D0330(set owner this+32, type 3, id) adds one; sub_8240F030 handles a pickup.
   Id of a snowflake = (Id << 32) + fnv1_32("<drop>_track") * 10^10 (mod 2^64), built in
   sub_824D06E0 (key from its r4). Disc: the per-list count is sub_825057F8 (same layout; no 1000 cap).
-  F1 > Snowflakes (src/ssx_snowflakes.cpp) shows collected / total per drop; a save can hold ids of
-  rockies0706, which has no list (the game's "N of 599" counts them), shown as Other. Drop names:
+  F1 > Snowflakes (src/ssx_snowflakes.cpp) shows collected / total per drop, by range and peak. Drop names:
   each drop's database record (sub_82375690 looks one up by its key) has fnv1_32("<code>_track") at +4
   and a pointer to TXT_NM_DRP_<RANGE>_<peak>_<n> at +0x24 (peak: TXT_NM_PEA_<RANGE>_<peak>); a track
   has several (World Tour, Explore, "NOT USED"). Found by a heap scan, named by the game's localize

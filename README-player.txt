@@ -14,11 +14,14 @@ Settings
        opens it, d-pad/stick + A to change, LB/RB switch tabs, B closes.
        Changes are saved to ssx.toml
        next to ssx.exe; some need a restart (the menu offers "Restart now").
-       Display   fullscreen, frame rate (30 to 300, or match your monitor), FPS counter
+       Display   fullscreen, frame rate (30 to 300, or match your monitor), VSync,
+                 FPS counter, the boost meter in freeride
        Graphics  resolution scale, upscaling (AMD FSR 1 by default), sharpness,
                  anti-aliasing, texture filtering
        Audio     volume
        Controls  keyboard, vibration, deadzone, key bindings
+       Profile   your name and picture, the badges that need EA's servers
+       Snowflakes  how many snowflakes you have on every drop
 
   Tip: 1x + FSR runs much faster than 2x and still looks sharp.
        2x is the sharpest but limited to around 60 fps by the GPU emulation.

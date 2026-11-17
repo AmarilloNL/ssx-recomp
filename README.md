@@ -56,6 +56,9 @@ code runs natively, and its Xbox 360 graphics are drawn with Direct3D 12 (on Lin
 | 📦 **DLC** | Mt. Eddie, Japan and the other packs, from your own console ([how](#adding-dlc)) |
 | 📈 **Title update** | the game's last update, with the gear for levels 11 to 15 ([how](#title-update)), and [riders up to level 15](#level-15) |
 | 🎵 **Your own music** | your music folders as playlists in the game's Music menu, remixed live as you ride ([how](#your-music)) |
+| ❄️ **Snowflake tracker** | how many snowflakes you have on every drop, per range and peak (settings → **Snowflakes**) |
+| 🏂 **Boost meter in freeride** | the boost and tricky meters while you freeride (settings → **Display**) |
+| 🏅 **Online-only badges** | the badges that need EA's servers, shown as earned (settings → **Profile**) |
 
 <a id="installing"></a>
 
@@ -172,7 +175,8 @@ own ISO, by an installer script:
 > [!TIP]
 > - **More frames:** pick a lower drawing size in **F1 → Graphics → Resolution**.
 > - **Tearing** (a horizontal cut through the picture) on a screen without G-Sync/FreeSync, like a
->   handheld? Turn on **VSync** in **F1 → Display** and restart.
+>   handheld? Turn on **VSync** in **F1 → Display**. It works with any frame rate (with the standard
+>   renderer, restart after turning it on).
 > - **The game won't start after changing a setting?** Delete `ssx.toml` next to `ssx.exe`.
 > - **Portable:** put a `portable.txt` next to `ssx.exe` (or tick **Portable** in the installer) and
 >   saves, DLC and music live in a `userdata` folder there instead of `Documents\ssx`.
@@ -388,12 +392,16 @@ The game is playable and is being tested by playing through the whole World Tour
 - Linux: no gamer picture yet, and the standard renderer runs at 1× only.
 - Online features (RiderNet, global events, online races) don't work: they go through Xbox Live,
   which the port can't sign in to. EA's SSX servers themselves are still running for the consoles
-  (on Xbox 360 with fewer features than on PS3).
+  (on Xbox 360 with fewer features than on PS3). The badges that need them can be shown as earned
+  (**F1 → Profile**).
 
 <details>
 <summary><b>✅ Fixed so far</b></summary>
 <br>
 
+- ✅ A snowflake tracker, the boost meter in freeride, the online-only badges, a portable install
+  option, VSync with ReGPU at any frame rate, and full frame rates right from the start
+  (thanks @StephenNarcisse) (1.6.0)
 - ✅ A native Linux version (beta), with ReGPU (1.5.0)
 - ✅ Races on ReGPU no longer sink to 40–60 fps: the snow's trail table uploads in about 1 ms
   instead of 10–20 (1.4.3)
