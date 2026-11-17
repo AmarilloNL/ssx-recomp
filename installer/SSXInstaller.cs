@@ -1041,7 +1041,13 @@ class InstallerForm : Form {
     ExtractOver(zip, source);
     File.Delete(zip);
 
-    var info = new ProcessStartInfo("powershell.exe",
+    // Windows PowerShell by its full path: on some PCs its folder isn't on the PATH (issue #15).
+    string powershell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell\\v1.0\\powershell.exe");
+    if (!File.Exists(powershell)) {
+      throw new FileNotFoundException("Windows PowerShell, which builds the game, wasn't found at " + powershell +
+                                      ". It is part of Windows; a repair of Windows (sfc /scannow) restores it.");
+    }
+    var info = new ProcessStartInfo(powershell,
         "-NoProfile -ExecutionPolicy RemoteSigned -File \"" + Path.Combine(source, "scripts\\build-ssx.ps1") +
         "\" -Iso \"" + iso + "\"" + (titleUpdate != null ? " -TitleUpdate \"" + titleUpdate + "\"" : "") +
         " -NoPause");
