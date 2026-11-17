@@ -5,19 +5,31 @@
 
 #include <rex/ppc/context.h>
 
-// Snowflakes (the game's offline geotags) collected per drop, for the F1 tracker (issue #9).
+// Snowflakes (the game's offline geotags) collected per drop, for the F1 tracker (issue #9). A drop's
+// snowflakes are those of its track(s); a track can be shared by several drops.
 struct SsxSnowflakeDrop {
-  std::string range;  // e.g. "Rockies"
-  std::string peak;   // in the game's language; empty until found
-  std::string drop;   // the drop's name in the game's language ("Drop 05" until found)
-  bool listed = true;  // false: a drop the game's own count leaves out (its total isn't known)
+  std::string name;   // in the game's language ("Drop 05" until found)
+  bool listed = true;  // false: on a track the game's own count leaves out (its total isn't known)
   int collected = 0;
   int total = 0;
 };
+struct SsxSnowflakePeak {
+  std::string name;  // in the game's language; empty until found
+  std::vector<SsxSnowflakeDrop> drops;  // by name
+};
+struct SsxSnowflakeRange {
+  std::string name;  // e.g. "Rockies"
+  int collected = 0, total = 0;  // of its tracks, each counted once
+  std::vector<SsxSnowflakePeak> peaks;  // by name
+};
+struct SsxSnowflakes {
+  int collected = 0, total = 0;  // as the game counts them ("N of 599")
+  std::vector<SsxSnowflakeRange> ranges;  // in the game's order
+};
 
-// By range (the game's order), peak and drop. Empty until the game has loaded its snowflake lists (at
-// startup); the collected counts come from the loaded profile (0 before it loads).
-std::vector<SsxSnowflakeDrop> SsxSnowflakeCounts();
+// Empty until the game has loaded its snowflake lists (at startup); the collected counts come from
+// the loaded profile (0 before it loads).
+SsxSnowflakes SsxSnowflakeCounts();
 
 // Looks up the drops' names (heap scan, localize); call on the game thread (the main loop's tick).
 void SsxSnowflakesTick(PPCContext& ctx, uint8_t* base);

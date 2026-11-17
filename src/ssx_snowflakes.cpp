@@ -23,7 +23,6 @@
 #include <cstdlib>
 #include <mutex>
 #include <string_view>
-#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -46,7 +45,7 @@ struct Drop {
   std::unordered_set<uint32_t> ids;
   bool listed = true;  // in the game's lists (its 599); else only known from collected ones
   std::vector<std::string> name_keys;  // of the drops (events) on this track
-  std::string peak, name;  // in the game's language, once found
+  std::vector<std::pair<std::string, std::string>> drops;  // peak and drop names, once found
 };
 
 std::mutex mutex;
@@ -65,7 +64,7 @@ void AddDrop(std::string_view file, std::string_view csv) {
   size_t end = file.find("_track");
   if (end == std::string_view::npos) return;
   uint32_t key = Fnv1(file.substr(0, end + 6));
-  Drop drop{std::string(file.substr(0, end)), key, uint64_t(key) * 10000000000ull, {}, true, {}, {}, {}};
+  Drop drop{std::string(file.substr(0, end)), key, uint64_t(key) * 10000000000ull, {}, true, {}, {}};
   bool header = true;
   while (!csv.empty()) {
     size_t eol = csv.find('\n');
@@ -174,7 +173,7 @@ void SsxSnowflakesTick(PPCContext& ctx, uint8_t* base) {
   // can have several (World Tour and Explore drops, unused ones).
   std::unordered_map<uint32_t, Drop*> by_key;
   for (Drop& d : drops) {
-    if (!d.name.empty()) continue;
+    if (!d.drops.empty()) continue;
     d.name_keys.clear();
     by_key[d.key] = &d;
   }
@@ -196,22 +195,20 @@ void SsxSnowflakesTick(PPCContext& ctx, uint8_t* base) {
     });
   }
   for (const Drop& d : drops) {
-    if (d.name.empty() && d.name_keys.empty() && name_attempts < 24) return;  // database not (all) loaded yet
+    if (d.drops.empty() && d.name_keys.empty() && name_attempts < 24) return;  // database not (all) loaded yet
   }
   name_attempts = 24;
   for (Drop& d : drops) {
-    if (!d.name.empty()) continue;
+    if (!d.drops.empty()) continue;
     for (const std::string& key : d.name_keys) {
       std::string name = TitleCase(Localize(ctx, base, loc, key));
-      if (name.empty() || name == "Not Used" || d.name.find(name) != std::string::npos) continue;
-      d.name += (d.name.empty() ? "" : " / ") + name;
+      if (name.empty() || name == "Not Used") continue;
       // The peak: TXT_NM_PEA_<RANGE>_<peak>, from TXT_NM_DRP_<RANGE>_<peak>_<drop>.
-      if (d.peak.empty()) {
-        std::string peak = key.substr(0, key.rfind('_'));
-        d.peak = TitleCase(Localize(ctx, base, loc, peak.replace(0, 11, "TXT_NM_PEA_")));
-      }
+      std::string peak_key = key.substr(0, key.rfind('_'));
+      std::pair<std::string, std::string> drop{TitleCase(Localize(ctx, base, loc, peak_key.replace(0, 11, "TXT_NM_PEA_"))), name};
+      if (std::find(d.drops.begin(), d.drops.end(), drop) == d.drops.end()) d.drops.push_back(drop);
+      REXLOG_DEBUG("Snowflakes: {} = {} / {}", d.code, drop.first, drop.second);
     }
-    REXLOG_DEBUG("Snowflakes: {} = {} / {}", d.code, d.peak, d.name);
   }
 }
 
@@ -229,10 +226,9 @@ REX_HOOK_RAW(SSX_FN_GEOTAG_COUNT) {
   SSX_FN_GEOTAG_COUNT_IMP(ctx, base);
 }
 
-std::vector<SsxSnowflakeDrop> SsxSnowflakeCounts() {
+SsxSnowflakes SsxSnowflakeCounts() {
   std::lock_guard<std::mutex> lock(mutex);
-  std::vector<SsxSnowflakeDrop> out;
-  if (drops.empty() || !guest) return out;
+  if (drops.empty() || !guest) return {};
   uint8_t* base = guest;
 
   // The collected set. The game may change it meanwhile (a pickup); a bounded walk over guest
@@ -256,32 +252,50 @@ std::vector<SsxSnowflakeDrop> SsxSnowflakeCounts() {
     auto code = CandidateCodes().find(uint32_t(id));
     if (known || code == CandidateCodes().end()) continue;
     uint32_t key = Fnv1(code->second + "_track");
-    drops.push_back({code->second, key, uint64_t(key) * 10000000000ull, {}, false, {}, {}, {}});
+    drops.push_back({code->second, key, uint64_t(key) * 10000000000ull, {}, false, {}, {}});
     name_attempts = 0;
   }
 
+  // Each track's count goes to its range once and to every drop on it.
+  SsxSnowflakes out;
+  out.collected = int(ids.size());
   for (const Drop& d : drops) {
-    SsxSnowflakeDrop row;
-    size_t range = RangeIndex(d.code);
-    row.range = range < std::size(kRanges) ? std::string(kRanges[range].name) : d.code;
-    row.peak = d.peak;
-    row.drop = !d.name.empty() ? d.name : "Drop " + d.code.substr(d.code.size() - std::min<size_t>(2, d.code.size()));
-    row.listed = d.listed;
-    row.total = int(d.ids.size());
+    int got = 0;
     for (uint64_t id : ids) {
-      if (uint32_t(id) == uint32_t(d.base) && (!d.listed || d.ids.count(uint32_t((id - d.base) >> 32)))) ++row.collected;
+      if (uint32_t(id) == uint32_t(d.base) && (!d.listed || d.ids.count(uint32_t((id - d.base) >> 32)))) ++got;
     }
-    out.push_back(std::move(row));
+    size_t r = RangeIndex(d.code);
+    std::string range_name = r < std::size(kRanges) ? std::string(kRanges[r].name) : d.code;
+    auto range = std::find_if(out.ranges.begin(), out.ranges.end(), [&](auto& x) { return x.name == range_name; });
+    if (range == out.ranges.end()) range = out.ranges.insert(out.ranges.end(), SsxSnowflakeRange{range_name});
+    range->collected += got;
+    range->total += int(d.ids.size());
+    out.total += int(d.ids.size());
+    std::vector<std::pair<std::string, std::string>> names = d.drops;
+    if (names.empty()) names.push_back({"", "Drop " + d.code.substr(d.code.size() - std::min<size_t>(2, d.code.size()))});
+    for (const auto& [peak_name, drop_name] : names) {
+      auto peak = std::find_if(range->peaks.begin(), range->peaks.end(), [&](auto& x) { return x.name == peak_name; });
+      if (peak == range->peaks.end()) peak = range->peaks.insert(range->peaks.end(), SsxSnowflakePeak{peak_name});
+      auto drop = std::find_if(peak->drops.begin(), peak->drops.end(), [&](auto& x) { return x.name == drop_name; });
+      if (drop == peak->drops.end()) drop = peak->drops.insert(peak->drops.end(), SsxSnowflakeDrop{drop_name});
+      drop->collected += got;
+      drop->total += int(d.ids.size());
+      drop->listed = drop->listed && d.listed;
+    }
   }
-  // Range in the game's order, then peak and drop by name.
-  auto range_order = [](const std::string& name) {
+  // Ranges in the game's order, peaks and drops by name.
+  auto range_order = [](const SsxSnowflakeRange& x) {
     for (size_t i = 0; i < std::size(kRanges); ++i) {
-      if (kRanges[i].name == name) return i;
+      if (kRanges[i].name == x.name) return i;
     }
     return std::size(kRanges);
   };
-  std::stable_sort(out.begin(), out.end(), [&](const SsxSnowflakeDrop& a, const SsxSnowflakeDrop& b) {
-    return std::make_tuple(range_order(a.range), a.peak, a.drop) < std::make_tuple(range_order(b.range), b.peak, b.drop);
-  });
+  std::sort(out.ranges.begin(), out.ranges.end(), [&](auto& a, auto& b) { return range_order(a) < range_order(b); });
+  for (auto& range : out.ranges) {
+    std::sort(range.peaks.begin(), range.peaks.end(), [](auto& a, auto& b) { return a.name < b.name; });
+    for (auto& peak : range.peaks) {
+      std::sort(peak.drops.begin(), peak.drops.end(), [](auto& a, auto& b) { return a.name < b.name; });
+    }
+  }
   return out;
 }

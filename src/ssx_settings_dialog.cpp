@@ -574,61 +574,53 @@ void SsxSettingsDialog::DrawAudioTab() {
 
 // Snowflakes (offline geotags) collected per drop: the game itself never shows where they're missing.
 void SsxSettingsDialog::DrawSnowflakesTab() {
-  std::vector<SsxSnowflakeDrop> drops = SsxSnowflakeCounts();
-  if (drops.empty()) {
+  SsxSnowflakes snowflakes = SsxSnowflakeCounts();
+  if (snowflakes.ranges.empty()) {
     ImGui::TextColored(kTextDim, "The game hasn't loaded its snowflakes yet.");
     return;
   }
-  int collected = 0, total = 0;
-  for (const auto& d : drops) collected += d.collected, total += d.total;
-  ImGui::Text("%d of %d snowflakes collected", collected, total);
-  ImGui::TextColored(kTextDim, "From the loaded profile (shown once you're past the title screen).");
+  ImGui::Text("%d of %d snowflakes collected", snowflakes.collected, snowflakes.total);
+  ImGui::PushStyleColor(ImGuiCol_Text, kTextDim);
+  ImGui::TextWrapped("From the loaded profile (shown once you're past the title screen). Drops that share a "
+                     "track share its snowflakes.");
+  ImGui::PopStyleColor();
   ImGui::Spacing();
   if (!ImGui::BeginTable("##snowflakes", 2, ImGuiTableFlags_SizingStretchProp)) return;
   ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthStretch, 0.8f);
   ImGui::TableSetupColumn("count", ImGuiTableColumnFlags_WidthStretch, 0.2f);
-  auto count = [](int got, int of, bool listed) {
-    if (!listed) {
-      ImGui::TextColored(kTextDim, "%d", got);
-    } else {
-      ImGui::TextColored(got == of ? kAccent : kText, "%d / %d", got, of);
-    }
-  };
-  // Ranges, each with its peaks and their drops (already in that order).
-  for (size_t r = 0; r < drops.size();) {
-    size_t r_end = r;
-    int got = 0, of = 0;
-    while (r_end < drops.size() && drops[r_end].range == drops[r].range) {
-      got += drops[r_end].collected, of += drops[r_end].total;
-      ++r_end;
-    }
+  const float indent = ImGui::GetStyle().IndentSpacing;
+  for (const auto& range : snowflakes.ranges) {
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
-    if (r) ImGui::Spacing();
-    ImGui::TextColored(kAccent, "%s", drops[r].range.c_str());
+    if (&range != &snowflakes.ranges.front()) ImGui::Spacing();
+    ImGui::TextColored(kAccent, "%s", range.name.c_str());
     ImGui::TableNextColumn();
-    if (r) ImGui::Spacing();
-    count(got, of, true);
-    for (size_t p = r; p < r_end;) {
+    if (&range != &snowflakes.ranges.front()) ImGui::Spacing();
+    ImGui::TextColored(range.collected >= range.total ? kAccent : kText, "%d / %d", range.collected, range.total);
+    for (const auto& peak : range.peaks) {
       ImGui::TableNextRow();
       ImGui::TableNextColumn();
-      ImGui::Indent();
-      ImGui::TextColored(kTextDim, "%s", drops[p].peak.empty() ? "-" : drops[p].peak.c_str());
-      ImGui::Unindent();
-      size_t p_end = p;
-      while (p_end < r_end && drops[p_end].peak == drops[p].peak) ++p_end;
-      for (; p < p_end; ++p) {
-        const SsxSnowflakeDrop& d = drops[p];
+      ImGui::Indent(indent);
+      ImGui::TextColored(kTextDim, "%s", peak.name.empty() ? "-" : peak.name.c_str());
+      ImGui::Unindent(indent);
+      for (const auto& drop : peak.drops) {
         ImGui::TableNextRow();
         ImGui::TableNextColumn();
-        ImGui::Indent(ImGui::GetStyle().IndentSpacing * 2.0f);
-        ImGui::TextWrapped("%s%s", d.drop.c_str(), d.listed ? "" : "  (not in the game's count)");
-        ImGui::Unindent(ImGui::GetStyle().IndentSpacing * 2.0f);
+        ImGui::Indent(indent * 2.0f);
+        ImGui::TextUnformatted(drop.name.c_str());
+        if (!drop.listed) {
+          ImGui::SameLine();
+          ImGui::TextColored(kTextDim, "(not in the game's count)");
+        }
+        ImGui::Unindent(indent * 2.0f);
         ImGui::TableNextColumn();
-        count(d.collected, d.total, d.listed);
+        if (drop.listed) {
+          ImGui::TextColored(drop.collected == drop.total ? kAccent : kText, "%d / %d", drop.collected, drop.total);
+        } else {
+          ImGui::TextColored(kTextDim, "%d", drop.collected);
+        }
       }
     }
-    r = r_end;
   }
   ImGui::EndTable();
 }
