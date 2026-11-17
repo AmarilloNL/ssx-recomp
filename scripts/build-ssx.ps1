@@ -224,7 +224,7 @@ if ($NoTitleUpdate) {
 }
 $gameVersion = if (Test-Path $xexp) { '0.0.3.2' } else { '0.0.0.2' }
 if ($gameVersion -eq '0.0.3.2' -and -not (Test-Path "$updateDir\patch0.big")) {
-    Fail "The title update's files are incomplete. Start ssx-recomp.exe, click Update / add DLC and add the title update."
+    Fail "The title update's files are incomplete. Start ssx-recomp.exe, click Add DLC / rebuild and add the title update."
 }
 Write-Host ("Building the game version $gameVersion" + $(if ($gameVersion -eq '0.0.3.2') { ' (with the title update).' } else { ' (the disc release).' }))
 # Code generated for the other version is removed, so it is generated again from scratch.
@@ -389,14 +389,21 @@ Step "Recompiling SSX and building the PC version (this takes a while)"
 & "$root\scripts\package.ps1" -Preset ssx-player -Clang $clang
 if (-not (Test-Path "$root\dist\SSX\ssx.exe")) { Fail "The build failed." }
 # The ReGPU renderer next to ssx.exe (the game's default). Without it the game uses the standard
-# renderer, so a failed download isn't fatal.
+# renderer, so a failed download isn't fatal. Kept in tools\regpu like the SDK, so a rebuild
+# downloads it only when the package version changes.
 if (-not $NoReGpu) {
     Step "Installing the ReGPU renderer"
-    $zip = "$env:TEMP\$ReGpuPackage.zip"
+    $regpu = "$root\tools\regpu"
     try {
-        Invoke-WebRequest $ReGpuPackageUrl -OutFile $zip -UseBasicParsing
-        Expand-Archive $zip "$root\dist\SSX" -Force
-        Remove-Item $zip
+        if (-not (Test-Path "$regpu\.version") -or (Get-Content "$regpu\.version") -ne $ReGpuPackage) {
+            $zip = "$env:TEMP\$ReGpuPackage.zip"
+            Invoke-WebRequest $ReGpuPackageUrl -OutFile $zip -UseBasicParsing
+            if (Test-Path $regpu) { Remove-Item $regpu -Recurse -Force }
+            Expand-Archive $zip $regpu -Force
+            Remove-Item $zip
+            Set-Content "$regpu\.version" $ReGpuPackage
+        }
+        Copy-Item "$regpu\*" "$root\dist\SSX" -Recurse -Force -Exclude .version
         Write-Host "ReGPU renderer installed."
     } catch {
         Write-Host "Couldn't download the ReGPU renderer ($($_.Exception.Message)); the game will use the standard renderer." -ForegroundColor Yellow

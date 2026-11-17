@@ -62,14 +62,19 @@ static class Program {
 
   // ssx-recomp.exe is the one program the player starts, from the folder SSX lives in: it builds
   // the game into source\ next to itself, and everything the game keeps (saves, DLC, music,
-  // shader cache, settings) stays in that folder too. Without a built game it opens the setup;
-  // with one it opens on the Play page (Play, or Update / add DLC, which runs the setup again).
-  // Any other arguments, or --play, start the game straight away with them (minus --play).
+  // shader cache, settings) stays in that folder too. It carries this port's source code (embedded
+  // by build-installer.ps1), so building never downloads the port: only the Update button goes
+  // online for the port, and replaces this exe with the latest release's, which then rebuilds.
+  // Without a built game it opens the setup; with one it opens on the Play page. Any other
+  // arguments, or --play, start the game straight away with them (minus --play).
   [STAThread]
   static int Main(string[] args) {
+    Install.RemoveReplacedExe();
     if (args.Length > 0 && Array.IndexOf(HeadlessOptions, args[0]) >= 0) return Headless(args);
     string folder = Install.Folder;
-    bool setup = args.Length > 0 && args[0] == "--setup";
+    // --rebuild: started by the Update button after replacing this exe; rebuilds with the ISO the game uses.
+    bool rebuild = args.Length > 0 && args[0] == "--rebuild";
+    bool setup = rebuild || (args.Length > 0 && args[0] == "--setup");
     if (!setup && args.Length > 0 && Install.Built(folder)) {
       try {
         Install.StartGame(folder, Array.FindAll(args, a => a != "--play"));
@@ -81,7 +86,7 @@ static class Program {
     try { SetProcessDPIAware(); } catch (Exception) { }
     Application.EnableVisualStyles();
     Application.SetCompatibleTextRenderingDefault(false);
-    Application.Run(new InstallerForm(folder, setup));
+    Application.Run(new InstallerForm(folder, setup, rebuild));
     return 0;
   }
 
@@ -116,7 +121,10 @@ static class Program {
       InstallerForm.CopyDlc(dlc.ToArray(), Install.UserData(folder), line);
       int code = InstallerForm.Build(Path.GetFullPath(iso), folder,
                                      titleUpdate != null ? Path.GetFullPath(titleUpdate) : null, line, null);
-      if (code == 0 && File.Exists(Path.Combine(folder, "source\\dist\\SSX\\ssx.exe"))) return 0;
+      if (code == 0 && Install.Built(folder)) {
+        Install.MarkBuilt(folder);
+        return 0;
+      }
       Console.Error.WriteLine("The build failed. The full log is build-ssx.log in " + Path.Combine(folder, "source"));
       return 1;
     } catch (Exception ex) {
@@ -162,6 +170,141 @@ static class Install {
       }
     } catch (Exception) { }
     return n;
+  }
+
+  // ---- The port's source, carried in this exe ----------------------------------------------
+
+  // Which commit of the port this exe carries (build-installer.ps1 embeds source.zip and its id).
+  public static string SourceId {
+    get {
+      using (Stream s = Assembly.GetExecutingAssembly().GetManifestResourceStream("source-id.txt")) {
+        return s == null ? null : new StreamReader(s).ReadToEnd().Trim();
+      }
+    }
+  }
+
+  static string Stamp(string folder, string name) { return Path.Combine(folder, "source\\" + name); }
+  static string ReadStamp(string path) {
+    try { return File.Exists(path) ? File.ReadAllText(path).Trim() : null; } catch (Exception) { return null; }
+  }
+
+  // The game is built, but from other source than this exe carries (an update replaced this exe,
+  // or the game was built by an older installer): building again brings the game up to date.
+  public static bool NeedsRebuild(string folder) {
+    return Built(folder) && ReadStamp(Stamp(folder, ".ssx-built")) != SourceId;
+  }
+
+  public static void MarkBuilt(string folder) {
+    try { File.WriteAllText(Stamp(folder, ".ssx-built"), SourceId ?? ""); } catch (Exception) { }
+  }
+
+  // Unpacks the source this exe carries into <folder>\source, unless it is already there.
+  // Earlier build output (tools, out, dist) stays, so a rebuild only redoes what changed.
+  public static void UnpackSource(string folder, Action<string> onLine) {
+    string source = Path.Combine(folder, "source"), stamp = Stamp(folder, ".ssx-source");
+    if (SourceId != null && ReadStamp(stamp) == SourceId && File.Exists(Path.Combine(source, "scripts\\build-ssx.ps1"))) {
+      onLine("The port's source (" + SourceId + ") is already unpacked.");
+      return;
+    }
+    using (Stream s = Assembly.GetExecutingAssembly().GetManifestResourceStream("source.zip")) {
+      if (s == null) {
+        throw new InvalidOperationException("This ssx-recomp.exe carries no source code: build it with " +
+                                            "installer\\build-installer.ps1, which embeds it.");
+      }
+      using (var archive = new ZipArchive(s)) {
+        foreach (var entry in archive.Entries) {  // one top-level folder, left out
+          int slash = entry.FullName.IndexOf('/');
+          string rel = slash >= 0 ? entry.FullName.Substring(slash + 1) : entry.FullName;
+          if (rel.Length == 0) continue;
+          string path = Path.Combine(source, rel.Replace('/', '\\'));
+          if (rel.EndsWith("/")) { Directory.CreateDirectory(path); continue; }
+          Directory.CreateDirectory(Path.GetDirectoryName(path));
+          entry.ExtractToFile(path, true);
+        }
+      }
+    }
+    File.WriteAllText(stamp, SourceId ?? "");
+    onLine("Unpacked the port's source (" + SourceId + ").");
+  }
+
+  // ---- Updates (only from the Update button) ------------------------------------------------
+
+  const string LatestReleaseApi = "https://api.github.com/repos/AmarilloNL/ssx-recomp/releases/latest";
+
+  // This exe's version, e.g. 1.6.0 (the releases are tagged v1.6.0).
+  public static string AppVersion {
+    get {
+      var a = (AssemblyInformationalVersionAttribute)Attribute.GetCustomAttribute(
+          Assembly.GetExecutingAssembly(), typeof(AssemblyInformationalVersionAttribute));
+      return a != null ? a.InformationalVersion : "0.0.0";
+    }
+  }
+
+  // The latest release's tag, and the download of its ssx-recomp.exe (null when it has none).
+  public static string LatestRelease(out string exeUrl) {
+    ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+    using (var web = new WebClient()) {
+      web.Headers[HttpRequestHeader.UserAgent] = "ssx-recomp";
+      string json = web.DownloadString(LatestReleaseApi);
+      Match tag = Regex.Match(json, "\"tag_name\"\\s*:\\s*\"([^\"]+)\"");
+      Match exe = Regex.Match(json, "\"browser_download_url\"\\s*:\\s*\"(https://[^\"]+/ssx-recomp\\.exe)\"");
+      exeUrl = exe.Success ? exe.Groups[1].Value : null;
+      return tag.Success ? tag.Groups[1].Value : null;
+    }
+  }
+
+  static Version ParseVersion(string text) {
+    Version v;
+    return text != null && Version.TryParse(text.TrimStart('v', 'V'), out v) ? v : null;
+  }
+
+  public static bool IsNewer(string tag) {
+    Version latest = ParseVersion(tag), own = ParseVersion(AppVersion);
+    return latest != null && own != null && latest > own;
+  }
+
+  // Downloads a release's ssx-recomp.exe next to this one (as ssx-recomp.exe.new) and checks it
+  // is that version's program. Returns its path.
+  public static string DownloadUpdate(string url, string tag) {
+    string file = Self + ".new";
+    ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+    using (var web = new WebClient()) {
+      web.Headers[HttpRequestHeader.UserAgent] = "ssx-recomp";
+      web.DownloadFile(url, file);
+    }
+    string version = FileVersionInfo.GetVersionInfo(file).ProductVersion;
+    if (ParseVersion(version) == null || ParseVersion(version) != ParseVersion(tag)) {
+      File.Delete(file);
+      throw new InvalidDataException("the download isn't ssx-recomp.exe " + tag);
+    }
+    return file;
+  }
+
+  // Puts newExe in target's place. A running exe can be renamed, so target may be this exe: it
+  // becomes target.old, which the new exe deletes when it starts.
+  public static void Replace(string newExe, string target) {
+    string old = target + ".old";
+    if (File.Exists(old)) File.Delete(old);
+    File.Move(target, old);
+    try {
+      File.Move(newExe, target);
+    } catch (Exception) {
+      File.Move(old, target);
+      throw;
+    }
+  }
+
+  // Deletes the exe an update replaced (it may still be closing).
+  public static void RemoveReplacedExe() {
+    string old = Self + ".old";
+    if (!File.Exists(old)) return;
+    var thread = new Thread(delegate() {
+      for (int i = 0; i < 20 && File.Exists(old); i++) {
+        try { File.Delete(old); } catch (Exception) { Thread.Sleep(250); }
+      }
+    });
+    thread.IsBackground = true;
+    thread.Start();
   }
 
   public static void StartGame(string folder, string[] args) {
@@ -642,13 +785,12 @@ class Badge : Painted {
 }
 
 class InstallerForm : Form {
-  const string SourceZipUrl = "https://github.com/AmarilloNL/ssx-recomp/archive/refs/heads/main.zip";
   const string RepoUrl = "https://github.com/AmarilloNL/ssx-recomp";
 
   [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 
   static readonly string[] Stages = {
-    "Download the port's source code", "Check your ISO", "Install the build tools",
+    "Unpack the port's source code", "Check your ISO", "Install the build tools",
     "Download the recompiler SDK", "Recompile the Xbox 360 code", "Build the PC version" };
   // Where each stage starts on the overall bar (the last entry is the end).
   static readonly float[] StageStart = { 0f, .02f, .04f, .10f, .18f, .36f, 1f };
@@ -693,8 +835,8 @@ class InstallerForm : Form {
   int page;
 
   // folder: the SSX folder. With the game built there the window opens on the Play page, or with
-  // setup on the Your game page to update it; otherwise on Welcome.
-  public InstallerForm(string folder, bool setup) {
+  // setup on the Your game page (rebuild: and starts building at once); otherwise on Welcome.
+  public InstallerForm(string folder, bool setup, bool rebuild) {
     this.folder = folder;
     Text = "SSX PC Port";
     AutoScaleMode = AutoScaleMode.None;
@@ -733,10 +875,22 @@ class InstallerForm : Form {
       ShowPage(0);
     } else if (setup) {
       ShowPage(1);
+      // After an update: rebuild right away from the ISO the game was built from (its ownership
+      // was confirmed for that build).
+      if (rebuild && iso != null) {
+        ownCheck.Checked = true;
+        Shown += delegate { if (Valid()) StartBuild(); };
+      }
     } else {
-      doneSub.Text = "In " + folder;
+      ShowPlayStatus();
       ShowPage(3);
     }
+  }
+
+  void ShowPlayStatus() {
+    doneSub.Text = Install.NeedsRebuild(folder)
+        ? "Version " + Install.AppVersion + " isn't built yet: click Add DLC / rebuild, then Rebuild."
+        : "Version " + Install.AppVersion + ", in " + folder;
   }
 
   protected override void OnHandleCreated(EventArgs e) {
@@ -873,7 +1027,8 @@ class InstallerForm : Form {
       Body = "F1 (or Back + Start) opens the settings: frame rate, resolution, FSR, controls.\r\n" +
              "Everything stays in this folder: saves, settings, DLC and music (in source\\dist\\SSX\\userdata). " +
              "DLC you added is installed when the game starts.\r\n" +
-             "Update SSX or add DLC and the title update any time with Update below: it rebuilds from the latest source.",
+             "Check for updates gets the latest ssx-recomp.exe and rebuilds SSX with it. Building needs no " +
+             "download of the port: this program carries its source.",
       Tone = Th.Accent };
     tips.Bounds = new Rectangle(x, Th.D(112), w, tips.FitHeight(w));
     p.Controls.Add(tips);
@@ -893,18 +1048,85 @@ class InstallerForm : Form {
         MessageBox.Show(this, "SSX couldn't be started: " + ex.Message, "SSX", MessageBoxButtons.OK, MessageBoxIcon.Warning);
       }
     };
-    var update = new FlatButton("Update / add DLC", false) {
-      Bounds = new Rectangle(x + Th.D(172), y + Th.D(46), Th.D(170), Th.D(44)) };
-    update.Click += delegate { MakeShortcut(); ShowPage(1); };
-    var open = new FlatButton("Open folder", false) {
-      Bounds = new Rectangle(x + Th.D(354), y + Th.D(46), Th.D(140), Th.D(44)) };
-    open.Click += delegate {
+    var update = new FlatButton("Check for updates", false) {
+      Bounds = new Rectangle(x + Th.D(172), y + Th.D(46), Th.D(180), Th.D(44)) };
+    update.Click += delegate { MakeShortcut(); CheckForUpdates(update); };
+    var dlc = new FlatButton("Add DLC / rebuild", false) {
+      Bounds = new Rectangle(x + Th.D(364), y + Th.D(46), Th.D(170), Th.D(44)) };
+    dlc.Click += delegate { MakeShortcut(); ShowPage(1); };
+    var open = new LinkLabel { Text = "Open the SSX folder", Font = Th.F(9.5f, FontStyle.Regular), BackColor = Th.Bg,
+                               LinkColor = Th.Accent, ActiveLinkColor = Th.AccentHover,
+                               LinkBehavior = LinkBehavior.HoverUnderline, AutoSize = true,
+                               Location = new Point(x, y + Th.D(104)) };
+    open.LinkClicked += delegate {
       Process.Start(new ProcessStartInfo("explorer.exe", "\"" + InstallFolder() + "\""));
     };
     p.Controls.Add(play);
     p.Controls.Add(update);
+    p.Controls.Add(dlc);
     p.Controls.Add(open);
   }
+
+  // ---- Updates ----------------------------------------------------------------------------
+
+  // The only time the port goes online: asks GitHub for the latest release and, when it's newer
+  // and the player agrees, swaps this exe for that release's ssx-recomp.exe, which then rebuilds.
+  void CheckForUpdates(FlatButton button) {
+    button.Enabled = false;
+    doneSub.Text = "Checking for updates...";
+    RunInBackground(delegate {
+      string url;
+      string tag = Install.LatestRelease(out url);
+      Ui(delegate { button.Enabled = true; OnLatestRelease(tag, url, button); });
+    }, delegate(Exception ex) {
+      button.Enabled = true;
+      doneSub.Text = "Couldn't check for updates: " + ex.Message;
+    });
+  }
+
+  void OnLatestRelease(string tag, string url, FlatButton button) {
+    if (!Install.IsNewer(tag)) {
+      doneSub.Text = "SSX is up to date (version " + Install.AppVersion + ").";
+      return;
+    }
+    if (url == null) {
+      doneSub.Text = "SSX " + tag + " is out, but its release has no ssx-recomp.exe to update to.";
+      if (MessageBox.Show(this, "SSX " + tag + " is out, but its release has no ssx-recomp.exe to update to.\n\n" +
+                          "Open the release page?", "SSX", MessageBoxButtons.YesNo, MessageBoxIcon.Information) ==
+          DialogResult.Yes) Process.Start(RepoUrl + "/releases/latest");
+      return;
+    }
+    if (MessageBox.Show(this, "SSX " + tag + " is available (you have " + Install.AppVersion + ").\n\n" +
+                        "Update now? This downloads the new ssx-recomp.exe and rebuilds SSX with it, which takes " +
+                        "a few minutes. Your saves and settings stay.", "SSX", MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Question) != DialogResult.Yes) {
+      doneSub.Text = "SSX " + tag + " is available.";
+      return;
+    }
+    button.Enabled = false;
+    doneSub.Text = "Downloading SSX " + tag + "...";
+    RunInBackground(delegate {
+      Install.Replace(Install.DownloadUpdate(url, tag), Install.Self);
+      Ui(delegate {
+        Process.Start(new ProcessStartInfo(Install.Self, "--rebuild") { WorkingDirectory = folder });
+        Close();
+      });
+    }, delegate(Exception ex) {
+      button.Enabled = true;
+      doneSub.Text = "The update failed: " + ex.Message;
+    });
+  }
+
+  // Runs work on a background thread; a failure goes to onError on the UI thread.
+  void RunInBackground(Action work, Action<Exception> onError) {
+    var thread = new Thread(delegate() {
+      try { work(); } catch (Exception ex) { Ui(delegate { onError(ex); }); }
+    });
+    thread.IsBackground = true;
+    thread.Start();
+  }
+
+  void Ui(Action action) { if (!IsDisposed) BeginInvoke(action); }
 
   void BuildFooter(int y, int h) {
     var foot = new Panel { Bounds = new Rectangle(0, y, ClientSize.Width, h), BackColor = Th.Rail };
@@ -943,7 +1165,10 @@ class InstallerForm : Form {
     nextButton.Primary = true;
     switch (page) {
       case 0: nextButton.Text = "Next"; break;
-      case 1: nextButton.Text = Install.Built(folder) ? "Update" : "Install"; nextButton.Enabled = Valid(); break;
+      case 1:
+        nextButton.Text = !Install.Built(folder) ? "Install" : DlcOnly() ? "Add DLC" : "Rebuild";
+        nextButton.Enabled = Valid();
+        break;
       case 2:
         nextButton.Text = running ? "Cancel" : "Retry";
         nextButton.Primary = !running;
@@ -954,13 +1179,33 @@ class InstallerForm : Form {
   }
 
   bool Valid() {
-    return ownCheck.Checked && File.Exists(isoField.Box.Text.Trim());
+    return DlcOnly() || (ownCheck.Checked && File.Exists(isoField.Box.Text.Trim()));
+  }
+
+  // Only DLC picked for a game that is built and up to date: the DLC is copied for the game to
+  // install on its next start, no rebuild. (The title update changes the game's code: rebuild.)
+  bool DlcOnly() {
+    return dlcFiles.Count > 0 && titleUpdateFile == null && Install.Built(folder) && !Install.NeedsRebuild(folder);
+  }
+
+  void AddDlcOnly() {
+    var problems = new List<string>();
+    CopyDlc(dlcFiles.ToArray(), Install.UserData(folder), delegate(string line) {
+      if (line.StartsWith("DLC: could not")) problems.Add(line);
+    });
+    doneSub.Text = problems.Count > 0 ? problems[0] : "DLC added: the game installs it when it starts.";
+    dlcFiles.Clear();
+    SetHint(dlcHint, "Added. Add more files any time.", Th.Faint);
+    ShowPage(3);
   }
 
   void Next() {
     switch (page) {
       case 0: ShowPage(1); break;
-      case 1: if (Valid()) StartBuild(); break;
+      case 1:
+        if (!Valid()) break;
+        if (DlcOnly()) AddDlcOnly(); else StartBuild();
+        break;
       case 2:
         if (running) {
           if (MessageBox.Show(this, "Stop the installation?", "SSX PC Port Setup", MessageBoxButtons.YesNo,
@@ -1060,6 +1305,7 @@ class InstallerForm : Form {
                          " Files in another folder? Click Add files... again.",
                 Th.Good);
       }
+      UpdateFooter();
     }
   }
 
@@ -1142,17 +1388,14 @@ class InstallerForm : Form {
     }
   }
 
-  // Downloads the source into <folder>\source and runs its builder (scripts\build-ssx.ps1), each output
-  // line to onLine; started gets the builder's process (to stop it). Returns the builder's exit code.
+  // Unpacks the source this exe carries into <folder>\source and runs its builder
+  // (scripts\build-ssx.ps1), each output line to onLine; started gets the builder's process (to stop
+  // it). Returns the builder's exit code. The port itself is never downloaded here; the builder
+  // only downloads build tools and packages it doesn't have yet.
   internal static int Build(string iso, string folder, string titleUpdate, Action<string> onLine, Action<Process> started) {
     string source = Path.Combine(folder, "source");
-    onLine("==> Downloading the SSX PC port source (no game files)");
-    Directory.CreateDirectory(folder);
-    string zip = Path.Combine(folder, "source.zip");
-    ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
-    using (var web = new WebClient()) web.DownloadFile(SourceZipUrl, zip);
-    ExtractOver(zip, source);
-    File.Delete(zip);
+    onLine("==> Unpacking the SSX PC port source (no game files)");
+    Install.UnpackSource(folder, onLine);
 
     // Windows PowerShell by its full path: on some PCs its folder isn't on the PATH (issue #15).
     string powershell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell\\v1.0\\powershell.exe");
@@ -1189,6 +1432,7 @@ class InstallerForm : Form {
     try {
       int code = Build(iso, folder, titleUpdate, OnLine, delegate(Process p) { buildProcess = p; });
       bool ok = code == 0 && File.Exists(GameExe());
+      if (ok) Install.MarkBuilt(folder);
       Finish(ok, ok ? "" : cancelled ? "Installation cancelled."
                          : "Something went wrong. The full log is saved as build-ssx.log in the source folder.");
     } catch (Exception ex) {
@@ -1216,7 +1460,7 @@ class InstallerForm : Form {
   }
 
   static int StageOf(string text) {
-    if (text.StartsWith("Downloading the SSX")) return 0;
+    if (text.StartsWith("Unpacking the SSX")) return 0;
     if (text.StartsWith("Select your SSX")) return 1;
     if (text.StartsWith("Checking build tools")) return 2;
     if (text.StartsWith("Downloading the ReXGlue")) return 3;
@@ -1297,22 +1541,6 @@ class InstallerForm : Form {
     stageList.Visible = !show;
     detailsLink.Text = show ? "Hide details" : "Show details";
     if (show) { logBox.SelectionStart = logBox.TextLength; logBox.ScrollToCaret(); }
-  }
-
-  // Extracts the GitHub archive (single top-level folder) over `target`, keeping
-  // earlier build output (tools, out, dist) so a re-run only rebuilds what changed.
-  static void ExtractOver(string zip, string target) {
-    using (var archive = ZipFile.OpenRead(zip)) {
-      foreach (var entry in archive.Entries) {
-        int slash = entry.FullName.IndexOf('/');
-        string rel = slash >= 0 ? entry.FullName.Substring(slash + 1) : entry.FullName;
-        if (rel.Length == 0) continue;
-        string path = Path.Combine(target, rel.Replace('/', '\\'));
-        if (rel.EndsWith("/")) { Directory.CreateDirectory(path); continue; }
-        Directory.CreateDirectory(Path.GetDirectoryName(path));
-        entry.ExtractToFile(path, true);
-      }
-    }
   }
 
   string InstallFolder() { return folder; }
