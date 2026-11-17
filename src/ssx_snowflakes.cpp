@@ -47,14 +47,14 @@ struct Drop {
   uint64_t base;     // key * 10^10
   std::unordered_set<uint32_t> ids;
   bool listed = true;  // in the game's lists (its 599); else only known from collected ones
-  std::string range;   // its record's range (asset name), once found
-  std::vector<std::string> name_keys;  // of the drops (events) on this track
+  std::string range;   // its records' range (asset name), once found
   std::vector<std::pair<std::string, std::string>> drops;  // peak and drop names, once found
 };
 
 std::mutex mutex;
 std::vector<Drop> drops;
 int name_attempts = 0;  // of the name lookup; back to 0 when a drop is added
+std::atomic<bool> refresh_names{false};
 uint32_t owner = 0;
 uint8_t* guest = nullptr;
 
@@ -68,7 +68,7 @@ void AddDrop(std::string_view file, std::string_view csv) {
   size_t end = file.find("_track");
   if (end == std::string_view::npos) return;
   uint32_t key = Fnv1(file.substr(0, end + 6));
-  Drop drop{std::string(file.substr(0, end)), key, uint64_t(key) * 10000000000ull, {}, true, {}, {}, {}};
+  Drop drop{std::string(file.substr(0, end)), key, uint64_t(key) * 10000000000ull, {}, true, {}, {}};
   bool header = true;
   while (!csv.empty()) {
     size_t eol = csv.find('\n');
@@ -88,7 +88,7 @@ void AddDrop(std::string_view file, std::string_view csv) {
   if (!outside_added) {
     outside_added = true;
     uint32_t eddie = Fnv1("rockies0706_track");
-    Drop d{"rockies0706", eddie, uint64_t(eddie) * 10000000000ull, {}, false, {}, {}, {}};
+    Drop d{"rockies0706", eddie, uint64_t(eddie) * 10000000000ull, {}, false, {}, {}};
     for (uint32_t id = 1; id <= 31; ++id) d.ids.insert(id);
     drops.push_back(std::move(d));
   }
@@ -180,9 +180,15 @@ uint32_t Be32(const uint8_t* p) { return uint32_t(p[0]) << 24 | p[1] << 16 | p[2
 
 }  // namespace
 
+void SsxSnowflakesRefreshNames() { refresh_names = true; }
+
 void SsxSnowflakesTick(PPCContext& ctx, uint8_t* base) {
   using clock = std::chrono::steady_clock;
   static clock::time_point next;
+  if (refresh_names.exchange(false)) {
+    name_attempts = 0;
+    next = {};
+  }
   if (name_attempts >= 24 || clock::now() < next) return;  // every 5 s, for 2 minutes at most
   next = clock::now() + std::chrono::seconds(5);
   std::lock_guard<std::mutex> lock(mutex);
@@ -190,59 +196,60 @@ void SsxSnowflakesTick(PPCContext& ctx, uint8_t* base) {
   if (drops.empty() || !loc) return;
   ++name_attempts;
 
-  // The drop records of each track: the track's key, and 0x20 on a pointer to the name's key. A track
-  // can have several (World Tour and Explore drops, unused ones).
-  std::unordered_map<uint32_t, Drop*> by_key;
-  for (Drop& d : drops) {
-    if (!d.drops.empty()) continue;
-    d.name_keys.clear();
-    by_key[d.key] = &d;
-  }
+  // The drop records of each track: the track's key; 0x18 on, a pointer to its peak's asset name (the
+  // range); 0x20 on, one to the key of the drop's name. A track has several (World Tour and Explore
+  // drops, unused ones); DLC records appear once the DLC's database is loaded.
+  std::unordered_map<uint32_t, std::vector<std::pair<std::string, std::string>>> records;  // name key, range
+  for (const Drop& d : drops) records[d.key];
   rex::memory::Memory* memory = rex::system::kernel_memory();
+  auto text_at = [&](uint32_t address, char* out, uint32_t size) {
+    return SsxGuestReadable(memory, address, size - 1) &&
+           SsxCopyHost(out, memory->TranslateVirtual<const char*>(address), size - 1);
+  };
   for (uint32_t heap : {0xA0000000u, 0x40000000u}) {
     SsxScanGuestHeap(memory, heap, 0x24, [&](uint32_t, const uint8_t* chunk, uint32_t n) {
       for (uint32_t at = 0; at + 0x24 <= n && at < (1u << 20); at += 4) {
-        auto it = by_key.find(Be32(chunk + at));
-        if (it == by_key.end()) continue;
-        char text[64] = {};
-        uint32_t address = Be32(chunk + at + 0x20);
-        std::vector<std::string>& keys = it->second->name_keys;
-        if (SsxGuestReadable(memory, address, sizeof(text) - 1) &&
-            SsxCopyHost(text, memory->TranslateVirtual<const char*>(address), sizeof(text) - 1) &&
-            std::strncmp(text, "TXT_NM_DRP_", 11) == 0 && std::find(keys.begin(), keys.end(), text) == keys.end()) {
-          keys.push_back(text);
-          char asset[48] = {};
-          uint32_t at_asset = Be32(chunk + at + 0x18);
-          if (it->second->range.empty() && SsxGuestReadable(memory, at_asset, sizeof(asset) - 1) &&
-              SsxCopyHost(asset, memory->TranslateVirtual<const char*>(at_asset), sizeof(asset) - 1)) {
-            std::string range(asset);
-            it->second->range = range.substr(0, range.find("_peak"));
-          }
-        }
+        auto it = records.find(Be32(chunk + at));
+        if (it == records.end()) continue;
+        char name[64] = {}, asset[48] = {};
+        if (!text_at(Be32(chunk + at + 0x20), name, sizeof(name)) || std::strncmp(name, "TXT_NM_DRP_", 11) != 0) continue;
+        text_at(Be32(chunk + at + 0x18), asset, sizeof(asset));
+        std::string range(asset);
+        std::pair<std::string, std::string> record{name, range.substr(0, range.find("_peak"))};
+        if (std::find(it->second.begin(), it->second.end(), record) == it->second.end()) it->second.push_back(record);
       }
     });
   }
   for (const Drop& d : drops) {
-    if (d.drops.empty() && d.name_keys.empty() && name_attempts < 24) return;  // database not (all) loaded yet
+    if (d.listed && records[d.key].empty() && name_attempts < 24) return;  // database not (all) loaded yet
   }
   name_attempts = 24;
-  for (const Drop& d : drops) {
-    if (d.range.empty() || range_names.count(d.range)) continue;
-    std::string key = "TXT_NM_RNG_" + d.range;
-    std::transform(key.begin(), key.end(), key.begin(), [](char c) { return char(std::toupper(uint8_t(c))); });
-    range_names[d.range] = TitleCase(Localize(ctx, base, loc, key));
-    REXLOG_DEBUG("Snowflakes: range {} = {}", d.range, range_names[d.range]);
-  }
+
+  // The texts, each looked up once (the game keeps its copies).
+  static std::unordered_map<std::string, std::string> texts;
+  auto text = [&](const std::string& key) {
+    auto found = texts.find(key);
+    return found != texts.end() ? found->second : texts[key] = TitleCase(Localize(ctx, base, loc, key));
+  };
   for (Drop& d : drops) {
-    if (!d.drops.empty()) continue;
-    for (const std::string& key : d.name_keys) {
-      std::string name = TitleCase(Localize(ctx, base, loc, key));
+    d.drops.clear();
+    d.range.clear();
+    for (const auto& [key, range] : records[d.key]) {
+      // (The game also has developer test records, ranges "rangetest1" and the like.)
+      bool real_range = std::any_of(std::begin(kRanges), std::end(kRanges), [&](auto& r) { return r.range == range; });
+      std::string name = real_range ? text(key) : "";
       if (name.empty() || name == "Not Used") continue;
+      if (d.range.empty()) d.range = range;
       // The peak: TXT_NM_PEA_<RANGE>_<peak>, from TXT_NM_DRP_<RANGE>_<peak>_<drop>.
       std::string peak_key = key.substr(0, key.rfind('_'));
-      std::pair<std::string, std::string> drop{TitleCase(Localize(ctx, base, loc, peak_key.replace(0, 11, "TXT_NM_PEA_"))), name};
+      std::pair<std::string, std::string> drop{text(peak_key.replace(0, 11, "TXT_NM_PEA_")), name};
       if (std::find(d.drops.begin(), d.drops.end(), drop) == d.drops.end()) d.drops.push_back(drop);
-      REXLOG_DEBUG("Snowflakes: {} {} = {} / {}", d.code, key, drop.first, drop.second);
+      REXLOG_DEBUG("Snowflakes: {} {} ({}) = {} / {}", d.code, key, range, drop.first, drop.second);
+    }
+    if (!d.range.empty() && !range_names.count(d.range)) {
+      std::string key = "TXT_NM_RNG_" + d.range;
+      std::transform(key.begin(), key.end(), key.begin(), [](char c) { return char(std::toupper(uint8_t(c))); });
+      range_names[d.range] = text(key);
     }
   }
 }
@@ -287,7 +294,7 @@ SsxSnowflakes SsxSnowflakeCounts() {
     auto code = CandidateCodes().find(uint32_t(id));
     if (known || code == CandidateCodes().end()) continue;
     uint32_t key = Fnv1(code->second + "_track");
-    drops.push_back({code->second, key, uint64_t(key) * 10000000000ull, {}, false, {}, {}, {}});
+    drops.push_back({code->second, key, uint64_t(key) * 10000000000ull, {}, false, {}, {}});
     name_attempts = 0;
   }
 
@@ -307,7 +314,7 @@ SsxSnowflakes SsxSnowflakeCounts() {
     auto localized = range_names.find(d.range);
     std::string range_name = localized != range_names.end() && !localized->second.empty() ? localized->second
                              : r < std::size(kRanges)                                    ? std::string(kRanges[r].name)
-                                                                                         : d.code;
+                                                                                         : "?";
     auto range = std::find_if(out.ranges.begin(), out.ranges.end(), [&](auto& x) { return x.name == range_name; });
     if (range == out.ranges.end()) {
       range = out.ranges.insert(out.ranges.end(), SsxSnowflakeRange{range_name});

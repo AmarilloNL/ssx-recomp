@@ -31,5 +31,8 @@ struct SsxSnowflakes {
 // the loaded profile (0 before it loads).
 SsxSnowflakes SsxSnowflakeCounts();
 
+// Looks the drops' names up again (the tab calls it when shown: DLC records load late).
+void SsxSnowflakesRefreshNames();
+
 // Looks up the drops' names (heap scan, localize); call on the game thread (the main loop's tick).
 void SsxSnowflakesTick(PPCContext& ctx, uint8_t* base);

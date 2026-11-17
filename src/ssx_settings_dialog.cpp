@@ -574,6 +574,9 @@ void SsxSettingsDialog::DrawAudioTab() {
 
 // Snowflakes (offline geotags) collected per drop: the game itself never shows where they're missing.
 void SsxSettingsDialog::DrawSnowflakesTab() {
+  static double last_shown = -10.0;  // a fresh look-up of the names each time the tab is opened
+  if (ImGui::GetTime() - last_shown > 1.0) SsxSnowflakesRefreshNames();
+  last_shown = ImGui::GetTime();
   SsxSnowflakes snowflakes = SsxSnowflakeCounts();
   if (snowflakes.ranges.empty()) {
     ImGui::TextColored(kTextDim, "The game hasn't loaded its snowflakes yet.");
