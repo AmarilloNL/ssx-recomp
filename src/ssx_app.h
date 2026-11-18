@@ -241,7 +241,8 @@ class SsxApp : public rex::ReXApp {
         config_path_, [this] {
           // Same path as the window close button: ends the title and exits the process.
           if (SsxSpawnRestart()) window()->RequestClose();
-        });
+        },
+        [this] { window()->RequestClose(); });  // Quit game: the window close button's path
     rex::ui::RegisterBind("bind_ssx_settings", "F1", "SSX settings menu",
                           [this] { settings_->Toggle(); });
     // Testing aid: SSX_OPEN_SETTINGS=<tab name> opens the menu at startup on that tab.

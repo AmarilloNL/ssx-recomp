@@ -17,7 +17,8 @@ class InputSystem;
 class SsxSettingsDialog : public rex::ui::ImGuiDialog {
  public:
   SsxSettingsDialog(rex::ui::ImGuiDrawer* drawer, rex::input::InputSystem* input,
-                    std::filesystem::path config_path, std::function<void()> restart);
+                    std::filesystem::path config_path, std::function<void()> restart,
+                    std::function<void()> quit);
   ~SsxSettingsDialog() override;
 
   // Adds the menu's fonts; call from ReXApp::OnConfigureFonts.
@@ -52,10 +53,12 @@ class SsxSettingsDialog : public rex::ui::ImGuiDialog {
   void DrawProfileTab();
   void DrawSnowflakesTab();
   void DrawScaleWarning();
+  void DrawQuitConfirm();
 
   rex::input::InputSystem* input_;
   std::filesystem::path config_path_;
   std::function<void()> restart_;
+  std::function<void()> quit_;  // the window close button's path (Quit game, issue #20)
   bool open_ = false;
   bool restart_needed_ = false;
   float font_scale_ = 1.0f;

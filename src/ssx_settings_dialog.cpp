@@ -263,11 +263,13 @@ void SsxSettingsDialog::ConfigureFonts(ImFontAtlas* atlas) {
 }
 
 SsxSettingsDialog::SsxSettingsDialog(rex::ui::ImGuiDrawer* drawer, rex::input::InputSystem* input,
-                                     std::filesystem::path config_path, std::function<void()> restart)
+                                     std::filesystem::path config_path, std::function<void()> restart,
+                                     std::function<void()> quit)
     : ImGuiDialog(drawer),
       input_(input),
       config_path_(std::move(config_path)),
-      restart_(std::move(restart)) {}
+      restart_(std::move(restart)),
+      quit_(std::move(quit)) {}
 
 SsxSettingsDialog::~SsxSettingsDialog() {
   if (open_) Toggle();
@@ -544,6 +546,31 @@ void SsxSettingsDialog::DrawScaleWarning() {
   ImGui::EndPopup();
 }
 
+// Quit game (issue #20): asks first, then closes the game the same way as the window's close button.
+void SsxSettingsDialog::DrawQuitConfirm() {
+  const ImGuiIO& io = ImGui::GetIO();
+  ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always,
+                          ImVec2(0.5f, 0.5f));
+  if (!ImGui::BeginPopupModal("##quit_confirm", nullptr,
+                              ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                                  ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize)) {
+    return;
+  }
+  ImGui::SetWindowFontScale(font_scale_);
+  ImGui::TextUnformatted("Quit SSX?");
+  ImGui::Spacing();
+  ImGui::TextDisabled("Progress the game hasn't saved yet is lost, as on the console.");
+  ImGui::Spacing();
+  if (ImGui::Button("Quit")) {
+    ImGui::CloseCurrentPopup();
+    quit_();
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+  ImGui::SetItemDefaultFocus();  // a controller lands on Cancel: two quick A presses don't quit
+  ImGui::EndPopup();
+}
+
 void SsxSettingsDialog::DrawProfileTab() {
   if (!BeginRows("##profile")) return;
   Row("Player name", "Shown in the menus instead of User. Letters, digits and spaces.");
@@ -743,7 +770,10 @@ void SsxSettingsDialog::OnDraw(ImGuiIO& io) {
   const ImGuiStyle& style = ImGui::GetStyle();
   float row = ImGui::GetFrameHeight() + ImGui::GetTextLineHeight() * 0.82f + style.CellPadding.y * 2.0f +
               style.ItemSpacing.y;
-  ImGui::BeginChild("##tab", ImVec2(0.0f, row * 6.0f + ImGui::GetTextLineHeightWithSpacing()));
+  // NavFlattened: the tab's settings and the footer's buttons are one controller navigation, so
+  // the D-pad goes from the last setting down to Quit game and back.
+  ImGui::BeginChild("##tab", ImVec2(0.0f, row * 6.0f + ImGui::GetTextLineHeightWithSpacing()),
+                    ImGuiChildFlags_NavFlattened);
   ImGui::SetWindowFontScale(font_scale_);
   switch (current_tab_) {
     case 0: DrawDisplayTab(); break;
@@ -755,20 +785,26 @@ void SsxSettingsDialog::OnDraw(ImGuiIO& io) {
   }
   ImGui::EndChild();
 
-  // Footer.
+  // Footer: the note left, the buttons right (Quit game always, Restart now when needed).
   ImGui::Spacing();
   ImGui::Separator();
   ImGui::Spacing();
+  ImGui::AlignTextToFramePadding();
   if (restart_needed_) {
-    ImGui::AlignTextToFramePadding();
     ImGui::TextColored(kWarn, "Some changes apply after a restart.");
-    ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - ImGui::CalcTextSize("Restart now").x -
-                    ImGui::GetStyle().FramePadding.x * 2.0f);
-    if (ImGui::Button("Restart now")) restart_();
   } else {
-    ImGui::AlignTextToFramePadding();  // same height as the restart line
     ImGui::TextDisabled("Changes are saved automatically.");
   }
+  const float pad = style.FramePadding.x * 2.0f;
+  float buttons = ImGui::CalcTextSize("Quit game").x + pad;
+  if (restart_needed_) buttons += ImGui::CalcTextSize("Restart now").x + pad + style.ItemSpacing.x;
+  ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - buttons);
+  if (restart_needed_) {
+    if (ImGui::Button("Restart now")) restart_();
+    ImGui::SameLine();
+  }
+  if (ImGui::Button("Quit game")) ImGui::OpenPopup("##quit_confirm");
+  DrawQuitConfirm();
 
   bool close = capturing_.empty() && ImGui::IsKeyPressed(ImGuiKey_Escape);
   ImGui::End();
