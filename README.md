@@ -95,8 +95,13 @@ against Redump, and shows the main settings on the game's page. Updates rebuild 
 > first time.
 >
 > 📁 **Everything stays in your SSX folder**: the build, saves, settings, DLC, music and the shader
-> cache. Nothing goes to `Documents` or the registry; move or back up the folder as a whole. Every
-> install starts fresh, with its own saves.
+> cache. Nothing goes to `Documents` or the registry; move or back up the folder as a whole. If
+> you played an earlier version, which kept its saves in `Documents\ssx`, the first start copies
+> them (with your DLC and music) into the SSX folder; `Documents\ssx` is left as it was.
+>
+> ♻️ **Installed with `SSX-Installer.exe` before?** Put `ssx-recomp.exe` in that install folder
+> (`SSX-PC` in your user folder, unless you picked another) and run it: it opens on **Play SSX**;
+> click **Add DLC / rebuild**, then **Rebuild**, to bring the game up to this version.
 >
 > 🔄 **To update, click Check for updates**: it's the only thing that goes online for the port. If
 > there's a newer release, it replaces `ssx-recomp.exe` with that release's and rebuilds SSX (only
