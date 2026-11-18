@@ -62,3 +62,8 @@
 
 // Vtable of the main loop's periodic task.
 #define SSX_VTABLE_MAIN_LOOP_TASK SSX_GUEST(0x82007738u, 0x82007840u)
+
+// The rider's boost and Tricky update, once a frame (issue #21, ssx_cheats.cpp; this = r3, same
+// field offsets in both versions).
+#define SSX_FN_BOOST_UPDATE SSX_GUEST(sub_82CED2E8, sub_82CC8850)
+#define SSX_FN_BOOST_UPDATE_IMP SSX_GUEST(__imp__sub_82CED2E8, __imp__sub_82CC8850)

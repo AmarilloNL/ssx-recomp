@@ -100,7 +100,7 @@ const Bind kBinds[] = {
     {"Start", "keybind_start"},              {"Back", "keybind_back"},
 };
 
-const char* const kTabs[] = {"Display", "Graphics", "Audio", "Controls", "Profile", "Snowflakes"};
+const char* const kTabs[] = {"Display", "Graphics", "Audio", "Controls", "Profile", "Snowflakes", "Cheats"};
 
 // X_INPUT_GAMEPAD button bits -> ImGui gamepad keys (ImGui's nav: A activates, B cancels).
 const struct {
@@ -661,6 +661,19 @@ void SsxSettingsDialog::DrawSnowflakesTab() {
   ImGui::EndTable();
 }
 
+// Cheats (issue #21, ssx_cheats.cpp). They apply at once and change nothing in the save.
+void SsxSettingsDialog::DrawCheatsTab() {
+  if (!BeginRows("##cheats")) return;
+  Row("Infinite boost", "Boost never runs out. Tricky doesn't start from tricks while it's on.");
+  Checkbox("##cheat_boost", "ssx_cheat_infinite_boost");
+  Row("Always Super Tricky", "Tricky and Super Tricky stay on the whole ride, with unlimited boost.");
+  Checkbox("##cheat_super_tricky", "ssx_cheat_super_tricky");
+  ImGui::EndTable();
+  ImGui::Spacing();
+  ImGui::TextDisabled("Cheats don't change your save: turn them off and the game plays as before.");
+  ImGui::TextDisabled("Scores, times and medals you get with a cheat on are kept like any others.");
+}
+
 void SsxSettingsDialog::DrawControlsTab() {
   if (BeginRows("##controls")) {
     Row("Keyboard controls", "Play without a controller.");
@@ -781,7 +794,8 @@ void SsxSettingsDialog::OnDraw(ImGuiIO& io) {
     case 2: DrawAudioTab(); break;
     case 3: DrawControlsTab(); break;
     case 4: DrawProfileTab(); break;
-    default: DrawSnowflakesTab(); break;
+    case 5: DrawSnowflakesTab(); break;
+    default: DrawCheatsTab(); break;
   }
   ImGui::EndChild();
 
