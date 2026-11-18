@@ -15,6 +15,5 @@ bench-*.log
 configure*.log
 package.log
 installer/ssx-recomp.exe
-installer/SSX-Installer.exe
 build-ssx.log
 installer/ssx-recomp-*-Windows-x64.zip
