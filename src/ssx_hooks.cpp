@@ -6,6 +6,7 @@
 
 #include "generated/default/ssx_pch.h"
 #include "ssx_guest.h"
+#include "ssx_runtime_export.h"
 
 REXCVAR_DEFINE_BOOL(ssx_freeride_hud, false, "SSX", "Show the boost and tricky meters in freeride");
 
@@ -56,4 +57,15 @@ REX_HOOK_RAW(SSX_FN_HUD_MODE_SETUP) {
   SSX_FN_HUD_SET_BOOL(ctx, base);
   ctx.r1.u32 = sp;
   REXLOG_INFO("Freeride: boost and tricky meters on");
+}
+
+// No network (issue #19). The game's online code polls the console's network address every frame;
+// with an address but no Xbox Live it waits about 10 s for Live (the "Loading" screen after the
+// save loads) before it says "You must be signed in to Xbox LIVE and the EA Servers". The port has
+// neither, so it reports no network, like a console without a cable: the game gives up at once.
+// The address itself is filled in as before.
+extern "C" REX_FUNC(__imp__NetDll_XNetGetTitleXnAddr) {
+  static const GuestFunc original = ResolveRuntimeExport("__imp__NetDll_XNetGetTitleXnAddr");
+  original(ctx, base);
+  ctx.r3.u64 = 0x00000001;  // XNET_GET_XNADDR_NONE
 }
