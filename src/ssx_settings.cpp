@@ -12,9 +12,11 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <set>
 #include <string>
+#include <string_view>
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -57,11 +59,41 @@ REXCVAR_DEFINE_STRING(ssx_renderer, "regpu", "SSX",
 REXCVAR_DEFINE_BOOL(ssx_vsync, false, "SSX", "VSync: no tearing on screens without G-Sync/FreeSync (restart)")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
+// Window mode at start. auto: `fullscreen` as set (F1 > Display, fullscreen by default), and when
+// RecompLauncher starts the game (RECOMPLAUNCHER_MODE) without one set, fullscreen in its Big Picture
+// mode and a window on the desktop.
+REXCVAR_DEFINE_STRING(ssx_window, "auto", "SSX",
+                      "Window at start: auto (as set; from RecompLauncher: fullscreen in Big Picture, a window "
+                      "on the desktop), fullscreen or windowed")
+    .allowed({"auto", "fullscreen", "windowed"});
+
 namespace {
 // What ssx_vsync turns off. Only it sets them at runtime, and that isn't saved: turning VSync off
 // (even while it's active) restores them at the next start.
 constexpr const char* kTearingFlags[] = {"d3d12_allow_variable_refresh_rate_and_tearing",
                                          "vulkan_allow_present_mode_immediate"};
+// The `fullscreen` value the window mode set for this start: not saved, so auto stays auto.
+std::string window_mode_fullscreen;
+
+void ApplyWindowMode() {
+  const std::string mode = REXCVAR_GET(ssx_window);
+  std::string want;
+  if (mode == "fullscreen") {
+    want = "true";
+  } else if (mode == "windowed") {
+    want = "false";
+  } else if (rex::cvar::GetFlagSource("fullscreen") == rex::cvar::Source::kDefault) {
+    const char* launcher = std::getenv("RECOMPLAUNCHER_MODE");
+    std::string_view from = launcher ? launcher : "";
+    if (from == "bigpicture") want = "true";
+    if (from == "desktop") want = "false";
+  }
+  if (want.empty() || rex::cvar::GetFlagByName("fullscreen") == want) return;
+  if (rex::cvar::SetFlagByName("fullscreen", want)) {
+    window_mode_fullscreen = want;
+    REXLOG_INFO("Window: fullscreen = {} (ssx_window {})", want, mode);
+  }
+}
 }  // namespace
 
 namespace {
@@ -149,6 +181,10 @@ void SsxSaveConfig(const std::filesystem::path& path) {
                                             entry.name) != std::end(kTearingFlags)) {
       continue;
     }
+    if (entry.source == rex::cvar::Source::kRuntime && entry.name == "fullscreen" &&
+        !window_mode_fullscreen.empty() && value == window_mode_fullscreen) {
+      continue;  // set by ssx_window for this start (changed in F1 since: saved)
+    }
     if (entry.type == rex::cvar::FlagType::String) {
       std::string quoted = "\"";
       for (char c : value) {
@@ -163,6 +199,8 @@ void SsxSaveConfig(const std::filesystem::path& path) {
 }
 
 void SsxApplyStartupSettings() {
+  ApplyWindowMode();  // before ReXApp opens the window
+
   // The default RTV render-target path copies EDRAM between host render targets
   // by whole tile rows; when the cutscene UI renders into a small target at row
   // 681, the main 1280x720 target only gets rows 0-687 back and the helicopter

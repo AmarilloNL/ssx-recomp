@@ -2,7 +2,7 @@
 # SSX (2012) PC port - installer for Linux.
 #
 # Downloads this project's latest source (no game code or data) and builds the game from YOUR OWN
-# Xbox 360 SSX (USA) ISO with scripts/build-ssx-linux.sh, as SSX-Installer.exe does on Windows.
+# Xbox 360 SSX (USA) ISO with scripts/build-ssx-linux.sh, as ssx-recomp.exe does on Windows.
 # Run it again to update: only what changed is rebuilt, and your saves (~/.local/share/ssx) and
 # settings (ssx.toml next to the game) are kept.
 #

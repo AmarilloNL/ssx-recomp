@@ -57,7 +57,11 @@ New-Item -ItemType Directory $dist -Force | Out-Null
 Remove-Item "$dist\*" -Include *.exe, *.dll, README.txt -ErrorAction SilentlyContinue
 Copy-Item "$build\*" $dist -Include ssx.exe, *.dll
 Copy-Item "$root\README-player.txt" "$dist\README.txt"
-Copy-Item "$root\installer\ssx.ico" $dist  # used by the installer's desktop shortcut
+Copy-Item "$root\installer\ssx.ico" $dist
+# Always portable (src/ssx_app.h): saves, DLC, music and the shader cache stay in dist\SSX\userdata.
+if (-not (Test-Path "$dist\portable.txt")) {
+    Set-Content "$dist\portable.txt" "SSX keeps its saves, DLC, music and shader cache in the userdata folder here." -Encoding ascii
+}
 # Built for the title update (CMakeLists.txt): the game loads its default.xexp and patch0.big
 # from update\ next to the exe (put in game-dump\update by build-ssx.ps1).
 Remove-Item "$dist\update" -Recurse -Force -ErrorAction SilentlyContinue
