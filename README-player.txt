@@ -19,6 +19,7 @@ Settings
        opens it, d-pad/stick + A to change, LB/RB switch tabs, B closes.
        Changes are saved to ssx.toml
        next to ssx.exe; some need a restart (the menu offers "Restart now").
+       Quit game (bottom right) closes SSX, also from a controller.
        Display   fullscreen, frame rate (30 to 300, or match your monitor), VSync,
                  FPS counter, the boost meter in freeride
        Graphics  resolution scale, upscaling (AMD FSR 1 by default), sharpness,

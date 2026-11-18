@@ -198,7 +198,7 @@ own ISO, by an installer script:
 
 | | |
 |---|---|
-| ⚙️ **Settings** | **F1** / **Esc** (controller: **Back + Start**, LB/RB switch tabs, B closes) |
+| ⚙️ **Settings** | **F1** / **Esc** (controller: **Back + Start**, LB/RB switch tabs, B closes); **Quit game** at the bottom |
 | 🎮 **Controller** | as on the console; vibration and deadzone in **F1 → Controls** |
 | ⌨️ **Keyboard** | WASD steer · Space jump · arrow keys = trick stick · Q/E triggers · 1/3 bumpers · Enter start · Tab back |
 
@@ -429,6 +429,8 @@ The game is playable and is being tested by playing through the whole World Tour
 <summary><b>✅ Fixed so far</b></summary>
 <br>
 
+- ✅ Every controller is player 1 (a controller that wasn't first, for example behind a Steam or
+  DS4Windows virtual pad, got stuck at "sign in"), and **Quit game** in the settings menu (1.7.1)
 - ✅ One `ssx-recomp.exe` that sets SSX up and is its launcher: a portable SSX folder (saves from
   earlier versions come along), **Check for updates**, extracted discs and
   [RecompLauncher](https://recomplauncher.com/game/ssx-recomp) support (thanks @Xarishark) (1.7.0)
