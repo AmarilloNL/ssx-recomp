@@ -23,6 +23,16 @@ if ($Clang) {
 }
 
 $build = "$root\out\build\$Preset"
+# CMake's build folder records where the source was. After the SSX folder was moved or copied,
+# configure refuses it ("CMakeCache.txt directory ... is different"): start it over, once.
+$cache = "$build\CMakeCache.txt"
+if (Test-Path $cache) {
+    $home_ = (Select-String -Path $cache -Pattern '^CMAKE_HOME_DIRECTORY:INTERNAL=(.*)$' | Select-Object -First 1).Matches.Groups[1].Value
+    if ($home_ -and [IO.Path]::GetFullPath($home_) -ne [IO.Path]::GetFullPath("$root")) {
+        Write-Host "  The SSX folder was moved (it was in $home_): building from scratch once."
+        Remove-Item $build -Recurse -Force
+    }
+}
 Push-Location $root
 # The recompiled sources are only added to the build if codegen output exists at configure
 # time, so on a fresh tree: configure, run codegen, then configure again to pick them up.
