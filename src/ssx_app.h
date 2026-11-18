@@ -221,6 +221,13 @@ class SsxApp : public rex::ReXApp {
     // but otherwise sane contents; real hardware samples them, so do the same.
     // GPU cvars only exist once the plugin has loaded, hence here.
     rex::cvar::SetFlagByName("gpu_allow_invalid_fetch_constants", "true");
+    // SSX is single-player and only player 1 has a signed-in profile, but the SDK numbers pads by
+    // connection order: a pad that isn't first (behind a Steam or DS4Windows virtual pad, a wheel,
+    // a second controller) pressed Start as player 2 and got "You must have a gamer profile
+    // signed in" (issue #22). Every controller (and the keyboard) is player 1. Set before the
+    // game's code runs, so nothing polls input yet.
+    static_cast<rex::input::InputSystem*>(runtime()->input_system())
+        ->SetDeviceAssignment(std::make_unique<rex::input::SharedAssignment>());
     InstallDroppedDlc(runtime(), user_data_root());
     SsxSetTuningDir(user_data_root() / "tuning");
     SsxSetMusicDir(user_data_root() / "music");
