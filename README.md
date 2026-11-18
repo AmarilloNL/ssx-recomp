@@ -429,6 +429,9 @@ The game is playable and is being tested by playing through the whole World Tour
 <summary><b>✅ Fixed so far</b></summary>
 <br>
 
+- ✅ One `ssx-recomp.exe` that sets SSX up and is its launcher: a portable SSX folder (saves from
+  earlier versions come along), **Check for updates**, extracted discs and
+  [RecompLauncher](https://recomplauncher.com/game/ssx-recomp) support (thanks @Xarishark) (1.7.0)
 - ✅ A snowflake tracker, the boost meter in freeride, the online-only badges, a portable install
   option, VSync with ReGPU at any frame rate, and full frame rates right from the start
   (thanks @StephenNarcisse) (1.6.0)
