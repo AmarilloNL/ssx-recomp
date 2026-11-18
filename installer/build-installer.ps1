@@ -42,4 +42,8 @@ $release = "$here\ssx-recomp-v$version-Windows-x64.zip"
 Remove-Item $release -ErrorAction SilentlyContinue
 Compress-Archive "$stage\*" $release
 Remove-Item $stage -Recurse -Force
-Get-Item "$here\ssx-recomp.exe", $release | Select-Object Name, Length, @{n = 'Source'; e = { $sha } }
+# The same program under the installer's earlier name, for launchers that install SSX with the
+# release's SSX-Installer.exe (Quiver). Its command line is unchanged. Upload it too.
+Copy-Item "$here\ssx-recomp.exe" "$here\SSX-Installer.exe" -Force
+Get-Item "$here\ssx-recomp.exe", "$here\SSX-Installer.exe", $release |
+    Select-Object Name, Length, @{n = 'Source'; e = { $sha } }
