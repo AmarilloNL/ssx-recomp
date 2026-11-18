@@ -296,8 +296,8 @@ with Mount Eddie and the Presell Pack installed, Japan, Eddie and Mac's Ultimate
 there, so they add nothing new (installing them anyway does no harm).
 
 > [!TIP]
-> **Quick version:** in the installer, click **Add files...** on the *Your game* page and select
-> the files (DLC and the title update together; the picks add up). The installer shows what each
+> **Quick version:** in `ssx-recomp.exe`, click **Add DLC / rebuild** (or, the first time, **Next**), then **Add files...**, and select
+> the files (DLC and the title update together; the picks add up). It shows what each
 > file is, or why it isn't an SSX package. DLC can also be copied to `userdata\dlc` by hand:
 > the game installs it the next time it starts.
 
@@ -319,7 +319,7 @@ storage uses its own file system, so use an Xbox 360 file tool (for example *FAT
 *Velocity* or *Horizon*) to open it and copy the package files out of the `4541096D\00000002`
 folder. Copy the package files themselves, not the folder.
 
-**Installing them by hand** (the installer's **Add files...** does the same):
+**Installing them by hand** (`ssx-recomp.exe`'s **Add files...** does the same):
 
 1. Close the game.
 2. Open the folder `userdata\dlc`. The game creates it the first time it starts, or you can
@@ -348,7 +348,7 @@ rates, resolution, DLC, your name and picture) works the same.
   updates are in `Content\0000000000000000\4541096D\000B0000\`. If there are two files, use the
   larger one (about 9 MB, version 0.0.3.2); the smaller one (about 1 MB) is an older update that's
   already contained in it.
-- **Adding it:** **Add files...** in the installer, then **Install**. The installer checks that
+- **Adding it:** in `ssx-recomp.exe`, **Add DLC / rebuild**, **Add files...**, then **Rebuild** (or **Install** the first time). It checks that
   it's the supported update. Updating later keeps it; you only add it once.
 - **Saves** work with both versions: the update loads saves from the disc version, and the disc
   version loads saves the update wrote.
