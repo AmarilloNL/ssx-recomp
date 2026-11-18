@@ -77,7 +77,7 @@ echo "  and 20-60 minutes the first time."
 # ---------------------------------------------------------------- 1. build tools
 step "Checking build tools (missing ones are installed)"
 need_cmds=(git cmake ninja clang clang++ python3 pkg-config curl)
-need_pkgs=(x11-xcb wayland-client vulkan)
+need_pkgs=(x11-xcb wayland-client vulkan xi xrandr)
 missing() {
   for c in "${need_cmds[@]}"; do command -v "$c" >/dev/null || return 0; done
   for p in "${need_pkgs[@]}"; do pkg-config --exists "$p" 2>/dev/null || return 0; done
@@ -87,6 +87,8 @@ if missing; then
   # Note: only the pacman list is tested (CachyOS); the apt and dnf lists follow SDL's Linux docs.
   if command -v pacman >/dev/null; then
     cmd=(as_root pacman -S --needed --noconfirm git cmake ninja clang python pkgconf curl libx11 libxcb wayland
+         wayland-protocols libxkbcommon libdecor alsa-lib libpulse pipewire systemd-libs libxrandr libxi
+         libxcursor libxss libxtst
          vulkan-headers vulkan-icd-loader ffmpeg)
   elif command -v apt-get >/dev/null; then
     cmd=(as_root apt-get install -y build-essential git cmake ninja-build clang python3 pkg-config
