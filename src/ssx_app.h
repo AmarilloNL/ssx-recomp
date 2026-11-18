@@ -68,8 +68,60 @@ class SsxApp : public rex::ReXApp {
         !rex::cvar::GetFlagByName("user_data_root").empty()) {
       return;
     }
+    const auto documents = paths.user_data_root;  // the default: Documents\ssx (~/.local/share/ssx)
     if (rex::cvar::GetFlagByName("cache_root").empty()) paths.cache_root = exe_dir / "userdata" / "cache";
     paths.user_data_root = exe_dir / "userdata";
+    import_log_ = SsxImportUserData(documents, paths.user_data_root);
+  }
+
+  void OnPostInitLogging() override {
+    if (!import_log_.empty()) REXLOG_INFO("{}", import_log_);
+  }
+
+  // ssx-recomp.exe makes every install portable, also ones that kept their saves in Documents\ssx
+  // until now: the first portable start copies what's there into userdata, so saves, DLC and music
+  // come along. Copied, never moved: Documents\ssx stays as it was. What userdata already has is
+  // left alone (the setup may have put new DLC there), and each folder is copied under a temporary
+  // name first, so a copy that fails halfway is tried again at the next start, not kept half done.
+  // Returns what it did, for the log (logging starts after the paths are set up).
+  static std::string SsxImportUserData(const std::filesystem::path& from, const std::filesystem::path& to) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path marker = to / "imported-from-documents.txt";
+    if (fs::exists(marker, ec)) return {};
+    fs::create_directories(to, ec);
+    std::string log;
+    bool complete = true;
+    if (fs::is_directory(from, ec) && !fs::equivalent(from, to, ec)) {
+      try {
+        for (const auto& entry : fs::directory_iterator(from)) {
+          const fs::path name = entry.path().filename();
+          if (name == "iso-mount" || fs::exists(to / name, ec)) continue;  // iso-mount: an empty stand-in
+          const fs::path partial = to / (name.string() + ".importing");
+          fs::remove_all(partial, ec);
+          std::error_code copy_ec;
+          fs::copy(entry.path(), partial, fs::copy_options::recursive, copy_ec);
+          if (!copy_ec) fs::rename(partial, to / name, copy_ec);
+          if (copy_ec) {
+            complete = false;
+            log += "; " + name.string() + " failed (" + copy_ec.message() + ")";
+            fs::remove_all(partial, ec);
+          } else {
+            log += "; " + name.string();
+          }
+        }
+      } catch (const std::exception& e) {
+        complete = false;
+        log += std::string("; reading it failed (") + e.what() + ")";
+      }
+    }
+    if (complete) {
+      std::ofstream(marker) << "SSX copied its saves, DLC and music from " << from.string()
+                            << " into this folder once, when it became portable. That folder was left as it was.\n";
+    }
+    if (log.empty()) return {};
+    return "User data imported from " + from.string() + " into " + to.string() + ": " + log.substr(2) +
+           (complete ? "" : " (tried again at the next start)");
   }
 
   // Find the game; an .iso is mounted later (OnLoadXexImage), so the runtime
@@ -252,5 +304,6 @@ class SsxApp : public rex::ReXApp {
   std::atomic<bool> overlay_pending_{false};
   std::filesystem::path config_path_;
   std::filesystem::path iso_path_;
+  std::string import_log_;  // SsxImportUserData's result, logged once logging is up
   std::unique_ptr<SsxSettingsDialog> settings_;
 };
