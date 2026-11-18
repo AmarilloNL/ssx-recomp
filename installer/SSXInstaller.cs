@@ -293,12 +293,39 @@ static class Install {
           string path = Path.Combine(source, rel.Replace('/', '\\'));
           if (rel.EndsWith("/")) { Directory.CreateDirectory(path); continue; }
           Directory.CreateDirectory(Path.GetDirectoryName(path));
+          // Unchanged files keep their time; changed ones get the current time, not the commit's:
+          // the build only recompiles files newer than its last build, and a release's commit can
+          // be older than that build (the player built after the commit was made).
+          if (SameContent(entry, path)) continue;
           entry.ExtractToFile(path, true);
+          File.SetLastWriteTimeUtc(path, DateTime.UtcNow);
         }
       }
     }
     File.WriteAllText(stamp, SourceId ?? "");
     onLine("Unpacked the port's source (" + SourceId + ").");
+  }
+
+  static bool SameContent(ZipArchiveEntry entry, string path) {
+    try {
+      var file = new FileInfo(path);
+      if (!file.Exists || file.Length != entry.Length) return false;
+      using (Stream a = entry.Open())
+      using (Stream b = file.OpenRead()) {
+        byte[] x = new byte[65536], y = new byte[65536];
+        int n;
+        while ((n = a.Read(x, 0, x.Length)) > 0) {
+          for (int got = 0, m; got < n; got += m) {
+            m = b.Read(y, got, n - got);
+            if (m == 0) return false;
+          }
+          for (int i = 0; i < n; i++) if (x[i] != y[i]) return false;
+        }
+        return b.ReadByte() < 0;
+      }
+    } catch (Exception) {
+      return false;
+    }
   }
 
   // ---- Updates (only from the Update button) ------------------------------------------------

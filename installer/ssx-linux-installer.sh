@@ -30,10 +30,23 @@ source="$folder/source"
 mkdir -p "$source"
 echo "==> Downloading the SSX PC port source (no game files) into $source"
 archive=$(mktemp)
-trap 'rm -f "$archive"' EXIT
+new=$(mktemp -d)
+trap 'rm -rf "$archive" "$new"' EXIT
 curl -fsSL -o "$archive" "$source_url" || { echo "Downloading the source failed."; exit 1; }
-# The source folders are replaced, so files removed or renamed upstream don't linger (an old patch
-# would be applied next to its new version). Build output (tools, out, dist, generated) stays.
-rm -rf "$source/patches" "$source/scripts" "$source/src" "$source/regpu-plugin" "$source/installer"
-tar -xzf "$archive" --strip-components=1 -C "$source" || { echo "Unpacking the source failed."; exit 1; }
+tar -xzf "$archive" --strip-components=1 -C "$new" || { echo "Unpacking the source failed."; exit 1; }
+# Files removed or renamed upstream don't linger in the source folders (an old patch would be
+# applied next to its new version). Build output (tools, out, dist, generated) stays.
+for dir in patches scripts src regpu-plugin installer; do
+  [ -d "$source/$dir" ] || continue
+  (cd "$source/$dir" && find . -type f) | while IFS= read -r f; do
+    [ -e "$new/$dir/$f" ] || rm -f "$source/$dir/$f"
+  done
+done
+# Only changed files are copied, and they get the current time rather than the commit's: the build
+# recompiles files newer than its last build, and the commit can be older than that build.
+(cd "$new" && find . -type f) | while IFS= read -r f; do
+  cmp -s "$new/$f" "$source/$f" && continue
+  mkdir -p "$(dirname "$source/$f")"
+  cp "$new/$f" "$source/$f" || { echo "Copying the source failed."; exit 1; }
+done || exit 1
 exec bash "$source/scripts/build-ssx-linux.sh" "${args[@]}"
