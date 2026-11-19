@@ -30,7 +30,7 @@ Settings
        Snowflakes  how many snowflakes you have on every drop
        Cheats    infinite boost; Tricky or Super Tricky the whole ride, or no Tricky;
                  infinite credits (your own credits are never spent); infinite rewinds;
-                 armour and batteries that never run out
+                 armour, oxygen and batteries that never run out
 
   Tip: 1x + FSR runs much faster than 2x and still looks sharp.
        2x is the sharpest but limited to around 60 fps by the GPU emulation.
