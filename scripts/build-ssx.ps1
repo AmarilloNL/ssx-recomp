@@ -531,6 +531,22 @@ if (-not (Test-Path $toml)) {
     Set-Content $toml "# SSX settings - written by the game. Edit in-game with F1.`ngame_data_root = `"$isoEscaped`"" -Encoding ascii
 }
 
+# SSX's shaders for ReGPU's first-boot compile (issue #17): the game starts once, loads all its effects,
+# writes static-shaders.bin beside ssx.exe and quits (about 15 s). Without the file ReGPU compiles each
+# shader the first time it is drawn, as before, so a failure here only warns.
+if (Test-Path "$root\dist\SSX\rexgpu-regpu.dll") {
+    Step "Collecting the game's shaders for the renderer"
+    Remove-Item "$root\dist\SSX\static-shaders.bin" -ErrorAction SilentlyContinue
+    $collect = Start-Process "$root\dist\SSX\ssx.exe" -WorkingDirectory "$root\dist\SSX" -WindowStyle Minimized -PassThru `
+        -ArgumentList '--ssx_collect_shaders=true', '--audio_mute'
+    if (-not $collect.WaitForExit(120000)) {
+        Stop-Process -Id $collect.Id -ErrorAction SilentlyContinue
+        Remove-Item "$root\dist\SSX\regpu-starting.flag" -ErrorAction SilentlyContinue
+    }
+    if (Test-Path "$root\dist\SSX\static-shaders.bin") { Write-Host "  Shaders collected." }
+    else { Write-Host "  Couldn't collect them; the game compiles each shader the first time it's used instead." -ForegroundColor Yellow }
+}
+
 Write-Host ""
 Write-Host "DONE. Your game is in: $root\dist\SSX" -ForegroundColor Green
 Write-Host "Start it with ssx.exe (F1 opens the settings)."
