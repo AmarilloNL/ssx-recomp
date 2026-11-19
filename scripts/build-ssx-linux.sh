@@ -448,7 +448,7 @@ if [ -f "$dist/librexgpu-regpu.so" ]; then
   step "Collecting the game's shaders for the renderer"
   rm -f "$dist/static-shaders.bin"
   collect=0
-  (cd "$dist" && timeout 120 ./ssx --ssx_collect_shaders=true --audio_mute >/dev/null 2>&1) || collect=$?
+  (cd "$dist" && timeout 120 ./ssx --ssx_collect_shaders=true --audio_mute --fullscreen=false >/dev/null 2>&1) || collect=$?
   # Stopped here after 2 minutes: not a failed renderer start, so its start marker goes (a crash keeps it).
   if [ "$collect" = 124 ]; then rm -f "$dist/regpu-starting.flag"; fi
   if [ -f "$dist/static-shaders.bin" ]; then echo "  Shaders collected."

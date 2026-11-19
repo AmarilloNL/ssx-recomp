@@ -538,7 +538,7 @@ if (Test-Path "$root\dist\SSX\rexgpu-regpu.dll") {
     Step "Collecting the game's shaders for the renderer"
     Remove-Item "$root\dist\SSX\static-shaders.bin" -ErrorAction SilentlyContinue
     $collect = Start-Process "$root\dist\SSX\ssx.exe" -WorkingDirectory "$root\dist\SSX" -WindowStyle Minimized -PassThru `
-        -ArgumentList '--ssx_collect_shaders=true', '--audio_mute'
+        -ArgumentList '--ssx_collect_shaders=true', '--audio_mute', '--fullscreen=false'
     if (-not $collect.WaitForExit(120000)) {
         Stop-Process -Id $collect.Id -ErrorAction SilentlyContinue
         Remove-Item "$root\dist\SSX\regpu-starting.flag" -ErrorAction SilentlyContinue
