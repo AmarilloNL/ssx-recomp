@@ -75,6 +75,7 @@ const Choice kRenderSizes[] = {{"Original  1120 x 584", "original"}, {"High  120
 const Choice kAntiAliasing[] = {{"Off", "none"}, {"FXAA", "fxaa"}, {"FXAA  (strong)", "fxaa_extreme"}};
 const Choice kAniso[] = {{"Game default", "-1"}, {"Off", "0"}, {"2x", "2"},
                          {"4x", "3"},            {"8x", "4"},  {"16x", "5"}};
+const Choice kTrickyCheats[] = {{"Normal", "0"}, {"Always Tricky", "1"}, {"Always Super Tricky", "2"}, {"Never", "3"}};
 
 struct Bind {
   const char* label;
@@ -666,8 +667,8 @@ void SsxSettingsDialog::DrawCheatsTab() {
   if (!BeginRows("##cheats")) return;
   Row("Infinite boost", "Boost never runs out. Tricky doesn't start from tricks while it's on.");
   Checkbox("##cheat_boost", "ssx_cheat_infinite_boost");
-  Row("Always Super Tricky", "Tricky and Super Tricky stay on the whole ride, with unlimited boost.");
-  Checkbox("##cheat_super_tricky", "ssx_cheat_super_tricky");
+  Row("Tricky", "Always Tricky stays in Tricky (never Super Tricky). Never: boost without Tricky.");
+  Combo("##cheat_tricky", "ssx_cheat_tricky", kTrickyCheats, std::size(kTrickyCheats));
   ImGui::EndTable();
   ImGui::Spacing();
   ImGui::TextDisabled("Cheats don't change your save: turn them off and the game plays as before.");

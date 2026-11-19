@@ -28,7 +28,8 @@ Settings
        Controls  keyboard, vibration, deadzone, key bindings
        Profile   your name and picture, the badges that need EA's servers
        Snowflakes  how many snowflakes you have on every drop
-       Cheats    infinite boost, or Super Tricky the whole ride (your save stays as it is)
+       Cheats    infinite boost; Tricky or Super Tricky the whole ride, or no Tricky
+                 (your save stays as it is)
 
   Tip: 1x + FSR runs much faster than 2x and still looks sharp.
        2x is the sharpest but limited to around 60 fps by the GPU emulation.
