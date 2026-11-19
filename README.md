@@ -431,9 +431,11 @@ The game is playable and is being tested by playing through the whole World Tour
 <br>
 
 - ✅ The main menu comes about 10 seconds sooner: the game no longer waits for Xbox Live after loading
-  the save; cheats (infinite boost, always Tricky or Super Tricky, no Tricky, infinite credits and rewinds, +1,000,000 credits, infinite gear: armour, oxygen, warmth, the wingsuit, ice axes, batteries; never lose a combo or the multiplier; max gear stats, big head and hands, glowing suit); the setup shows the
-  title update and DLC you already added; moving the SSX folder no longer breaks the
-  next rebuild (1.8.0)
+  the save; cheats (infinite boost, always Tricky or Super Tricky, no Tricky, infinite credits and
+  rewinds, +1,000,000 credits, infinite gear: armour, oxygen, warmth, the wingsuit, ice axes,
+  batteries; never lose a combo or the multiplier; max gear stats, big head and hands, glowing suit);
+  the setup shows the title update and DLC you already added; moving the SSX folder no longer breaks
+  the next rebuild (1.8.0)
 - ✅ Every controller is player 1 (a controller that wasn't first, for example behind a Steam or
   DS4Windows virtual pad, got stuck at "sign in"), and **Quit game** in the settings menu (1.7.1)
 - ✅ One `ssx-recomp.exe` that sets SSX up and is its launcher: a portable SSX folder (saves from
