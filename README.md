@@ -61,7 +61,7 @@ code runs natively, and its Xbox 360 graphics are drawn with Direct3D 12 (on Lin
 | ❄️ **Snowflake tracker** | how many snowflakes you have on every drop, per range and peak (settings → **Snowflakes**) |
 | 🏂 **Boost meter in freeride** | the boost and tricky meters while you freeride (settings → **Display**) |
 | 🏅 **Online-only badges** | the badges that need EA's servers, shown as earned (settings → **Profile**) |
-| 🎮 **Cheats** | infinite boost; Tricky or Super Tricky the whole ride, or no Tricky at all; infinite credits, without touching your own; infinite rewinds; armour and batteries that never run out (settings → **Cheats**) |
+| 🎮 **Cheats** | infinite boost; Tricky or Super Tricky the whole ride, or no Tricky at all; infinite credits (your own are never spent); infinite rewinds; armour and batteries that never run out (settings → **Cheats**) |
 
 <a id="installing"></a>
 

@@ -29,7 +29,7 @@ Settings
        Profile   your name and picture, the badges that need EA's servers
        Snowflakes  how many snowflakes you have on every drop
        Cheats    infinite boost; Tricky or Super Tricky the whole ride, or no Tricky;
-                 infinite credits (your own credits stay as they are); infinite rewinds;
+                 infinite credits (your own credits are never spent); infinite rewinds;
                  armour and batteries that never run out
 
   Tip: 1x + FSR runs much faster than 2x and still looks sharp.
