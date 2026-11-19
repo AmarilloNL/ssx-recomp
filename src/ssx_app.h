@@ -46,6 +46,7 @@
 #include "ssx_restart.h"
 #include "ssx_settings.h"
 #include "ssx_settings_dialog.h"
+#include "ssx_shaders.h"
 #include "ssx_music.h"
 #include "ssx_tuning.h"
 
@@ -243,6 +244,7 @@ class SsxApp : public rex::ReXApp {
           if (SsxSpawnRestart()) window()->RequestClose();
         },
         [this] { window()->RequestClose(); });  // Quit game: the window close button's path
+    SsxShadersSetQuit([this] { app_context().CallInUIThreadDeferred([this] { window()->RequestClose(); }); });
     rex::ui::RegisterBind("bind_ssx_settings", "F1", "SSX settings menu",
                           [this] { settings_->Toggle(); });
     // Testing aid: SSX_OPEN_SETTINGS=<tab name> opens the menu at startup on that tab.

@@ -24,7 +24,11 @@
 
 #include <rex/cvar.h>
 #include <rex/kernel/xboxkrnl/video.h>
+#include <cstring>
+#include <fstream>
+#include <vector>
 #include <rex/logging.h>
+#include <rex/filesystem.h>
 #include <rex/runtime.h>
 #include <rex/system/function_dispatcher.h>
 #include <rex/system/kernel_state.h>
@@ -48,6 +52,9 @@ REXCVAR_DEFINE_STRING(regpu_resolution, "screen", "GPU",
 REXCVAR_DEFINE_INT32(anisotropic_override, 3, "GPU",
                      "Texture filtering: -1 the game's, 0 off, 1-5 1x-16x anisotropic")
     .range(-1, 5);
+// ReGPU's count of the dwords a shader uses (src/gpu/ucode.h).
+namespace ucode { uint32_t UsedDwords(const uint32_t* microcodeBE, uint32_t dwords); }
+
 namespace glue2gpu
 {
 namespace
@@ -345,6 +352,34 @@ X_STATUS ReGpuGraphicsSystem::SetupPresentation(rex::ui::WindowedAppContext*)
     return X_STATUS_SUCCESS;
 }
 
+// SSX's shaders for the first-boot compile (issue #17): static-shaders.bin beside the exe, written by
+// ssx.exe --ssx_collect_shaders ("SSXS", the count, then per shader u8 pixel, u32 dwords, big-endian code),
+// each cut to the dwords it uses, as ReGPU's own scanner does, so the hashes match the shaders the game draws.
+std::vector<regpu::ScannedShader> ReadStaticShaders()
+{
+    std::vector<regpu::ScannedShader> out;
+    std::ifstream f(rex::filesystem::GetExecutableFolder() / "static-shaders.bin", std::ios::binary);
+    char magic[4];
+    uint32_t count = 0;
+    if (!f.read(magic, 4) || std::memcmp(magic, "SSXS", 4) != 0 || !f.read(reinterpret_cast<char*>(&count), 4))
+        return out;
+    for (uint32_t i = 0; i < count; i++)
+    {
+        uint8_t pixel = 0;
+        uint32_t dwords = 0;
+        if (!f.read(reinterpret_cast<char*>(&pixel), 1) || !f.read(reinterpret_cast<char*>(&dwords), 4) || dwords == 0 ||
+            dwords > 0x2000)
+            break;
+        std::vector<uint32_t> code(dwords);
+        if (!f.read(reinterpret_cast<char*>(code.data()), std::streamsize(dwords) * 4))
+            break;
+        code.resize(ucode::UsedDwords(code.data(), dwords));
+        out.push_back({ pixel != 0, std::move(code) });
+    }
+    REXLOG_INFO("ReGPU: {} shaders from static-shaders.bin", out.size());
+    return out;
+}
+
 void ReGpuGraphicsSystem::FillHost()
 {
     regpu::Host& host = regpu::GetHost();
@@ -364,6 +399,8 @@ void ReGpuGraphicsSystem::FillHost()
         OverlayFramePresented();
     };
     host.drawOverlay = DrawOverlay;
+    host.staticShaders = ReadStaticShaders;
+    host.staticShadersSaved = [] { return true; };  // reading the file is quick: no "searching" screen
 }
 
 X_STATUS ReGpuGraphicsSystem::SetupGuestGpu(rex::runtime::FunctionDispatcher* dispatcher,
