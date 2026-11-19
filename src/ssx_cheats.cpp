@@ -26,7 +26,7 @@ REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_boost, false, "SSX", "Cheat: boost never 
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_credits, false, "SSX", "Cheat: buying costs nothing, the stores show 9,999,999");
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_rewinds, false, "SSX", "Cheat: rewinds are never used up");
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_gear, false, "SSX",
-                    "Cheat: armour, oxygen and the headlamp and pulse goggles batteries never run out");
+                    "Cheat: armour, oxygen, core temperature and the headlamp and pulse goggles batteries never run out");
 REXCVAR_DEFINE_INT32(ssx_cheat_tricky, 0, "SSX",
                      "Cheat: 0 Tricky as normal, 1 always Tricky, 2 always Super Tricky, 3 never Tricky");
 
@@ -138,4 +138,16 @@ REX_HOOK_RAW(SSX_FN_HUD_UPDATE) {
     std::memcpy(&level, &bits, 4);
     if (level >= 0.0f && level < 1.0f) REX_STORE_U32(value, 0x3F800000u);  // 1.0f
   }
+}
+
+// ...and the cold: the rider's core temperature can't go above a maximum that drops with the cold taken
+// so far, so right after each frame's cold update that cold is back to none and the temperature full.
+REX_EXTERN(SSX_FN_COLD_UPDATE_IMP);
+REX_HOOK_RAW(SSX_FN_COLD_UPDATE) {
+  const uint32_t self = ctx.r3.u32;
+  SSX_FN_COLD_UPDATE_IMP(ctx, base);
+  if (!REXCVAR_GET(ssx_cheat_infinite_gear)) return;
+  if (const uint32_t cold = REX_LOAD_U32(self + 0x2019C)) REX_STORE_U32(cold, 0);  // 0.0f
+  if (const uint32_t max = REX_LOAD_U32(self + 0x20194)) REX_STORE_U32(max, 0x3F800000u);
+  if (const uint32_t temperature = REX_LOAD_U32(self + 0x20190)) REX_STORE_U32(temperature, 0x3F800000u);
 }

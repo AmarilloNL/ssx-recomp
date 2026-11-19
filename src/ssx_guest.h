@@ -82,5 +82,10 @@
 // value at *[stats + (N+1)*4] (N in the game's own sorted stat list, e.g. 148 FLT_Armour).
 #define SSX_FN_HUD_UPDATE SSX_GUEST(sub_824C8DB0, sub_82492D28)
 #define SSX_FN_HUD_UPDATE_IMP SSX_GUEST(__imp__sub_824C8DB0, __imp__sub_82492D28)
+// The rider's cold, once a frame (Antarctica; this r3): pointers to the core temperature ([r3+0x20190],
+// the FLT_InternalTemperature stat), its maximum ([r3+0x20194], 185) and the cold taken so far
+// ([r3+0x2019C]); the maximum is 1 minus that cold, the temperature can't go above the maximum.
+#define SSX_FN_COLD_UPDATE SSX_GUEST(sub_82CF83B0, sub_82CD3970)
+#define SSX_FN_COLD_UPDATE_IMP SSX_GUEST(__imp__sub_82CF83B0, __imp__sub_82CD3970)
 #define SSX_FN_GET_CREDITS SSX_GUEST(sub_824A7910, sub_82473950)
 #define SSX_FN_GET_CREDITS_IMP SSX_GUEST(__imp__sub_824A7910, __imp__sub_82473950)
