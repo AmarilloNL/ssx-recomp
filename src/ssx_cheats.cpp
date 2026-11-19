@@ -14,6 +14,8 @@
 //   update and put them back after it.
 // Nothing is written to the save: turning a cheat off hands the values back to the game.
 
+#include <cstring>
+
 #include <rex/cvar.h>
 #include <rex/hook.h>
 
@@ -23,6 +25,8 @@
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_boost, false, "SSX", "Cheat: boost never runs out");
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_credits, false, "SSX", "Cheat: buying costs nothing, the stores show 9,999,999");
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_rewinds, false, "SSX", "Cheat: rewinds are never used up");
+REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_gear, false, "SSX",
+                    "Cheat: armour and the headlamp and pulse goggles batteries never run out");
 REXCVAR_DEFINE_INT32(ssx_cheat_tricky, 0, "SSX",
                      "Cheat: 0 Tricky as normal, 1 always Tricky, 2 always Super Tricky, 3 never Tricky");
 
@@ -109,4 +113,29 @@ REX_EXTERN(SSX_FN_USE_REWIND_IMP);
 REX_HOOK_RAW(SSX_FN_USE_REWIND) {
   if (REXCVAR_GET(ssx_cheat_infinite_rewinds)) return;
   SSX_FN_USE_REWIND_IMP(ctx, base);
+}
+
+// Infinite armour and batteries: the rider's armour and headlamp and pulse goggles batteries are stats from
+// 0 to 1 that the game takes off directly (a hit, a frame of light); right after each frame's HUD update
+// they're full again. -1 means not in use (between rides): left alone.
+namespace {
+constexpr uint32_t kGearStats[] = {148 /* FLT_Armour */, 166 /* FLT_HeadLampBatteryLevel */,
+                                   196 /* FLT_PulseGogglesBatteryLevel */};
+}
+
+REX_EXTERN(SSX_FN_HUD_UPDATE_IMP);
+REX_HOOK_RAW(SSX_FN_HUD_UPDATE) {
+  const uint32_t hud = ctx.r3.u32;
+  SSX_FN_HUD_UPDATE_IMP(ctx, base);
+  if (!REXCVAR_GET(ssx_cheat_infinite_gear)) return;
+  const uint32_t stats = REX_LOAD_U32(hud + 144);
+  if (!stats) return;
+  for (uint32_t id : kGearStats) {
+    const uint32_t value = REX_LOAD_U32(stats + (id + 1) * 4);
+    if (!value) continue;
+    const uint32_t bits = REX_LOAD_U32(value);
+    float level;
+    std::memcpy(&level, &bits, 4);
+    if (level >= 0.0f && level < 1.0f) REX_STORE_U32(value, 0x3F800000u);  // 1.0f
+  }
 }

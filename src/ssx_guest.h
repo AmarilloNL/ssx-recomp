@@ -78,5 +78,9 @@
 // rewinds are infinite ([r3+148] points at that flag, as in a race).
 #define SSX_FN_USE_REWIND SSX_GUEST(sub_82CF30E0, sub_82CCE650)
 #define SSX_FN_USE_REWIND_IMP SSX_GUEST(__imp__sub_82CF30E0, __imp__sub_82CCE650)
+// The in-ride HUD's update, once a frame (this r3): [this+144] is the rider's stats object, stat N's
+// value at *[stats + (N+1)*4] (N in the game's own sorted stat list, e.g. 148 FLT_Armour).
+#define SSX_FN_HUD_UPDATE SSX_GUEST(sub_824C8DB0, sub_82492D28)
+#define SSX_FN_HUD_UPDATE_IMP SSX_GUEST(__imp__sub_824C8DB0, __imp__sub_82492D28)
 #define SSX_FN_GET_CREDITS SSX_GUEST(sub_824A7910, sub_82473950)
 #define SSX_FN_GET_CREDITS_IMP SSX_GUEST(__imp__sub_824A7910, __imp__sub_82473950)

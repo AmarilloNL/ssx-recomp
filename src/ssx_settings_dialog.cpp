@@ -673,6 +673,8 @@ void SsxSettingsDialog::DrawCheatsTab() {
   Checkbox("##cheat_credits", "ssx_cheat_infinite_credits");
   Row("Infinite rewinds", "Rewinds (LB) are never used up, also where a drop gives only a few.");
   Checkbox("##cheat_rewinds", "ssx_cheat_infinite_rewinds");
+  Row("Infinite armour and batteries", "Armour, and the headlamp and pulse goggles batteries, never run out.");
+  Checkbox("##cheat_gear", "ssx_cheat_infinite_gear");
   ImGui::EndTable();
   ImGui::Spacing();
   ImGui::TextDisabled("Turn a cheat off and the game plays as before. Your own credits are never changed.");
