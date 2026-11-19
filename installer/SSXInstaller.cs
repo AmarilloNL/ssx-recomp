@@ -1077,10 +1077,7 @@ class InstallerForm : Form {
     dlcHint = Th.Label("", Th.F(9.5f, FontStyle.Regular), Th.Faint, x + Th.D(2), dlcY + Th.D(40), w, Th.D(60));
     dlcHint.AutoEllipsis = true;
     p.Controls.Add(dlcHint);
-    SetHint(dlcHint, "Copied off your own Xbox 360 with a tool like FATXplorer or Velocity. In " +
-                     "Content\\0000000000000000\\4541096D, the DLC (long-named files) is in 00000002 and the title " +
-                     "update in 000B0000 (if there are two, the larger one). Add them once: later updates keep them.",
-            Th.Faint);
+    SetHint(dlcHint, DlcHelp, Th.Faint);
 
     UpdateHints();
   }
@@ -1269,6 +1266,7 @@ class InstallerForm : Form {
 
   void ShowPage(int p) {
     page = p;
+    if (p == 1 && dlcFiles.Count == 0 && titleUpdateFile == null) ShowAddedHint();
     for (int i = 0; i < pages.Length; i++) pages[i].Visible = i == p;
     rail.Current = p == 3 ? 4 : p;
     rail.Invalidate();
@@ -1312,8 +1310,57 @@ class InstallerForm : Form {
     });
     doneSub.Text = problems.Count > 0 ? problems[0] : "DLC added: the game installs it when it starts.";
     dlcFiles.Clear();
-    SetHint(dlcHint, "Added. Add more files any time.", Th.Faint);
     ShowPage(3);
+  }
+
+  const string DlcHelp = "Copied off your own Xbox 360 with a tool like FATXplorer or Velocity. In " +
+                         "Content\\0000000000000000\\4541096D, the DLC (long-named files) is in 00000002 and the title " +
+                         "update in 000B0000 (if there are two, the larger one). Add them once: later updates keep them.";
+
+  // With nothing picked: what this SSX folder already has (issue #18: no need to add it again), or the help text.
+  void ShowAddedHint() {
+    List<string> added = Added(folder);
+    if (added.Count == 0) SetHint(dlcHint, DlcHelp, Th.Faint);
+    else SetHint(dlcHint, "Already added: " + string.Join(", ", added.ToArray()) +
+                          ". They're kept for every rebuild: add files only for something new.", Th.Good);
+  }
+
+  // The title update and DLC this SSX folder keeps for every rebuild: the title update in
+  // source\game-dump (build-ssx.ps1), the DLC the game installed (the .header files the SDK's
+  // ContentManager writes: XCONTENT_DATA, display name in UTF-16 big-endian at offset 8) or will
+  // install on its next start (files waiting in userdata\dlc, src/ssx_dlc.cpp).
+  static List<string> Added(string folder) {
+    var added = new List<string>();
+    string dump = Path.Combine(folder, "source\\game-dump");
+    if (File.Exists(Path.Combine(dump, "files\\default.xexp")) && File.Exists(Path.Combine(dump, "update\\patch0.big"))) {
+      added.Add("Title update");
+    }
+    var dlc = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);  // file name -> display name
+    string userData = Path.Combine(Install.GameDir(folder), "userdata");
+    try {
+      string headers = Path.Combine(userData, "0000000000000000\\4541096D\\Headers\\00000002");
+      if (Directory.Exists(headers)) {
+        foreach (string file in Directory.GetFiles(headers, "*.header")) {
+          byte[] h = File.ReadAllBytes(file);
+          if (h.Length < 8 + 256) continue;
+          string name = Encoding.BigEndianUnicode.GetString(h, 8, 256);
+          int end = name.IndexOf('\0');
+          if (end >= 0) name = name.Substring(0, end);
+          if (name.Length > 0) dlc[Path.GetFileNameWithoutExtension(file)] = name;
+        }
+      }
+      string waiting = Path.Combine(userData, "dlc");
+      if (Directory.Exists(waiting)) {
+        foreach (string file in Directory.GetFiles(waiting)) {
+          if (dlc.ContainsKey(Path.GetFileName(file))) continue;
+          bool isUpdate;
+          string problem, name = ReadPackageName(file, out isUpdate, out problem);
+          if (name != null && !isUpdate) dlc[Path.GetFileName(file)] = name;
+        }
+      }
+    } catch (Exception) { }  // only a hint: an unreadable folder shows what was found so far
+    foreach (string name in dlc.Values) added.Add(name.Replace("SSX™ ", ""));
+    return added;
   }
 
   void Next() {
