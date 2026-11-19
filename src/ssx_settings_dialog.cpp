@@ -687,11 +687,11 @@ void SsxSettingsDialog::DrawCheatsTab() {
   }
   Row("Infinite rewinds", "Rewinds (LB) are never used up, also where a drop gives only a few.");
   Checkbox("##cheat_rewinds", "ssx_cheat_infinite_rewinds");
-  Row("Infinite gear", "Armour, oxygen (and tanks), core temperature, wingsuit, ice axes and batteries never wear out.");
+  Row("Infinite gear", "Armour, oxygen (and tanks), core temperature, batteries, the wingsuit and ice axes never run out.");
   Checkbox("##cheat_gear", "ssx_cheat_infinite_gear");
   Row("Never lose combo", "A wipeout banks your combo (with its bonus) instead of losing it.");
   Checkbox("##cheat_combo", "ssx_cheat_keep_combo");
-  Row("Never lose multiplier", "The trick multiplier only goes up.");
+  Row("Never lose multiplier", "The trick multiplier only goes up during a ride.");
   Checkbox("##cheat_multiplier", "ssx_cheat_keep_multiplier");
   Row("Max gear stats", "From your next ride: board, wingsuit and other gear at their best.");
   Checkbox("##cheat_max_gear", "ssx_cheat_max_gear");
