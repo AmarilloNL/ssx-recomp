@@ -665,7 +665,8 @@ void SsxSettingsDialog::DrawSnowflakesTab() {
   ImGui::EndTable();
 }
 
-// Cheats (issue #21, ssx_cheats.cpp). They apply at once and change nothing in the save.
+// Cheats (issue #21, ssx_cheats.cpp). Most apply at once; the outfit ones (max gear, big head and hands,
+// glowing) from the next ride. Only what is bought and the credits given end up in the save.
 void SsxSettingsDialog::DrawCheatsTab() {
   if (!BeginRows("##cheats")) return;
   Row("Infinite boost", "Boost never runs out. Tricky doesn't start from tricks while it's on.");
