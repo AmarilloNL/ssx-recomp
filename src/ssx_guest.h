@@ -68,9 +68,10 @@
 #define SSX_FN_BOOST_UPDATE SSX_GUEST(sub_82CED2E8, sub_82CC8850)
 #define SSX_FN_BOOST_UPDATE_IMP SSX_GUEST(__imp__sub_82CED2E8, __imp__sub_82CC8850)
 
-// The profile's credits (key 'BILL'): add (profile r3, amount r4, a purchase's is negative) and
-// get (profile r3, credits in r3), the getter the menus and stores use (ssx_cheats.cpp).
-#define SSX_FN_ADD_CREDITS SSX_GUEST(sub_824A9DF8, sub_82475E38)
-#define SSX_FN_ADD_CREDITS_IMP SSX_GUEST(__imp__sub_824A9DF8, __imp__sub_82475E38)
+// The profile's credits (key 'BILL', ssx_cheats.cpp): every change (amount r4, a purchase's is negative)
+// goes through the first, which adds it to the profile (sub_824A9DF8 / sub_82475E38) and to the menus'
+// credits; the second is the getter the menus and stores use (profile r3, credits in r3).
+#define SSX_FN_CHANGE_CREDITS SSX_GUEST(sub_82402000, sub_823DB560)
+#define SSX_FN_CHANGE_CREDITS_IMP SSX_GUEST(__imp__sub_82402000, __imp__sub_823DB560)
 #define SSX_FN_GET_CREDITS SSX_GUEST(sub_824A7910, sub_82473950)
 #define SSX_FN_GET_CREDITS_IMP SSX_GUEST(__imp__sub_824A7910, __imp__sub_82473950)

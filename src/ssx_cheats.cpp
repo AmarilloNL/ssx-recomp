@@ -82,17 +82,18 @@ REX_HOOK_RAW(SSX_FN_BOOST_UPDATE) {
 }
 
 // Infinite credits. Every change to the profile's credits goes through one function (a purchase adds a
-// negative amount): with the cheat on, a purchase adds nothing. The menus and stores read the credits
-// through a getter that reports at least 9,999,999, so everything is affordable; the add function reads
-// the profile itself, so the saved credits stay the real ones (and rewards still add to them).
+// negative amount), which also updates the credits the menus show: with the cheat on, a purchase adds
+// nothing. The menus and stores read the credits through a getter that reports at least 9,999,999, so
+// everything is affordable; adding reads the profile itself, so the saved credits stay the real ones
+// (and rewards still add to them).
 namespace {
 constexpr int32_t kCheatCredits = 9999999;
 }
 
-REX_EXTERN(SSX_FN_ADD_CREDITS_IMP);
-REX_HOOK_RAW(SSX_FN_ADD_CREDITS) {
+REX_EXTERN(SSX_FN_CHANGE_CREDITS_IMP);
+REX_HOOK_RAW(SSX_FN_CHANGE_CREDITS) {
   if (REXCVAR_GET(ssx_cheat_infinite_credits) && int32_t(ctx.r4.u32) < 0) ctx.r4.u64 = 0;
-  SSX_FN_ADD_CREDITS_IMP(ctx, base);
+  SSX_FN_CHANGE_CREDITS_IMP(ctx, base);
 }
 
 REX_EXTERN(SSX_FN_GET_CREDITS_IMP);
