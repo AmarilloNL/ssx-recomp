@@ -380,6 +380,27 @@ std::vector<regpu::ScannedShader> ReadStaticShaders()
     return out;
 }
 
+// The screen ReGPU shows while it compiles the static shaders on the first start (a black window for half
+// a minute looks like a hang): dark, with a progress bar of done / total. No text (no font here).
+bool BootScreen(const wchar_t*, uint32_t done, uint32_t total, std::vector<uint8_t>& rgba)
+{
+    constexpr uint32_t kW = 1280, kH = 720, kBarW = 640, kBarH = 12, kX = (kW - kBarW) / 2, kY = kH * 3 / 4;
+    rgba.assign(size_t(kW) * kH * 4, 0);
+    for (size_t i = 3; i < rgba.size(); i += 4)
+        rgba[i] = 255;  // opaque black
+    const uint32_t filled = total ? uint32_t(uint64_t(kBarW) * std::min(done, total) / total) : 0;
+    for (uint32_t y = kY; y < kY + kBarH; y++)
+        for (uint32_t x = kX; x < kX + kBarW; x++)
+        {
+            uint8_t* p = &rgba[(size_t(y) * kW + x) * 4];
+            const bool on = x - kX < filled;
+            p[0] = on ? 0x4F : 0x20; // RGBA: the menus' cyan, on a dim track
+            p[1] = on ? 0xC3 : 0x30;
+            p[2] = on ? 0xF7 : 0x38;
+        }
+    return true;
+}
+
 void ReGpuGraphicsSystem::FillHost()
 {
     regpu::Host& host = regpu::GetHost();
@@ -401,6 +422,7 @@ void ReGpuGraphicsSystem::FillHost()
     host.drawOverlay = DrawOverlay;
     host.staticShaders = ReadStaticShaders;
     host.staticShadersSaved = [] { return true; };  // reading the file is quick: no "searching" screen
+    host.bootScreen = BootScreen;
 }
 
 X_STATUS ReGpuGraphicsSystem::SetupGuestGpu(rex::runtime::FunctionDispatcher* dispatcher,
