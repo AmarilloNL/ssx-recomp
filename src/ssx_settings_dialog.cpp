@@ -673,8 +673,8 @@ void SsxSettingsDialog::DrawCheatsTab() {
   Checkbox("##cheat_credits", "ssx_cheat_infinite_credits");
   ImGui::EndTable();
   ImGui::Spacing();
-  ImGui::TextDisabled("Cheats don't change your save: turn them off and the game plays as before.");
-  ImGui::TextDisabled("Scores, times and medals you get with a cheat on are kept like any others.");
+  ImGui::TextDisabled("Turn a cheat off and the game plays as before. Your own credits are never changed.");
+  ImGui::TextDisabled("Scores, medals and what you buy with a cheat on are kept like any others.");
 }
 
 void SsxSettingsDialog::DrawControlsTab() {
