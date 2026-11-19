@@ -673,7 +673,7 @@ void SsxSettingsDialog::DrawCheatsTab() {
   Checkbox("##cheat_credits", "ssx_cheat_infinite_credits");
   Row("Infinite rewinds", "Rewinds (LB) are never used up, also where a drop gives only a few.");
   Checkbox("##cheat_rewinds", "ssx_cheat_infinite_rewinds");
-  Row("Infinite gear", "Armour, oxygen, core temperature and the headlamp and pulse goggles batteries never run out.");
+  Row("Infinite gear", "Armour, oxygen (and tanks), core temperature, wingsuit lift, ice axes and batteries never run out.");
   Checkbox("##cheat_gear", "ssx_cheat_infinite_gear");
   ImGui::EndTable();
   ImGui::Spacing();

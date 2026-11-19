@@ -26,7 +26,7 @@ REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_boost, false, "SSX", "Cheat: boost never 
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_credits, false, "SSX", "Cheat: buying costs nothing, the stores show 9,999,999");
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_rewinds, false, "SSX", "Cheat: rewinds are never used up");
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_gear, false, "SSX",
-                    "Cheat: armour, oxygen, core temperature and the headlamp and pulse goggles batteries never run out");
+                    "Cheat: armour, oxygen (and tanks), core temperature, wingsuit lift, ice axes and the headlamp and pulse goggles batteries never run out");
 REXCVAR_DEFINE_INT32(ssx_cheat_tricky, 0, "SSX",
                      "Cheat: 0 Tricky as normal, 1 always Tricky, 2 always Super Tricky, 3 never Tricky");
 
@@ -115,12 +115,15 @@ REX_HOOK_RAW(SSX_FN_USE_REWIND) {
   SSX_FN_USE_REWIND_IMP(ctx, base);
 }
 
-// Infinite gear: the rider's armour, oxygen and headlamp and pulse goggles batteries are stats from 0 to 1
-// that the game takes off directly (a hit, a frame of breathing or light); right after each frame's HUD
-// update they're full again. -1 means not in use (between rides): left alone.
+// Infinite gear: the rider's armour, oxygen (and the tank's), the wingsuit's and ice axes' effectiveness and
+// the headlamp and pulse goggles batteries are stats from 0 to 1 that the game takes off directly (a hit, a
+// frame of breathing, flying or light); right after each frame's HUD update they're full again. -1 means
+// not in use (between rides): left alone.
 namespace {
-constexpr uint32_t kGearStats[] = {148 /* FLT_Armour */, 166 /* FLT_HeadLampBatteryLevel */, 190 /* FLT_OxygenLevel */,
-                                   196 /* FLT_PulseGogglesBatteryLevel */};
+constexpr uint32_t kGearStats[] = {148 /* FLT_Armour */,        166 /* FLT_HeadLampBatteryLevel */,
+                                   169 /* FLT_IceAxeEffectiveness */, 190 /* FLT_OxygenLevel */,
+                                   191 /* FLT_OxygenTankLevel */, 196 /* FLT_PulseGogglesBatteryLevel */,
+                                   231 /* FLT_WingsuitEffectiveness */};
 }
 
 REX_EXTERN(SSX_FN_HUD_UPDATE_IMP);
