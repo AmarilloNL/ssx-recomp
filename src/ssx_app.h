@@ -240,11 +240,11 @@ class SsxApp : public rex::ReXApp {
     settings_ = std::make_unique<SsxSettingsDialog>(
         drawer, static_cast<rex::input::InputSystem*>(runtime()->input_system()),
         config_path_, [this] {
-          // Same path as the window close button: ends the title and exits the process.
-          if (SsxSpawnRestart()) window()->RequestClose();
+          // Ends the title and exits the process, like the window close button.
+          if (SsxSpawnRestart()) CloseWindow();
         },
-        [this] { window()->RequestClose(); });  // Quit game: the window close button's path
-    SsxShadersSetQuit([this] { app_context().CallInUIThreadDeferred([this] { window()->RequestClose(); }); });
+        [this] { CloseWindow(); });  // Quit game
+    SsxShadersSetQuit([this] { app_context().CallInUIThreadDeferred([this] { CloseWindow(); }); });
     rex::ui::RegisterBind("bind_ssx_settings", "F1", "SSX settings menu",
                           [this] { settings_->Toggle(); });
     // Testing aid: SSX_OPEN_SETTINGS=<tab name> opens the menu at startup on that tab.
@@ -258,7 +258,7 @@ class SsxApp : public rex::ReXApp {
     overlay_.reset();
   }
 
-  // A normal close (window, Alt+F4, F1's restart): the ReGPU start was fine. (ReXGlue exits the
+  // A normal close (the window's close button, Alt+F4): the ReGPU start was fine. (ReXGlue exits the
   // process right after closing, without OnShutdown.)
   bool OnWindowCloseRequested() override {
     std::error_code ignored;
@@ -267,6 +267,15 @@ class SsxApp : public rex::ReXApp {
   }
 
  private:
+  // F1's Quit game and restart close the window themselves, which doesn't pass OnWindowCloseRequested:
+  // the ReGPU start was fine too (the menu is up), so the marker goes first. Otherwise quitting within
+  // 30 s of the start sent the next start to the standard renderer.
+  void CloseWindow() {
+    std::error_code ignored;
+    std::filesystem::remove(StartMarker(), ignored);
+    window()->RequestClose();
+  }
+
   // ReGPU is the default renderer, so a PC it can't start on must not crash on every start. This
   // marker next to the exe exists while a ReGPU start is unproven: from loading the plugin until the
   // game has run for 30 s or closes normally. Still there at the next start (a crash or a kill), the
