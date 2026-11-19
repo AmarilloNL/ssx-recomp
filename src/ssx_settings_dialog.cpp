@@ -687,6 +687,10 @@ void SsxSettingsDialog::DrawCheatsTab() {
   Checkbox("##cheat_rewinds", "ssx_cheat_infinite_rewinds");
   Row("Infinite gear", "Armour, oxygen (and tanks), core temperature, wingsuit lift, ice axes and batteries never run out.");
   Checkbox("##cheat_gear", "ssx_cheat_infinite_gear");
+  Row("Never lose combo", "A wipeout banks your combo (with its bonus) instead of losing it.");
+  Checkbox("##cheat_combo", "ssx_cheat_keep_combo");
+  Row("Never lose multiplier", "The trick multiplier only goes up.");
+  Checkbox("##cheat_multiplier", "ssx_cheat_keep_multiplier");
   ImGui::EndTable();
   ImGui::Spacing();
   ImGui::TextDisabled("Turn a cheat off and the game plays as before. Your own credits are never spent.");

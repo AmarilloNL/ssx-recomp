@@ -31,7 +31,8 @@ Settings
        Cheats    infinite boost; Tricky or Super Tricky the whole ride, or no Tricky;
                  infinite credits (your own credits are never spent) or +1,000,000;
                  infinite rewinds; armour, oxygen, warmth (core temp), wingsuit lift,
-                 ice axes and batteries that never run out
+                 ice axes and batteries that never run out;
+                 never lose a combo (a wipeout banks it) or the multiplier
 
   Tip: 1x + FSR runs much faster than 2x and still looks sharp.
        2x is the sharpest but limited to around 60 fps by the GPU emulation.

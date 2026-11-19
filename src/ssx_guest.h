@@ -95,3 +95,19 @@
 #define SSX_FN_MENU_SET_CREDITS SSX_GUEST(sub_8239FE40, sub_8256A820)
 #define SSX_MENU_DATA SSX_GUEST(0x838AB660u, 0x8388F3F0u)
 #define SSX_MENU_ID_CREDITS SSX_GUEST(552u, 571u)
+// The rider's trick scoring (this r3; same fields in both versions): [r3+264] points at the combo's trick
+// count, [r3+280] at its points, [r3+596] at the multiplier level. Each frame the scoring update first
+// checks for a wipeout (the first, r4 a flag it sets): when [r3+300] and [r3+308] are set it loses the
+// combo (its points are cleared without the combo bonus) and ends Tricky. Later the update adds a frame's
+// points (the second: f1 points, r5 1 when the combo's time is up: then it also adds the combo bonus,
+// points x (multiplier level + 1), and clears the combo). Both report the combo's end with the third
+// (r5 1 banked, 0 lost), which tells the HUD.
+#define SSX_FN_SCORE_WIPEOUT SSX_GUEST(sub_82CF12A0, sub_82CCC808)
+#define SSX_FN_SCORE_WIPEOUT_IMP SSX_GUEST(__imp__sub_82CF12A0, __imp__sub_82CCC808)
+#define SSX_FN_SCORE_ADD SSX_GUEST(sub_82CF0968, sub_82CCBED0)
+#define SSX_FN_COMBO_ENDED SSX_GUEST(sub_82CEFEB0, sub_82CCB418)
+#define SSX_FN_COMBO_ENDED_IMP SSX_GUEST(__imp__sub_82CEFEB0, __imp__sub_82CCB418)
+// The multiplier level ([r3+596]) after a trick or a frame: up one for a big enough trick while flowing, down
+// one when the flow stops (at once, or as its timer runs out), between -1 and 19.
+#define SSX_FN_FLOW_UPDATE SSX_GUEST(sub_82CED030, sub_82CC8598)
+#define SSX_FN_FLOW_UPDATE_IMP SSX_GUEST(__imp__sub_82CED030, __imp__sub_82CC8598)

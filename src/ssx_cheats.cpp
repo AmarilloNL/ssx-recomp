@@ -28,6 +28,8 @@ REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_credits, false, "SSX", "Cheat: buying cos
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_rewinds, false, "SSX", "Cheat: rewinds are never used up");
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_gear, false, "SSX",
                     "Cheat: armour, oxygen (and tanks), core temperature, wingsuit lift, ice axes and the headlamp and pulse goggles batteries never run out");
+REXCVAR_DEFINE_BOOL(ssx_cheat_keep_combo, false, "SSX", "Cheat: a wipeout banks the combo instead of losing it");
+REXCVAR_DEFINE_BOOL(ssx_cheat_keep_multiplier, false, "SSX", "Cheat: the trick multiplier never goes down");
 REXCVAR_DEFINE_INT32(ssx_cheat_tricky, 0, "SSX",
                      "Cheat: 0 Tricky as normal, 1 always Tricky, 2 always Super Tricky, 3 never Tricky");
 
@@ -194,5 +196,52 @@ REX_HOOK_RAW(SSX_FN_COLD_UPDATE) {
   if (cold && level(cold) > 0.0f) REX_STORE_U32(cold, 0);  // 0.0f: no cold taken
   for (uint32_t value : {max, temperature}) {
     if (value && level(value) >= 0.0f && level(value) < 1.0f) REX_STORE_U32(value, 0x3F800000u);  // 1.0f
+  }
+}
+
+// Never lose a combo: when a wipeout would lose the combo (the game's own test, with tricks in it), the
+// combo is banked first through the game's own end of combo (the bonus, the HUD's "banked"); the wipeout
+// then has nothing left to lose, and its report of that empty combo is left out. The rest of the wipeout
+// (Tricky ends, boost) is as normal.
+namespace {
+thread_local bool combo_banked = false;
+}
+
+REX_EXTERN(SSX_FN_SCORE_ADD);
+REX_EXTERN(SSX_FN_SCORE_WIPEOUT_IMP);
+REX_HOOK_RAW(SSX_FN_SCORE_WIPEOUT) {
+  const uint32_t self = ctx.r3.u32;
+  auto flag = [&](uint32_t field) {
+    const uint32_t p = REX_LOAD_U32(self + field);
+    return p && REX_LOAD_U8(p);
+  };
+  const uint32_t count = REX_LOAD_U32(self + 264);
+  if (REXCVAR_GET(ssx_cheat_keep_combo) && flag(300) && flag(308) && count && int32_t(REX_LOAD_U32(count)) > 0) {
+    const PPCContext saved = ctx;
+    ctx.f1.f64 = 0.0;  // no points of its own
+    ctx.r5.u64 = 1;    // the combo's time is up
+    SSX_FN_SCORE_ADD(ctx, base);
+    ctx = saved;
+    combo_banked = true;
+  }
+  SSX_FN_SCORE_WIPEOUT_IMP(ctx, base);
+  combo_banked = false;
+}
+
+REX_EXTERN(SSX_FN_COMBO_ENDED_IMP);
+REX_HOOK_RAW(SSX_FN_COMBO_ENDED) {
+  if (combo_banked && ctx.r5.u32 == 0) return;  // the wipeout's report of the combo just banked
+  SSX_FN_COMBO_ENDED_IMP(ctx, base);
+}
+
+// Never lose the multiplier: after the game's flow update a level above 0 can only go up (a new ride
+// starts from 0 elsewhere, as normal).
+REX_EXTERN(SSX_FN_FLOW_UPDATE_IMP);
+REX_HOOK_RAW(SSX_FN_FLOW_UPDATE) {
+  const uint32_t level = REX_LOAD_U32(ctx.r3.u32 + 596);
+  const int32_t before = level ? int32_t(REX_LOAD_U32(level)) : 0;
+  SSX_FN_FLOW_UPDATE_IMP(ctx, base);
+  if (REXCVAR_GET(ssx_cheat_keep_multiplier) && before > 0 && int32_t(REX_LOAD_U32(level)) < before) {
+    REX_STORE_U32(level, uint32_t(before));
   }
 }
