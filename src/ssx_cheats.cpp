@@ -21,6 +21,7 @@
 #include "ssx_guest.h"
 
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_boost, false, "SSX", "Cheat: boost never runs out");
+REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_credits, false, "SSX", "Cheat: buying costs nothing, the stores show 9,999,999");
 REXCVAR_DEFINE_INT32(ssx_cheat_tricky, 0, "SSX",
                      "Cheat: 0 Tricky as normal, 1 always Tricky, 2 always Super Tricky, 3 never Tricky");
 
@@ -78,4 +79,24 @@ REX_HOOK_RAW(SSX_FN_BOOST_UPDATE) {
     if (tuning) StoreFloat(base, REX_LOAD_U32(self + 148), REX_LOAD_U32(tuning + 540));  // full boost
     StoreFloat(base, REX_LOAD_U32(self + 152), 0x3F800000u);  // 1.0f: the HUD's meter full too
   }
+}
+
+// Infinite credits. Every change to the profile's credits goes through one function (a purchase adds a
+// negative amount): with the cheat on, a purchase adds nothing. The menus and stores read the credits
+// through a getter that reports at least 9,999,999, so everything is affordable; the add function reads
+// the profile itself, so the saved credits stay the real ones (and rewards still add to them).
+namespace {
+constexpr int32_t kCheatCredits = 9999999;
+}
+
+REX_EXTERN(SSX_FN_ADD_CREDITS_IMP);
+REX_HOOK_RAW(SSX_FN_ADD_CREDITS) {
+  if (REXCVAR_GET(ssx_cheat_infinite_credits) && int32_t(ctx.r4.u32) < 0) ctx.r4.u64 = 0;
+  SSX_FN_ADD_CREDITS_IMP(ctx, base);
+}
+
+REX_EXTERN(SSX_FN_GET_CREDITS_IMP);
+REX_HOOK_RAW(SSX_FN_GET_CREDITS) {
+  SSX_FN_GET_CREDITS_IMP(ctx, base);
+  if (REXCVAR_GET(ssx_cheat_infinite_credits) && int32_t(ctx.r3.u32) < kCheatCredits) ctx.r3.u64 = kCheatCredits;
 }
