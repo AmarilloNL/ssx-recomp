@@ -671,6 +671,8 @@ void SsxSettingsDialog::DrawCheatsTab() {
   Combo("##cheat_tricky", "ssx_cheat_tricky", kTrickyCheats, std::size(kTrickyCheats));
   Row("Infinite credits", "Buying costs nothing. Stores show 9,999,999; your own credits come back when it's off.");
   Checkbox("##cheat_credits", "ssx_cheat_infinite_credits");
+  Row("Infinite rewinds", "Rewinds (LB) are never used up, also where a drop gives only a few.");
+  Checkbox("##cheat_rewinds", "ssx_cheat_infinite_rewinds");
   ImGui::EndTable();
   ImGui::Spacing();
   ImGui::TextDisabled("Turn a cheat off and the game plays as before. Your own credits are never changed.");

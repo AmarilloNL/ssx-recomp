@@ -22,6 +22,7 @@
 
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_boost, false, "SSX", "Cheat: boost never runs out");
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_credits, false, "SSX", "Cheat: buying costs nothing, the stores show 9,999,999");
+REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_rewinds, false, "SSX", "Cheat: rewinds are never used up");
 REXCVAR_DEFINE_INT32(ssx_cheat_tricky, 0, "SSX",
                      "Cheat: 0 Tricky as normal, 1 always Tricky, 2 always Super Tricky, 3 never Tricky");
 
@@ -100,4 +101,12 @@ REX_EXTERN(SSX_FN_GET_CREDITS_IMP);
 REX_HOOK_RAW(SSX_FN_GET_CREDITS) {
   SSX_FN_GET_CREDITS_IMP(ctx, base);
   if (REXCVAR_GET(ssx_cheat_infinite_credits) && int32_t(ctx.r3.u32) < kCheatCredits) ctx.r3.u64 = kCheatCredits;
+}
+
+// Infinite rewinds: a rewind is never taken off the count (the drops that limit them, like Survive It,
+// keep the count they start with).
+REX_EXTERN(SSX_FN_USE_REWIND_IMP);
+REX_HOOK_RAW(SSX_FN_USE_REWIND) {
+  if (REXCVAR_GET(ssx_cheat_infinite_rewinds)) return;
+  SSX_FN_USE_REWIND_IMP(ctx, base);
 }

@@ -73,5 +73,10 @@
 // credits; the second is the getter the menus and stores use (profile r3, credits in r3).
 #define SSX_FN_CHANGE_CREDITS SSX_GUEST(sub_82402000, sub_823DB560)
 #define SSX_FN_CHANGE_CREDITS_IMP SSX_GUEST(__imp__sub_82402000, __imp__sub_823DB560)
+// A rewind is used up: the rider's rewind component (r3) takes one off its count of rewinds left
+// ([r3+240], published as the rider stat the HUD's rewind icons show); it returns at once when the drop's
+// rewinds are infinite ([r3+148] points at that flag, as in a race).
+#define SSX_FN_USE_REWIND SSX_GUEST(sub_82CF30E0, sub_82CCE650)
+#define SSX_FN_USE_REWIND_IMP SSX_GUEST(__imp__sub_82CF30E0, __imp__sub_82CCE650)
 #define SSX_FN_GET_CREDITS SSX_GUEST(sub_824A7910, sub_82473950)
 #define SSX_FN_GET_CREDITS_IMP SSX_GUEST(__imp__sub_824A7910, __imp__sub_82473950)
