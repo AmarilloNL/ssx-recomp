@@ -18,6 +18,7 @@
 #include <cstring>
 #include <fstream>
 #include <map>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -38,114 +39,41 @@ REXCVAR_DEFINE_BOOL(ssx_collect_shaders, false, "SSX",
 REX_EXTERN(SSX_FN_LOAD_EFFECT);  // hooked below
 
 namespace {
-// The effects in data0.big (their names, without .fxo).
-const char* const kEffects[] = {
-    "adaptfixedshader",
-    "antialiasing",
-    "debug_mipview_default",
-    "debug_mipview_instancing",
-    "debug_mipview_proxy",
-    "debug_mipview_terrain",
-    "debug_shader",
-    "debug_shader_instancing",
-    "debug_shader_proxy",
-    "debug_shader_terrain",
-    "debugdisplaytexture",
-    "debughelper",
-    "defaultmanip",
-    "displacement_accum",
-    "displacement_debug",
-    "eatext_glyphshader",
-    "errormissing",
-    "fixedcolor",
-    "fontwriter",
-    "fxaa",
-    "globe_default",
-    "hdr",
-    "hizmanip",
-    "lynx",
-    "lynx_animtexture",
-    "lynx_avalanche",
-    "lynx_cloud_trans",
-    "lynx_dynamic_lighting",
-    "lynx_glare",
-    "lynx_glare_occluded",
-    "lynx_instance",
-    "lynx_occluded",
-    "lynx_ribbon",
-    "lynx_snow",
-    "lynx_snowfall",
-    "lynx_snowspray",
-    "lynx_snowspray_zfeather",
-    "lynx_vbeam",
-    "lynx_volumetric",
-    "lynx_zfeather",
-    "mayablinn",
-    "mayalambert",
-    "motionblur",
-    "object_advanced",
-    "object_alpha",
-    "object_alpha_anim",
-    "object_default",
-    "object_default_anim",
-    "object_default_skinned",
-    "object_foliage",
-    "object_foliage_anim",
-    "object_geotag",
-    "object_shadow",
-    "object_texture_anim",
-    "occlusionbbox",
-    "particlefx",
-    "particlefx_bloom",
-    "particlefx_tonemap",
-    "player_apparel",
-    "player_board",
-    "player_body",
-    "player_eye",
-    "player_ghost",
-    "player_hair",
-    "player_secondary",
-    "player_wingsuit",
-    "post_copy",
-    "postfx",
-    "prelighting",
-    "recolortexture",
-    "rendersplashscreen",
-    "rendertexture",
-    "ribbon",
-    "screenfade",
-    "shadowbuffer",
-    "shadowtest",
-    "sky",
-    "ssao",
-    "terrain_default",
-    "terrain_default_simple",
-    "terrain_foreground",
-    "terrain_midground",
-    "terrain_midground_fe",
-    "terrain_oceanwave",
-    "terrain_oceanwave_fe",
-    "terrain_proxy",
-    "texturecopy",
-    "texturecopyfmv",
-    "texturemip",
-    "ui_background",
-    "ui_trickmeter_disc",
-    "userscreenshot",
-};
+// The effects the game can load: every "<name>.fxo" in the archive indexes it has loaded (in memory by its
+// first effect load), so the port carries no list of the game's files and DLC archives count too. A stray
+// match (2 fragments of other names in a test) is harmless: the loader still returns, and the shaders
+// collected were the same 3701 as with the 92 real names alone.
+std::vector<std::string> EffectNames() {
+  rex::memory::Memory* memory = rex::system::kernel_memory();
+  std::set<std::string> names;
+  auto is_name = [](uint8_t c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'; };
+  for (uint32_t heap : {0x00010000u, 0x40000000u, 0x80000000u, 0x90000000u, 0xA0000000u, 0xC0000000u, 0xE0000000u}) {
+    SsxScanGuestHeap(memory, heap, 64, [&](uint32_t, const uint8_t* p, uint32_t bytes) {
+      for (uint32_t i = 3; i + 4 <= bytes && i < (1u << 20); ++i) {
+        if (p[i] != '.' || p[i + 1] != 'f' || p[i + 2] != 'x' || p[i + 3] != 'o') continue;
+        uint32_t s = i;
+        while (s > 0 && i - s < 48 && is_name(p[s - 1])) --s;
+        if (i - s >= 3) names.insert(std::string(reinterpret_cast<const char*>(p + s), i - s));
+      }
+    });
+  }
+  return {names.begin(), names.end()};
+}
 
 std::function<void()> g_quit;
 
 // Loads every effect through the game's loader (out slot, -, name ".fx"); the slots keep them loaded.
 void LoadAllEffects(PPCContext& ctx, uint8_t* base) {
-  const uint32_t n = uint32_t(std::size(kEffects));
+  const std::vector<std::string> effects = EffectNames();
+  const uint32_t n = uint32_t(effects.size());
+  if (!n) return;
   const uint32_t block = rex::system::kernel_memory()->SystemHeapAlloc(n * 4 + n * 64);
   if (!block) return;
   const PPCContext saved = ctx;
   uint32_t loaded = 0;
   for (uint32_t i = 0; i < n; ++i) {
     const uint32_t slot = block + i * 4, name = block + n * 4 + i * 64;
-    const std::string s = std::string(kEffects[i]) + ".fx";
+    const std::string s = effects[i].substr(0, 58) + ".fx";
     REX_STORE_U32(slot, 0);
     for (size_t k = 0; k <= s.size(); ++k) REX_STORE_U8(name + uint32_t(k), k < s.size() ? uint8_t(s[k]) : 0);
     ctx = saved;
@@ -157,7 +85,7 @@ void LoadAllEffects(PPCContext& ctx, uint8_t* base) {
     if (REX_LOAD_U32(slot)) ++loaded;
   }
   ctx = saved;
-  REXLOG_INFO("shaders: {} of {} effects loaded", loaded, n);
+  REXLOG_INFO("shaders: {} of {} effect names found in memory loaded", loaded, n);
 }
 
 // Every shader container in physical memory, de-duplicated, to static-shaders.bin: "SSXS", the count, then
