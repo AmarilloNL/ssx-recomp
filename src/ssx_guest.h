@@ -111,3 +111,10 @@
 // one when the flow stops (at once, or as its timer runs out), between -1 and 19.
 #define SSX_FN_FLOW_UPDATE SSX_GUEST(sub_82CED030, sub_82CC8598)
 #define SSX_FN_FLOW_UPDATE_IMP SSX_GUEST(__imp__sub_82CED030, __imp__sub_82CC8598)
+// A gear stat of the rider's outfit (loadout r3, stat r4 -> r3): the sum of that stat's points over the 15 items
+// worn (each lists up to 6 stat, points pairs). Stats 0-25 are the gear's (board speed to pulse goggles),
+// 26-36 its perks (30 glowing, 34 big head, 35 big hands, 36 both). At the start of a ride each is divided
+// by its maximum (100 in both versions), at most 1, and the rider's tuning is set between a worst and a
+// best one by these.
+#define SSX_FN_GEAR_STAT SSX_GUEST(sub_82C64778, sub_82C3FB78)
+#define SSX_FN_GEAR_STAT_IMP SSX_GUEST(__imp__sub_82C64778, __imp__sub_82C3FB78)

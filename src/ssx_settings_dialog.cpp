@@ -78,6 +78,7 @@ const Choice kAntiAliasing[] = {{"Off", "none"}, {"FXAA", "fxaa"}, {"FXAA  (stro
 const Choice kAniso[] = {{"Game default", "-1"}, {"Off", "0"}, {"2x", "2"},
                          {"4x", "3"},            {"8x", "4"},  {"16x", "5"}};
 const Choice kTrickyCheats[] = {{"Normal", "0"}, {"Always Tricky", "1"}, {"Always Super Tricky", "2"}, {"Never", "3"}};
+const Choice kBigCheats[] = {{"Normal", "0"}, {"Big head", "1"}, {"Big hands", "2"}, {"Big head and hands", "3"}};
 
 struct Bind {
   const char* label;
@@ -691,6 +692,12 @@ void SsxSettingsDialog::DrawCheatsTab() {
   Checkbox("##cheat_combo", "ssx_cheat_keep_combo");
   Row("Never lose multiplier", "The trick multiplier only goes up.");
   Checkbox("##cheat_multiplier", "ssx_cheat_keep_multiplier");
+  Row("Max gear stats", "From your next ride: board, wingsuit and other gear at their best.");
+  Checkbox("##cheat_max_gear", "ssx_cheat_max_gear");
+  Row("Big head and hands", "From your next ride, like the suits with that perk.");
+  Combo("##cheat_big", "ssx_cheat_big", kBigCheats, std::size(kBigCheats));
+  Row("Glowing suit", "From your next ride: your suit's glowing parts light up.");
+  Checkbox("##cheat_glowing", "ssx_cheat_glowing");
   ImGui::EndTable();
   ImGui::Spacing();
   ImGui::TextDisabled("Turn a cheat off and the game plays as before. Your own credits are never spent.");

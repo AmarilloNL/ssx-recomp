@@ -30,6 +30,9 @@ REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_gear, false, "SSX",
                     "Cheat: armour, oxygen (and tanks), core temperature, wingsuit lift, ice axes and the headlamp and pulse goggles batteries never run out");
 REXCVAR_DEFINE_BOOL(ssx_cheat_keep_combo, false, "SSX", "Cheat: a wipeout banks the combo instead of losing it");
 REXCVAR_DEFINE_BOOL(ssx_cheat_keep_multiplier, false, "SSX", "Cheat: the trick multiplier never goes down");
+REXCVAR_DEFINE_BOOL(ssx_cheat_max_gear, false, "SSX", "Cheat: every gear stat at its best");
+REXCVAR_DEFINE_INT32(ssx_cheat_big, 0, "SSX", "Cheat: 0 as normal, 1 big head, 2 big hands, 3 both");
+REXCVAR_DEFINE_BOOL(ssx_cheat_glowing, false, "SSX", "Cheat: a glowing suit");
 REXCVAR_DEFINE_INT32(ssx_cheat_tricky, 0, "SSX",
                      "Cheat: 0 Tricky as normal, 1 always Tricky, 2 always Super Tricky, 3 never Tricky");
 
@@ -244,4 +247,23 @@ REX_HOOK_RAW(SSX_FN_FLOW_UPDATE) {
   if (REXCVAR_GET(ssx_cheat_keep_multiplier) && before > 0 && int32_t(REX_LOAD_U32(level)) < before) {
     REX_STORE_U32(level, uint32_t(before));
   }
+}
+
+// Max gear stats, big head and hands, glowing: the outfit's points for a gear stat are read through one
+// function; with a cheat on it answers the full points (a stat's maximum) for those stats. Nothing of the
+// outfit or the save is changed.
+namespace {
+constexpr uint32_t kFullPoints = 100;
+enum GearStat : uint32_t { kLastGearStat = 25, kGlowing = 30, kBigHead = 34, kBigHands = 35, kBigHeadAndHands = 36 };
+}  // namespace
+
+REX_EXTERN(SSX_FN_GEAR_STAT_IMP);
+REX_HOOK_RAW(SSX_FN_GEAR_STAT) {
+  const uint32_t stat = ctx.r4.u32;
+  SSX_FN_GEAR_STAT_IMP(ctx, base);
+  const int big = REXCVAR_GET(ssx_cheat_big);
+  const bool full = (stat <= kLastGearStat && REXCVAR_GET(ssx_cheat_max_gear)) ||
+                    (stat == kGlowing && REXCVAR_GET(ssx_cheat_glowing)) || (stat == kBigHead && (big & 1)) ||
+                    (stat == kBigHands && (big & 2)) || (stat == kBigHeadAndHands && big == 3);
+  if (full && (ctx.r3.u32 & 0xFF) < kFullPoints) ctx.r3.u64 = kFullPoints;
 }
