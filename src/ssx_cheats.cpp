@@ -27,7 +27,7 @@ REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_boost, false, "SSX", "Cheat: boost never 
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_credits, false, "SSX", "Cheat: buying costs nothing, the stores show 9,999,999");
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_rewinds, false, "SSX", "Cheat: rewinds are never used up");
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_gear, false, "SSX",
-                    "Cheat: armour, oxygen (and tanks), core temperature, wingsuit lift, ice axes and the headlamp and pulse goggles batteries never run out");
+                    "Cheat: armour, oxygen (and tanks), core temperature, the wingsuit, ice axes and the headlamp and pulse goggles batteries never run out");
 REXCVAR_DEFINE_BOOL(ssx_cheat_keep_combo, false, "SSX", "Cheat: a wipeout banks the combo instead of losing it");
 REXCVAR_DEFINE_BOOL(ssx_cheat_keep_multiplier, false, "SSX", "Cheat: the trick multiplier never goes down");
 REXCVAR_DEFINE_BOOL(ssx_cheat_max_gear, false, "SSX", "Cheat: every gear stat at its best");
