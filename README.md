@@ -61,7 +61,7 @@ code runs natively, and its Xbox 360 graphics are drawn with Direct3D 12 (on Lin
 | ❄️ **Snowflake tracker** | how many snowflakes you have on every drop, per range and peak (settings → **Snowflakes**) |
 | 🏂 **Boost meter in freeride** | the boost and tricky meters while you freeride (settings → **Display**) |
 | 🏅 **Online-only badges** | the badges that need EA's servers, shown as earned (settings → **Profile**) |
-| 🎮 **Cheats** | infinite boost; Tricky or Super Tricky the whole ride, or no Tricky at all; infinite credits (your own are never spent); infinite rewinds; armour, oxygen, warmth, wingsuit lift, ice axes and batteries that never run out (settings → **Cheats**) |
+| 🎮 **Cheats** | infinite boost; Tricky or Super Tricky the whole ride, or no Tricky at all; infinite credits (your own are never spent) or +1,000,000 credits; infinite rewinds; armour, oxygen, warmth, wingsuit lift, ice axes and batteries that never run out (settings → **Cheats**) |
 
 <a id="installing"></a>
 
@@ -431,7 +431,7 @@ The game is playable and is being tested by playing through the whole World Tour
 <br>
 
 - ✅ The main menu comes about 10 seconds sooner: the game no longer waits for Xbox Live after loading
-  the save; cheats (infinite boost, always Tricky or Super Tricky, no Tricky, infinite credits and rewinds, infinite gear: armour, oxygen, warmth, wingsuit lift, ice axes, batteries); the setup shows the
+  the save; cheats (infinite boost, always Tricky or Super Tricky, no Tricky, infinite credits and rewinds, +1,000,000 credits, infinite gear: armour, oxygen, warmth, wingsuit lift, ice axes, batteries); the setup shows the
   title update and DLC you already added; moving the SSX folder no longer breaks the
   next rebuild (1.8.0)
 - ✅ Every controller is player 1 (a controller that wasn't first, for example behind a Steam or

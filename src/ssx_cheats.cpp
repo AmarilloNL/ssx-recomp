@@ -14,6 +14,7 @@
 //   update and put them back after it.
 // These values aren't saved: turning a cheat off hands them back to the game.
 
+#include <atomic>
 #include <cstring>
 
 #include <rex/cvar.h>
@@ -91,9 +92,17 @@ REX_HOOK_RAW(SSX_FN_BOOST_UPDATE) {
 // nothing. The menus and stores read the credits through a getter that reports at least 9,999,999, so
 // everything is affordable; adding reads the profile itself, so the saved credits stay the real ones
 // (and rewards still add to them).
+//
+// +1,000,000 credits (a button in F1 > Cheats) is a gift that stays: the next time the game reads the credits
+// (on its own thread), the profile gets it through the game's own add, like a reward, and the menus their
+// new credits. It isn't counted as earned.
 namespace {
 constexpr int32_t kCheatCredits = 9999999;
-}
+constexpr uint32_t kGiftCredits = 1000000;
+std::atomic<int> credit_gifts{0};
+}  // namespace
+
+void SsxCheatsGiveCredits() { credit_gifts.fetch_add(1); }
 
 REX_EXTERN(SSX_FN_CHANGE_CREDITS_IMP);
 REX_HOOK_RAW(SSX_FN_CHANGE_CREDITS) {
@@ -102,9 +111,32 @@ REX_HOOK_RAW(SSX_FN_CHANGE_CREDITS) {
 }
 
 REX_EXTERN(SSX_FN_GET_CREDITS_IMP);
+REX_EXTERN(SSX_FN_ADD_CREDITS);
+REX_EXTERN(SSX_FN_MENU_SET_CREDITS);
 REX_HOOK_RAW(SSX_FN_GET_CREDITS) {
+  const int gifts = credit_gifts.exchange(0);
+  const PPCContext saved = ctx;
+  ctx.r1.u32 = saved.r1.u32 - 256;  // a frame of our own below the caller's
+  for (int i = 0; i < gifts; ++i) {
+    ctx.r3.u64 = saved.r3.u32;  // the profile
+    ctx.r4.u64 = kGiftCredits;
+    ctx.r5.u64 = 0;  // not earned
+    SSX_FN_ADD_CREDITS(ctx, base);
+  }
+  ctx = saved;
   SSX_FN_GET_CREDITS_IMP(ctx, base);
   if (REXCVAR_GET(ssx_cheat_infinite_credits) && int32_t(ctx.r3.u32) < kCheatCredits) ctx.r3.u64 = kCheatCredits;
+  if (const uint32_t menus = gifts ? REX_LOAD_U32(SSX_MENU_DATA) : 0) {
+    const PPCContext got = ctx;
+    ctx.r1.u32 = got.r1.u32 - 256;
+    const uint32_t value = ctx.r1.u32 + 128;
+    REX_STORE_U32(value, got.r3.u32);
+    ctx.r3.u64 = menus;
+    ctx.r4.u64 = SSX_MENU_ID_CREDITS;
+    ctx.r5.u64 = value;
+    SSX_FN_MENU_SET_CREDITS(ctx, base);
+    ctx = got;
+  }
 }
 
 // Infinite rewinds: a rewind is never taken off the count (the drops that limit them, like Survive It,

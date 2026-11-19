@@ -89,3 +89,9 @@
 #define SSX_FN_COLD_UPDATE_IMP SSX_GUEST(__imp__sub_82CF83B0, __imp__sub_82CD3970)
 #define SSX_FN_GET_CREDITS SSX_GUEST(sub_824A7910, sub_82473950)
 #define SSX_FN_GET_CREDITS_IMP SSX_GUEST(__imp__sub_824A7910, __imp__sub_82473950)
+// The add the change above makes: profile r3, amount r4, r5 1 to count it as earned too (key 'EARN').
+#define SSX_FN_ADD_CREDITS SSX_GUEST(sub_824A9DF8, sub_82475E38)
+// ...and how it then hands the menus their credits: SetInt(*SSX_MENU_DATA, SSX_MENU_ID_CREDITS, &value).
+#define SSX_FN_MENU_SET_CREDITS SSX_GUEST(sub_8239FE40, sub_8256A820)
+#define SSX_MENU_DATA SSX_GUEST(0x838AB660u, 0x8388F3F0u)
+#define SSX_MENU_ID_CREDITS SSX_GUEST(552u, 571u)

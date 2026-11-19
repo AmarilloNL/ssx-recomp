@@ -34,6 +34,8 @@
 #include "ssx_settings.h"
 #include "ssx_snowflakes.h"
 
+void SsxCheatsGiveCredits();  // ssx_cheats.cpp
+
 REXCVAR_DEFINE_BOOL(ssx_show_fps, false, "SSX", "Show the frame rate in the top-left corner");
 
 namespace {
@@ -671,6 +673,16 @@ void SsxSettingsDialog::DrawCheatsTab() {
   Combo("##cheat_tricky", "ssx_cheat_tricky", kTrickyCheats, std::size(kTrickyCheats));
   Row("Infinite credits", "Buying costs nothing. Stores show 9,999,999; your own credits come back when it's off.");
   Checkbox("##cheat_credits", "ssx_cheat_infinite_credits");
+  Row("Give credits", "Adds 1,000,000 to your own credits, kept like a reward.");
+  static int given = 0;
+  if (ImGui::Button("+1,000,000")) {
+    SsxCheatsGiveCredits();
+    ++given;
+  }
+  if (given) {
+    ImGui::SameLine();
+    ImGui::TextDisabled("added %dx", given);
+  }
   Row("Infinite rewinds", "Rewinds (LB) are never used up, also where a drop gives only a few.");
   Checkbox("##cheat_rewinds", "ssx_cheat_infinite_rewinds");
   Row("Infinite gear", "Armour, oxygen (and tanks), core temperature, wingsuit lift, ice axes and batteries never run out.");
