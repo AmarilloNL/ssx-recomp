@@ -12,7 +12,7 @@
 //   full, +496 keeps Tricky full, and +508 with it clears Super Tricky. Tricky's length depends on
 //   more than the tuning record, so the always-Tricky cheats turn these on for the game's own
 //   update and put them back after it.
-// Nothing is written to the save: turning a cheat off hands the values back to the game.
+// These values aren't saved: turning a cheat off hands them back to the game.
 
 #include <cstring>
 
@@ -115,9 +115,9 @@ REX_HOOK_RAW(SSX_FN_USE_REWIND) {
   SSX_FN_USE_REWIND_IMP(ctx, base);
 }
 
-// Infinite armour, oxygen and batteries: the rider's armour, oxygen and headlamp and pulse goggles batteries
-// are stats from 0 to 1 that the game takes off directly (a hit, a frame of breathing or light); right after
-// each frame's HUD update they're full again. -1 means not in use (between rides): left alone.
+// Infinite gear: the rider's armour, oxygen and headlamp and pulse goggles batteries are stats from 0 to 1
+// that the game takes off directly (a hit, a frame of breathing or light); right after each frame's HUD
+// update they're full again. -1 means not in use (between rides): left alone.
 namespace {
 constexpr uint32_t kGearStats[] = {148 /* FLT_Armour */, 166 /* FLT_HeadLampBatteryLevel */, 190 /* FLT_OxygenLevel */,
                                    196 /* FLT_PulseGogglesBatteryLevel */};
@@ -147,7 +147,17 @@ REX_HOOK_RAW(SSX_FN_COLD_UPDATE) {
   const uint32_t self = ctx.r3.u32;
   SSX_FN_COLD_UPDATE_IMP(ctx, base);
   if (!REXCVAR_GET(ssx_cheat_infinite_gear)) return;
-  if (const uint32_t cold = REX_LOAD_U32(self + 0x2019C)) REX_STORE_U32(cold, 0);  // 0.0f
-  if (const uint32_t max = REX_LOAD_U32(self + 0x20194)) REX_STORE_U32(max, 0x3F800000u);
-  if (const uint32_t temperature = REX_LOAD_U32(self + 0x20190)) REX_STORE_U32(temperature, 0x3F800000u);
+  auto level = [&](uint32_t value) {
+    const uint32_t bits = REX_LOAD_U32(value);
+    float f;
+    std::memcpy(&f, &bits, 4);
+    return f;
+  };
+  // Like the stats above, only values in use (0 to 1) are changed.
+  const uint32_t cold = REX_LOAD_U32(self + 0x2019C), max = REX_LOAD_U32(self + 0x20194),
+                 temperature = REX_LOAD_U32(self + 0x20190);
+  if (cold && level(cold) > 0.0f) REX_STORE_U32(cold, 0);  // 0.0f: no cold taken
+  for (uint32_t value : {max, temperature}) {
+    if (value && level(value) >= 0.0f && level(value) < 1.0f) REX_STORE_U32(value, 0x3F800000u);  // 1.0f
+  }
 }
