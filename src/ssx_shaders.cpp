@@ -18,6 +18,7 @@
 #include <cstring>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <thread>
@@ -142,10 +143,9 @@ void WriteShaders(const Shaders& shaders, size_t scans) {
 void SsxShadersSetQuit(std::function<void()> quit) { g_quit = std::move(quit); }
 
 // The game's effect loader: with --ssx_collect_shaders its first call (at startup) loads all of them; the
-// shaders are read out as the loads finish, then the game quits the normal way. A single read after 10 s
-// missed some on a slower PC (Linux, GTX 1080 box: 3684 vs 3701), and the game patches a vertex shader's
-// fetches in place once it draws with it, so every read is added to the ones before: done when two reads
-// in a row (2 s apart) add nothing, at most about a minute.
+// shaders are read out twice, then the game quits the normal way: right after the loads, before the game
+// draws with them (it patches a vertex shader's fetches in place for each draw, so later reads see patched
+// copies), and 10 s later for loads that finish late. The two reads are kept together.
 REX_EXTERN(SSX_FN_LOAD_EFFECT_IMP);
 REX_HOOK_RAW(SSX_FN_LOAD_EFFECT) {
   SSX_FN_LOAD_EFFECT_IMP(ctx, base);
@@ -153,18 +153,14 @@ REX_HOOK_RAW(SSX_FN_LOAD_EFFECT) {
   if (started || !REXCVAR_GET(ssx_collect_shaders)) return;
   started = true;  // (also keeps LoadAllEffects' own calls from coming back here)
   LoadAllEffects(ctx, base);
-  std::thread([] {
-    Shaders shaders;
-    size_t scans = 0;
-    for (int quiet = 0; quiet < 2 && scans < 30;) {
-      std::this_thread::sleep_for(std::chrono::seconds(scans ? 2 : 10));
-      const size_t before = shaders.size();
-      const size_t containers = ScanShaders(shaders);
-      ++scans;
-      REXLOG_INFO("shaders: read {}: {} containers, {} shaders so far", scans, containers, shaders.size());
-      quiet = shaders.size() == before ? quiet + 1 : 0;
-    }
-    WriteShaders(shaders, scans);
+  auto shaders = std::make_shared<Shaders>();
+  const size_t early = ScanShaders(*shaders);
+  REXLOG_INFO("shaders: read 1 (right after the loads): {} containers, {} shaders", early, shaders->size());
+  std::thread([shaders] {
+    std::this_thread::sleep_for(std::chrono::seconds(10));
+    const size_t late = ScanShaders(*shaders);
+    REXLOG_INFO("shaders: read 2 (10 s later): {} containers, {} shaders in all", late, shaders->size());
+    WriteShaders(*shaders, 2);
     if (g_quit) g_quit();
   }).detach();
 }
