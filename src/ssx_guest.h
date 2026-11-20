@@ -122,3 +122,12 @@
 // loads data\xenon\shaders\terrain_default.fxo, or finds it loaded).
 #define SSX_FN_LOAD_EFFECT SSX_GUEST(sub_829E5548, sub_829B53D0)
 #define SSX_FN_LOAD_EFFECT_IMP SSX_GUEST(__imp__sub_829E5548, __imp__sub_829B53D0)
+// A wingsuit flight's node of the rider's behaviour graph, once a frame while flying (node r4, [r4+48] its
+// ports): it adds the frame to the time flown (port +216, a float the graph keeps), and the lift fades as
+// that time nears the flight's length; it also publishes the share used as stat 232
+// (FLT_WingsuitUsePercentage, the HUD's wingsuit meter). The graph's floats are set through the second
+// (port r3, value f1; returns the value's address in r3).
+#define SSX_FN_WING_FLIGHT SSX_GUEST(sub_82CB9770, sub_82C94B78)
+#define SSX_FN_WING_FLIGHT_IMP SSX_GUEST(__imp__sub_82CB9770, __imp__sub_82C94B78)
+#define SSX_FN_GRAPH_SET_FLOAT SSX_GUEST(sub_831A9D48, sub_83186728)
+#define SSX_FN_GRAPH_SET_FLOAT_IMP SSX_GUEST(__imp__sub_831A9D48, __imp__sub_83186728)

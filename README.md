@@ -432,8 +432,9 @@ The game is playable and is being tested by playing through the whole World Tour
 
 - ✅ The main menu comes about 10 seconds sooner: the game no longer waits for Xbox Live after loading
   the save; cheats (infinite boost, always Tricky or Super Tricky, no Tricky, infinite credits and
-  rewinds, +1,000,000 credits, infinite gear: armour, oxygen, warmth, the wingsuit, ice axes,
-  batteries; never lose a combo or the multiplier; max gear stats, big head and hands, glowing suit);
+  rewinds, +1,000,000 credits, infinite wingsuit lift, one switch each for the headlamp and pulse
+  goggles batteries, the wingsuit, armour and ice axes durability, oxygen tanks and cold protection;
+  never lose a combo or the multiplier; max gear stats, big head, big hands, glowing suit);
   the setup shows the title update and DLC you already added; moving the SSX folder no longer breaks
   the next rebuild (1.8.0)
 - ✅ Every controller is player 1 (a controller that wasn't first, for example behind a Steam or

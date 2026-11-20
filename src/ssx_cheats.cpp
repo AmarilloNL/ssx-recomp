@@ -26,12 +26,19 @@
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_boost, false, "SSX", "Cheat: boost never runs out");
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_credits, false, "SSX", "Cheat: buying costs nothing, the stores show 9,999,999");
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_rewinds, false, "SSX", "Cheat: rewinds are never used up");
-REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_gear, false, "SSX",
-                    "Cheat: armour, oxygen (and tanks), core temperature, the wingsuit, ice axes and the headlamp and pulse goggles batteries never run out");
+REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_lift, false, "SSX", "Cheat: a wingsuit's lift never fades during a flight");
+REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_headlamp, false, "SSX", "Cheat: the headlamp's battery never runs out");
+REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_goggles, false, "SSX", "Cheat: the pulse goggles' battery never runs out");
+REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_wingsuit, false, "SSX", "Cheat: the wingsuit never wears out");
+REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_armour, false, "SSX", "Cheat: armour never wears out");
+REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_ice_axes, false, "SSX", "Cheat: ice axes never wear out");
+REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_oxygen, false, "SSX", "Cheat: oxygen (and the oxygen tanks) never run out");
+REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_warmth, false, "SSX", "Cheat: the cold never lowers the core temperature");
 REXCVAR_DEFINE_BOOL(ssx_cheat_keep_combo, false, "SSX", "Cheat: a wipeout banks the combo instead of losing it");
 REXCVAR_DEFINE_BOOL(ssx_cheat_keep_multiplier, false, "SSX", "Cheat: the trick multiplier never goes down");
 REXCVAR_DEFINE_BOOL(ssx_cheat_max_gear, false, "SSX", "Cheat: every gear stat at its best");
-REXCVAR_DEFINE_INT32(ssx_cheat_big, 0, "SSX", "Cheat: 0 as normal, 1 big head, 2 big hands, 3 both");
+REXCVAR_DEFINE_BOOL(ssx_cheat_big_head, false, "SSX", "Cheat: a big head");
+REXCVAR_DEFINE_BOOL(ssx_cheat_big_hands, false, "SSX", "Cheat: big hands");
 REXCVAR_DEFINE_BOOL(ssx_cheat_glowing, false, "SSX", "Cheat: a glowing suit");
 REXCVAR_DEFINE_INT32(ssx_cheat_tricky, 0, "SSX",
                      "Cheat: 0 Tricky as normal, 1 always Tricky, 2 always Super Tricky, 3 never Tricky");
@@ -154,23 +161,28 @@ REX_HOOK_RAW(SSX_FN_USE_REWIND) {
 
 // Infinite gear: the rider's armour, oxygen (and the tank's), the wingsuit's and ice axes' effectiveness and
 // the headlamp and pulse goggles batteries are stats from 0 to 1 that the game takes off directly (a hit, a
-// frame of breathing, flying or light); right after each frame's HUD update they're full again. -1 means
-// not in use (between rides): left alone.
-namespace {
-constexpr uint32_t kGearStats[] = {148 /* FLT_Armour */,        166 /* FLT_HeadLampBatteryLevel */,
-                                   169 /* FLT_IceAxeEffectiveness */, 190 /* FLT_OxygenLevel */,
-                                   191 /* FLT_OxygenTankLevel */, 196 /* FLT_PulseGogglesBatteryLevel */,
-                                   231 /* FLT_WingsuitEffectiveness */};
-}
-
+// frame of breathing, flying or light); right after each frame's HUD update the ones with their cheat on are
+// full again. -1 means not in use (between rides): left alone.
 REX_EXTERN(SSX_FN_HUD_UPDATE_IMP);
 REX_HOOK_RAW(SSX_FN_HUD_UPDATE) {
   const uint32_t hud = ctx.r3.u32;
   SSX_FN_HUD_UPDATE_IMP(ctx, base);
-  if (!REXCVAR_GET(ssx_cheat_infinite_gear)) return;
   const uint32_t stats = REX_LOAD_U32(hud + 144);
   if (!stats) return;
-  for (uint32_t id : kGearStats) {
+  const struct {
+    uint32_t id;
+    bool on;
+  } gear[] = {
+      {148 /* FLT_Armour */, REXCVAR_GET(ssx_cheat_infinite_armour)},
+      {166 /* FLT_HeadLampBatteryLevel */, REXCVAR_GET(ssx_cheat_infinite_headlamp)},
+      {169 /* FLT_IceAxeEffectiveness */, REXCVAR_GET(ssx_cheat_infinite_ice_axes)},
+      {190 /* FLT_OxygenLevel */, REXCVAR_GET(ssx_cheat_infinite_oxygen)},
+      {191 /* FLT_OxygenTankLevel */, REXCVAR_GET(ssx_cheat_infinite_oxygen)},
+      {196 /* FLT_PulseGogglesBatteryLevel */, REXCVAR_GET(ssx_cheat_infinite_goggles)},
+      {231 /* FLT_WingsuitEffectiveness */, REXCVAR_GET(ssx_cheat_infinite_wingsuit)},
+  };
+  for (const auto& [id, on] : gear) {
+    if (!on) continue;
     const uint32_t value = REX_LOAD_U32(stats + (id + 1) * 4);
     if (!value) continue;
     const uint32_t bits = REX_LOAD_U32(value);
@@ -186,7 +198,7 @@ REX_EXTERN(SSX_FN_COLD_UPDATE_IMP);
 REX_HOOK_RAW(SSX_FN_COLD_UPDATE) {
   const uint32_t self = ctx.r3.u32;
   SSX_FN_COLD_UPDATE_IMP(ctx, base);
-  if (!REXCVAR_GET(ssx_cheat_infinite_gear)) return;
+  if (!REXCVAR_GET(ssx_cheat_infinite_warmth)) return;
   auto level = [&](uint32_t value) {
     const uint32_t bits = REX_LOAD_U32(value);
     float f;
@@ -261,9 +273,30 @@ REX_EXTERN(SSX_FN_GEAR_STAT_IMP);
 REX_HOOK_RAW(SSX_FN_GEAR_STAT) {
   const uint32_t stat = ctx.r4.u32;
   SSX_FN_GEAR_STAT_IMP(ctx, base);
-  const int big = REXCVAR_GET(ssx_cheat_big);
+  const bool head = REXCVAR_GET(ssx_cheat_big_head), hands = REXCVAR_GET(ssx_cheat_big_hands);
   const bool full = (stat <= kLastGearStat && REXCVAR_GET(ssx_cheat_max_gear)) ||
-                    (stat == kGlowing && REXCVAR_GET(ssx_cheat_glowing)) || (stat == kBigHead && (big & 1)) ||
-                    (stat == kBigHands && (big & 2)) || (stat == kBigHeadAndHands && big == 3);
+                    (stat == kGlowing && REXCVAR_GET(ssx_cheat_glowing)) || (stat == kBigHead && head) ||
+                    (stat == kBigHands && hands) || (stat == kBigHeadAndHands && head && hands);
   if (full && (ctx.r3.u32 & 0xFF) < kFullPoints) ctx.r3.u64 = kFullPoints;
+}
+
+// Infinite lift: while the flight node runs with the cheat on, the time flown it stores goes back to 0, so
+// each frame of a flight flies (and shows on the wingsuit meter) like its first.
+namespace {
+thread_local uint32_t flight_time_port = 0;
+}
+
+REX_EXTERN(SSX_FN_WING_FLIGHT_IMP);
+REX_HOOK_RAW(SSX_FN_WING_FLIGHT) {
+  const uint32_t ports = REX_LOAD_U32(ctx.r4.u32 + 48);
+  flight_time_port = REXCVAR_GET(ssx_cheat_infinite_lift) && ports ? REX_LOAD_U32(ports + 216) : 0;
+  SSX_FN_WING_FLIGHT_IMP(ctx, base);
+  flight_time_port = 0;
+}
+
+REX_EXTERN(SSX_FN_GRAPH_SET_FLOAT_IMP);
+REX_HOOK_RAW(SSX_FN_GRAPH_SET_FLOAT) {
+  const bool flight_time = flight_time_port && ctx.r3.u32 == flight_time_port;
+  SSX_FN_GRAPH_SET_FLOAT_IMP(ctx, base);
+  if (flight_time) REX_STORE_U32(ctx.r3.u32, 0);  // 0.0f
 }
