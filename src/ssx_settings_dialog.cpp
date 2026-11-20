@@ -78,7 +78,6 @@ const Choice kAntiAliasing[] = {{"Off", "none"}, {"FXAA", "fxaa"}, {"FXAA  (stro
 const Choice kAniso[] = {{"Game default", "-1"}, {"Off", "0"}, {"2x", "2"},
                          {"4x", "3"},            {"8x", "4"},  {"16x", "5"}};
 const Choice kTrickyCheats[] = {{"Normal", "0"}, {"Always Tricky", "1"}, {"Always Super Tricky", "2"}, {"Never", "3"}};
-const Choice kBigCheats[] = {{"Normal", "0"}, {"Big head", "1"}, {"Big hands", "2"}, {"Big head and hands", "3"}};
 
 struct Bind {
   const char* label;
@@ -687,16 +686,32 @@ void SsxSettingsDialog::DrawCheatsTab() {
   }
   Row("Infinite rewinds", "Rewinds (LB) are never used up, also where a drop gives only a few.");
   Checkbox("##cheat_rewinds", "ssx_cheat_infinite_rewinds");
-  Row("Infinite gear", "Armour, oxygen (and tanks), core temperature, batteries, the wingsuit and ice axes never run out.");
-  Checkbox("##cheat_gear", "ssx_cheat_infinite_gear");
+  Row("Infinite lift (wingsuits)", "A wingsuit flight keeps its lift, and the wingsuit meter stays full.");
+  Checkbox("##cheat_lift", "ssx_cheat_infinite_lift");
+  Row("Infinite battery life (headlamps)", "The headlamp never goes dark.");
+  Checkbox("##cheat_headlamp", "ssx_cheat_infinite_headlamp");
+  Row("Infinite battery life (pulse goggles)", "The pulse goggles never run out.");
+  Checkbox("##cheat_goggles", "ssx_cheat_infinite_goggles");
+  Row("Infinite durability (wingsuit)", "The wingsuit never wears out.");
+  Checkbox("##cheat_wingsuit", "ssx_cheat_infinite_wingsuit");
+  Row("Infinite durability (armour)", "Armour never wears out.");
+  Checkbox("##cheat_armour", "ssx_cheat_infinite_armour");
+  Row("Infinite durability (ice axes)", "Ice axes never wear out.");
+  Checkbox("##cheat_ice_axes", "ssx_cheat_infinite_ice_axes");
+  Row("Infinite tank size (oxygen tanks)", "Oxygen and the oxygen tanks never run out.");
+  Checkbox("##cheat_oxygen", "ssx_cheat_infinite_oxygen");
+  Row("Infinite cold protection (solar panels)", "The cold never lowers your core temperature.");
+  Checkbox("##cheat_warmth", "ssx_cheat_infinite_warmth");
   Row("Never lose combo", "A wipeout banks your combo (with its bonus) instead of losing it.");
   Checkbox("##cheat_combo", "ssx_cheat_keep_combo");
   Row("Never lose multiplier", "The trick multiplier only goes up during a ride.");
   Checkbox("##cheat_multiplier", "ssx_cheat_keep_multiplier");
   Row("Max gear stats", "From your next ride: board, wingsuit and other gear at their best.");
   Checkbox("##cheat_max_gear", "ssx_cheat_max_gear");
-  Row("Big head and hands", "From your next ride, like the suits with that perk.");
-  Combo("##cheat_big", "ssx_cheat_big", kBigCheats, std::size(kBigCheats));
+  Row("Big head mode", "From your next ride, like the suits with that perk.");
+  Checkbox("##cheat_big_head", "ssx_cheat_big_head");
+  Row("Big hands mode", "From your next ride, like the suits with that perk.");
+  Checkbox("##cheat_big_hands", "ssx_cheat_big_hands");
   Row("Glowing suit", "From your next ride: your suit's glowing parts light up.");
   Checkbox("##cheat_glowing", "ssx_cheat_glowing");
   ImGui::EndTable();
