@@ -461,3 +461,4 @@ if [ -z "$no_menu" ]; then echo "Start it from your app menu (SSX) or with $dist
 else echo "Start it with $dist/ssx (F1 opens the settings)."; fi
 if [ -f "$dist/portable.txt" ]; then echo "Saves are in $dist/userdata (portable)."
 else echo "Saves are in ${XDG_DATA_HOME:-$HOME/.local/share}/ssx."; fi
+echo "Keep $iso where it is: the game reads its data from it every time it starts."

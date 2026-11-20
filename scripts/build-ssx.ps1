@@ -556,6 +556,7 @@ if (Test-Path "$root\dist\SSX\rexgpu-regpu.dll") {
 Write-Host ""
 Write-Host "DONE. Your game is in: $root\dist\SSX" -ForegroundColor Green
 Write-Host "Start it with ssx.exe (F1 opens the settings)."
+Write-Host "Keep your ISO (or extracted disc) where it is: the game reads its data from it every time it starts."
 Stop-Transcript | Out-Null
 if (-not $NoPause) {
     Start-Process explorer.exe "$root\dist\SSX"

@@ -163,9 +163,20 @@ REX_HOOK_RAW(SSX_FN_USE_REWIND) {
 // the headlamp and pulse goggles batteries are stats from 0 to 1 that the game takes off directly (a hit, a
 // frame of breathing, flying or light); right after each frame's HUD update the ones with their cheat on are
 // full again. -1 means not in use (between rides): left alone.
+// Infinite lift (below) leaves one frame of flight on the wingsuit meter (232, read only by the HUD and
+// the rewind snapshot): it's cleared before the HUD shows it, so the bar stays full.
 REX_EXTERN(SSX_FN_HUD_UPDATE_IMP);
 REX_HOOK_RAW(SSX_FN_HUD_UPDATE) {
   const uint32_t hud = ctx.r3.u32;
+  if (const uint32_t stats = REX_LOAD_U32(hud + 144); stats && REXCVAR_GET(ssx_cheat_infinite_lift)) {
+    const uint32_t meter = REX_LOAD_U32(stats + (232 + 1) * 4);  // FLT_WingsuitUsePercentage
+    if (meter) {
+      const uint32_t bits = REX_LOAD_U32(meter);
+      float used;
+      std::memcpy(&used, &bits, 4);
+      if (used > 0.0f && used <= 1.0f) REX_STORE_U32(meter, 0);  // 0.0f
+    }
+  }
   SSX_FN_HUD_UPDATE_IMP(ctx, base);
   const uint32_t stats = REX_LOAD_U32(hud + 144);
   if (!stats) return;
@@ -281,7 +292,7 @@ REX_HOOK_RAW(SSX_FN_GEAR_STAT) {
 }
 
 // Infinite lift: while the flight node runs with the cheat on, the time flown it stores goes back to 0, so
-// each frame of a flight flies (and shows on the wingsuit meter) like its first.
+// each frame of a flight flies like its first (the meter: see the HUD update above).
 namespace {
 thread_local uint32_t flight_time_port = 0;
 }
