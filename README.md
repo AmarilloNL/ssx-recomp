@@ -100,6 +100,10 @@ against Redump, and shows the main settings on the game's page. Updates rebuild 
 > you played an earlier version, which kept its saves in `Documents\ssx`, the first start copies
 > them (with your DLC and music) into the SSX folder; `Documents\ssx` is left as it was.
 >
+> 💿 **Keep your ISO** (or extracted disc): only the game's code is built into the SSX folder; the
+> game reads its data from your ISO every time it starts. If you move or delete it, the game asks
+> for it at the next start: pick the ISO itself, not the `default.xex` in `source\game-dump`.
+>
 > ♻️ **Installed with `SSX-Installer.exe` before?** Put `ssx-recomp.exe` in that install folder
 > (`SSX-PC` in your user folder, unless you picked another) and run it: it opens on **Play SSX**;
 > click **Add DLC / rebuild**, then **Rebuild**, to bring the game up to this version.
@@ -169,7 +173,8 @@ own ISO, by an installer script:
 > [!NOTE]
 > Needs about **15 GB** free during the build and **20–60 minutes** the first time. The script
 > installs missing build tools with your package manager (it asks for your password through
-> `sudo`). 🔄 **To update, run it again**: your saves and settings stay.
+> `sudo`). 🔄 **To update, run it again**: your saves and settings stay. 💿 **Keep your ISO** where
+> it is: the game reads its data from it every time it starts.
 >
 > **Beta:** tested on **CachyOS** (KDE Plasma on Wayland) with an NVIDIA GTX 1080 and an Xbox
 > controller, where races hold 60 fps. Debian/Ubuntu (`apt`) and Fedora (`dnf`) get their packages
