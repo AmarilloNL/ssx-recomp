@@ -88,9 +88,10 @@ void LoadAllEffects(PPCContext& ctx, uint8_t* base) {
   REXLOG_INFO("shaders: {} of {} effect names found in memory loaded", loaded, n);
 }
 
-// Every shader container in physical memory, de-duplicated, to static-shaders.bin: "SSXS", the count, then
-// per shader u8 pixel, u32 dwords and the big-endian code.
-void WriteShaders() {
+using Shaders = std::map<std::vector<uint8_t>, bool>;  // code -> pixel
+
+// Adds every shader container in physical memory to `shaders` (de-duplicated); returns the containers seen.
+size_t ScanShaders(Shaders& shaders) {
   rex::memory::Memory* memory = rex::system::kernel_memory();
   std::vector<uint32_t> containers;
   SsxScanGuestHeap(memory, 0xA0000000u, 4, [&](uint32_t at, const uint8_t* p, uint32_t bytes) {
@@ -99,7 +100,6 @@ void WriteShaders() {
     }
   });
   auto word = [&](uint32_t a) { return __builtin_bswap32(*memory->TranslateVirtual<const uint32_t*>(a)); };
-  std::map<std::vector<uint8_t>, bool> shaders;  // code -> pixel
   for (uint32_t c : containers) {
     if (!SsxGuestReadable(memory, c, 24)) continue;
     const bool pixel = (word(c) & 0xFF) == 0;
@@ -117,6 +117,12 @@ void WriteShaders() {
     const uint8_t* code = memory->TranslateVirtual<const uint8_t*>(start);
     shaders.emplace(std::vector<uint8_t>(code, code + size), pixel);
   }
+  return containers.size();
+}
+
+// The shaders to static-shaders.bin: "SSXS", the count, then per shader u8 pixel, u32 dwords and the
+// big-endian code.
+void WriteShaders(const Shaders& shaders, size_t scans) {
   const auto path = rex::filesystem::GetExecutableFolder() / "static-shaders.bin";
   std::ofstream out(path, std::ios::binary | std::ios::trunc);
   const uint32_t count = uint32_t(shaders.size());
@@ -129,16 +135,17 @@ void WriteShaders() {
     out.write(reinterpret_cast<const char*>(&dwords), 4);
     out.write(reinterpret_cast<const char*>(code.data()), std::streamsize(code.size()));
   }
-  REXLOG_INFO("shaders: {} containers, {} shaders written to {}", containers.size(), count, path.string());
+  REXLOG_INFO("shaders: {} shaders from {} scans written to {}", count, scans, path.string());
 }
 }  // namespace
 
 void SsxShadersSetQuit(std::function<void()> quit) { g_quit = std::move(quit); }
 
 // The game's effect loader: with --ssx_collect_shaders its first call (at startup) loads all of them; the
-// shaders are read out once the loads have had time to finish, then the game quits the normal way.
-// ponytail: a fixed 10 s wait (3700 shaders in a test, all within it); wait for the container count to
-// settle instead if a slower disc or PC ever misses some.
+// shaders are read out as the loads finish, then the game quits the normal way. A single read after 10 s
+// missed some on a slower PC (Linux, GTX 1080 box: 3684 vs 3701), and the game patches a vertex shader's
+// fetches in place once it draws with it, so every read is added to the ones before: done when two reads
+// in a row (2 s apart) add nothing, at most about a minute.
 REX_EXTERN(SSX_FN_LOAD_EFFECT_IMP);
 REX_HOOK_RAW(SSX_FN_LOAD_EFFECT) {
   SSX_FN_LOAD_EFFECT_IMP(ctx, base);
@@ -147,8 +154,17 @@ REX_HOOK_RAW(SSX_FN_LOAD_EFFECT) {
   started = true;  // (also keeps LoadAllEffects' own calls from coming back here)
   LoadAllEffects(ctx, base);
   std::thread([] {
-    std::this_thread::sleep_for(std::chrono::seconds(10));
-    WriteShaders();
+    Shaders shaders;
+    size_t scans = 0;
+    for (int quiet = 0; quiet < 2 && scans < 30;) {
+      std::this_thread::sleep_for(std::chrono::seconds(scans ? 2 : 10));
+      const size_t before = shaders.size();
+      const size_t containers = ScanShaders(shaders);
+      ++scans;
+      REXLOG_INFO("shaders: read {}: {} containers, {} shaders so far", scans, containers, shaders.size());
+      quiet = shaders.size() == before ? quiet + 1 : 0;
+    }
+    WriteShaders(shaders, scans);
     if (g_quit) g_quit();
   }).detach();
 }
