@@ -1156,6 +1156,7 @@ class InstallerForm : Form {
     var tips = new Card {
       Title = "Good to know",
       Body = "F1 (or Back + Start) opens the settings: frame rate, resolution, FSR, controls.\r\n" +
+             "Keep your ISO (or extracted disc) where it is: the game reads its data from it.\r\n" +
              "Everything stays in this folder: saves, settings, DLC and music (in source\\dist\\SSX\\userdata). " +
              "DLC you added is installed when the game starts.\r\n" +
              "Check for updates gets the latest ssx-recomp.exe and rebuilds SSX with it. Building needs no " +
@@ -1415,7 +1416,7 @@ class InstallerForm : Form {
     } else if (File.Exists(iso) && Path.GetFileName(iso).Equals("default.xex", StringComparison.OrdinalIgnoreCase)) {
       SetHint(isoHint, "Extracted disc found. It is verified before the build starts; keep the folder where it is.", Th.Good);
     } else if (File.Exists(iso)) {
-      SetHint(isoHint, string.Format("Disc image found ({0:0.0} GB). It is verified before the build starts.",
+      SetHint(isoHint, string.Format("Disc image found ({0:0.0} GB). It is verified before the build starts; keep it where it is.",
                                      new FileInfo(iso).Length / 1e9), Th.Good);
     } else {
       SetHint(isoHint, "File not found.", Th.Warn);
