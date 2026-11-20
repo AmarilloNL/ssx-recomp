@@ -28,9 +28,9 @@ using System.Windows.Forms;
 [assembly: AssemblyProduct("SSX PC Port")]
 [assembly: AssemblyCompany("AmarilloNL")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 AmarilloNL, MIT License")]
-[assembly: AssemblyVersion("1.7.1.0")]
-[assembly: AssemblyFileVersion("1.7.1.0")]
-[assembly: AssemblyInformationalVersion("1.7.1")]
+[assembly: AssemblyVersion("1.8.0.0")]
+[assembly: AssemblyFileVersion("1.8.0.0")]
+[assembly: AssemblyInformationalVersion("1.8.0")]
 
 // Windows shell link (.lnk) interfaces, for the desktop shortcut.
 [ComImport, Guid("00021401-0000-0000-C000-000000000046")] class ShellLink { }

@@ -61,7 +61,7 @@ code runs natively, and its Xbox 360 graphics are drawn with Direct3D 12 (on Lin
 | ❄️ **Snowflake tracker** | how many snowflakes you have on every drop, per range and peak (settings → **Snowflakes**) |
 | 🏂 **Boost meter in freeride** | the boost and tricky meters while you freeride (settings → **Display**) |
 | 🏅 **Online-only badges** | the badges that need EA's servers, shown as earned (settings → **Profile**) |
-| 🎮 **Cheats** | infinite boost; Tricky or Super Tricky the whole ride, or no Tricky at all; infinite credits (your own are never spent) or +1,000,000 credits; infinite rewinds; armour, oxygen, warmth, the wingsuit, ice axes and batteries that never run out; never lose a combo or the multiplier; max gear stats; big head and hands; a glowing suit (settings → **Cheats**) |
+| 🎮 **Cheats** | infinite boost; Tricky or Super Tricky the whole ride, or no Tricky at all; infinite credits (your own are never spent) or +1,000,000 credits; infinite rewinds; infinite wingsuit lift; armour, oxygen, warmth, the wingsuit, ice axes and batteries that never run out (one switch each); never lose a combo or the multiplier; max gear stats; big head and hands; a glowing suit (settings → **Cheats**) |
 
 <a id="installing"></a>
 
@@ -435,8 +435,8 @@ The game is playable and is being tested by playing through the whole World Tour
   rewinds, +1,000,000 credits, infinite wingsuit lift, one switch each for the headlamp and pulse
   goggles batteries, the wingsuit, armour and ice axes durability, oxygen tanks and cold protection;
   never lose a combo or the multiplier; max gear stats, big head, big hands, glowing suit);
-  the setup shows the title update and DLC you already added; moving the SSX folder no longer breaks
-  the next rebuild; a folder with only default.xex (like the setup's own copy) is no longer taken as
+  the setup shows the title update and DLC you already added; quitting from F1 right after starting no
+  longer switches to the standard renderer; moving the SSX folder no longer breaks the next rebuild; a folder with only default.xex (like the setup's own copy) is no longer taken as
   the game, which crashed at start (1.8.0)
 - ✅ Every controller is player 1 (a controller that wasn't first, for example behind a Steam or
   DS4Windows virtual pad, got stuck at "sign in"), and **Quit game** in the settings menu (1.7.1)
