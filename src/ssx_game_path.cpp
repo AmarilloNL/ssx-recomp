@@ -1,7 +1,8 @@
 // ssx - find the user's SSX game data: an extracted disc folder or the .iso.
 //
 // Order: the saved/--game_data_root path, a "game" folder next to the exe, an
-// .iso next to the exe, then a file picker. The pick is saved to ssx.toml.
+// .iso next to the exe, then a file picker. The pick is saved to ssx.toml. A folder counts only
+// as the whole extracted disc (default.xex and data0.big).
 
 #include "ssx_game_path.h"
 
@@ -88,12 +89,26 @@ bool IsIso(const fs::path& p) {
   return ext == L".iso" && fs::is_regular_file(p);
 }
 
+// A folder with default.xex in it, or that default.xex: the folder (empty if neither).
+fs::path XexFolder(fs::path p) {
+  std::error_code ec;
+  if (fs::is_regular_file(p, ec) && p.filename() == "default.xex") p = p.parent_path();
+  return fs::is_directory(p, ec) && fs::exists(p / "default.xex", ec) ? p : fs::path();
+}
+
+// An extracted disc is the whole disc: default.xex with the game's archives next to it (data0.big is the
+// first one the game opens). A folder with only default.xex, like the setup's own copy in
+// source\game-dump\files, has none of the game's data: started from it, the game crashes at once (issue #23).
+bool IsExtractedDisc(const fs::path& folder) {
+  std::error_code ec;
+  return fs::exists(folder / "data0.big", ec);
+}
+
 // Normalizes a candidate to a game folder or .iso, or returns empty if invalid.
 fs::path Validate(fs::path p) {
   std::error_code ec;
   if (p.empty() || !fs::exists(p, ec)) return {};
-  if (fs::is_regular_file(p, ec) && p.filename() == "default.xex") p = p.parent_path();
-  if (fs::is_directory(p, ec) && fs::exists(p / "default.xex", ec)) return p;
+  if (const fs::path folder = XexFolder(p); !folder.empty()) return IsExtractedDisc(folder) ? folder : fs::path();
   if (IsIso(p)) return p;
   return {};
 }
@@ -150,10 +165,12 @@ void SsxExit(int code, const char* why) {
 std::optional<fs::path> SsxLocateGame(const fs::path& exe_dir, const fs::path& config_path) {
   if (!REXCVAR_GET(game).empty()) {
     if (fs::path given = Validate(REXCVAR_GET(game)); !given.empty()) return given;  // not saved
-    REXLOG_WARN("--game {}: not an SSX disc image or a folder with default.xex", REXCVAR_GET(game));
+    REXLOG_WARN("--game {}: not an SSX disc image or a whole extracted disc (default.xex and data0.big)", REXCVAR_GET(game));
   }
-  fs::path found = Validate(rex::cvar::GetFlagByName("game_data_root"));
+  const std::string saved = rex::cvar::GetFlagByName("game_data_root");
+  fs::path found = Validate(saved);
   if (!found.empty()) return found;  // from ssx.toml or --game_data_root; nothing to save
+  const bool saved_incomplete = !saved.empty() && !XexFolder(saved).empty();
   found = Validate(exe_dir / "game");
   if (found.empty()) {
     std::error_code ec;
@@ -164,11 +181,21 @@ std::optional<fs::path> SsxLocateGame(const fs::path& exe_dir, const fs::path& c
       }
     }
   }
+  if (found.empty() && saved_incomplete) {
+    ShowMessage(SSX_TEXT("SSX is set to read the game from a folder that has only default.xex, not the rest of "
+                         "the disc (data0.big and the other files). Pick default.xex in your whole extracted "
+                         "disc, or the disc's .iso file."),
+                false);
+  }
   while (found.empty()) {
     fs::path picked = PickWithDialog();
     if (picked.empty()) return std::nullopt;  // cancelled
     found = Validate(picked);
-    if (found.empty()) {
+    if (found.empty() && !XexFolder(picked).empty()) {
+      ShowMessage(SSX_TEXT("That folder has default.xex but not the rest of the disc (data0.big and the other "
+                           "files). Pick default.xex in your whole extracted disc, or the disc's .iso file."),
+                  false);
+    } else if (found.empty()) {
       ShowMessage(SSX_TEXT("That doesn't look like SSX. Pick default.xex from the extracted disc, "
                            "or the disc's .iso file."),
                   false);

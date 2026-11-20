@@ -143,6 +143,7 @@ class SsxApp : public rex::ReXApp {
 #endif
     if (std::filesystem::is_directory(*game)) {
       paths.game_data_root = *game;
+      game_folder_ = *game;
     } else {
       iso_path_ = *game;
       paths.game_data_root = paths.user_data_root / "iso-mount";
@@ -156,6 +157,7 @@ class SsxApp : public rex::ReXApp {
   }
 
   void OnLoadXexImage(std::string&) override {
+    if (!game_folder_.empty()) REXLOG_INFO("Game: the extracted disc in {}", game_folder_.string());
     if (iso_path_.empty()) return;
     auto* vfs = runtime()->file_system();
     auto disc = std::make_unique<rex::filesystem::DiscImageDevice>("\\Device\\Cdrom0", iso_path_);
@@ -321,6 +323,7 @@ class SsxApp : public rex::ReXApp {
   std::atomic<bool> overlay_pending_{false};
   std::filesystem::path config_path_;
   std::filesystem::path iso_path_;
+  std::filesystem::path game_folder_;  // the extracted disc the game reads, when it isn't an .iso
   std::string import_log_;  // SsxImportUserData's result, logged once logging is up
   std::unique_ptr<SsxSettingsDialog> settings_;
 };
