@@ -431,12 +431,29 @@ static class Install {
   }
 
   // A copy of the game the builder takes: a disc image (.iso), or an extracted disc (its folder
-  // with default.xex, or that default.xex).
+  // with default.xex, or that default.xex). An extracted disc is the whole disc: a folder with only
+  // default.xex (like source\game-dump\files, the build's own copy) has none of the game's data, and
+  // the game started from it crashes at once (issue #23).
   public static bool IsGameCopy(string path) {
     if (string.IsNullOrEmpty(path)) return false;
     try {
-      if (File.Exists(path)) return true;
-      return Directory.Exists(path) && File.Exists(Path.Combine(path, "default.xex"));
+      if (Path.GetFileName(path).Equals("default.xex", StringComparison.OrdinalIgnoreCase) && File.Exists(path)) {
+        path = Path.GetDirectoryName(path);
+      } else if (File.Exists(path)) {
+        return true;
+      }
+      return Directory.Exists(path) && File.Exists(Path.Combine(path, "default.xex")) &&
+             File.Exists(Path.Combine(path, "data0.big"));
+    } catch (Exception) {
+      return false;
+    }
+  }
+
+  // default.xex without the rest of its disc next to it (see IsGameCopy).
+  public static bool IsLoneXex(string path) {
+    try {
+      return Path.GetFileName(path).Equals("default.xex", StringComparison.OrdinalIgnoreCase) && File.Exists(path) &&
+             !File.Exists(Path.Combine(Path.GetDirectoryName(path), "data0.big"));
     } catch (Exception) {
       return false;
     }
@@ -456,7 +473,7 @@ static class Install {
         if (!IsGameCopy(path)) path = raw;
         if (Directory.Exists(path)) path = Path.Combine(path, "default.xex");
         return (path.EndsWith(".iso", StringComparison.OrdinalIgnoreCase) ||
-                Path.GetFileName(path).Equals("default.xex", StringComparison.OrdinalIgnoreCase)) && File.Exists(path)
+                Path.GetFileName(path).Equals("default.xex", StringComparison.OrdinalIgnoreCase)) && IsGameCopy(path)
                    ? path : null;
       }
     } catch (Exception) { }
@@ -1392,6 +1409,9 @@ class InstallerForm : Form {
     if (iso.Length == 0) {
       SetHint(isoHint, "SSX (USA), title ID 4541096D: the disc image, or default.xex in the extracted disc's folder.",
               Th.Faint);
+    } else if (Install.IsLoneXex(iso)) {
+      SetHint(isoHint, "Only default.xex is in that folder: pick default.xex in your whole extracted disc " +
+                       "(data0.big and the other files next to it), or the disc image.", Th.Warn);
     } else if (File.Exists(iso) && Path.GetFileName(iso).Equals("default.xex", StringComparison.OrdinalIgnoreCase)) {
       SetHint(isoHint, "Extracted disc found. It is verified before the build starts; keep the folder where it is.", Th.Good);
     } else if (File.Exists(iso)) {

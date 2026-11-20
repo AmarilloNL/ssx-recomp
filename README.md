@@ -436,7 +436,8 @@ The game is playable and is being tested by playing through the whole World Tour
   goggles batteries, the wingsuit, armour and ice axes durability, oxygen tanks and cold protection;
   never lose a combo or the multiplier; max gear stats, big head, big hands, glowing suit);
   the setup shows the title update and DLC you already added; moving the SSX folder no longer breaks
-  the next rebuild (1.8.0)
+  the next rebuild; a folder with only default.xex (like the setup's own copy) is no longer taken as
+  the game, which crashed at start (1.8.0)
 - ✅ Every controller is player 1 (a controller that wasn't first, for example behind a Steam or
   DS4Windows virtual pad, got stuck at "sign in"), and **Quit game** in the settings menu (1.7.1)
 - ✅ One `ssx-recomp.exe` that sets SSX up and is its launcher: a portable SSX folder (saves from
