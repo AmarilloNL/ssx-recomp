@@ -65,7 +65,7 @@
         "license": { "name": "Microsoft Visual Studio license terms", "url": "https://visualstudio.microsoft.com/license-terms/" }
       }
     ],
-    "version": "1.7.1",
+    "version": "1.8.0",
     "done": ["{install}/source/dist/SSX/ssx.exe"]
   },
   "saves": [

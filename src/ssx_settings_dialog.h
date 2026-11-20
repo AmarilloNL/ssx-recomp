@@ -54,6 +54,7 @@ class SsxSettingsDialog : public rex::ui::ImGuiDialog {
   void DrawSnowflakesTab();
   void DrawScaleWarning();
   void DrawQuitConfirm();
+  void DrawCheatsTab();
 
   rex::input::InputSystem* input_;
   std::filesystem::path config_path_;

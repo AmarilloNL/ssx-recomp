@@ -34,6 +34,8 @@
 #include "ssx_settings.h"
 #include "ssx_snowflakes.h"
 
+void SsxCheatsGiveCredits();  // ssx_cheats.cpp
+
 REXCVAR_DEFINE_BOOL(ssx_show_fps, false, "SSX", "Show the frame rate in the top-left corner");
 
 namespace {
@@ -75,6 +77,7 @@ const Choice kRenderSizes[] = {{"Original  1120 x 584", "original"}, {"High  120
 const Choice kAntiAliasing[] = {{"Off", "none"}, {"FXAA", "fxaa"}, {"FXAA  (strong)", "fxaa_extreme"}};
 const Choice kAniso[] = {{"Game default", "-1"}, {"Off", "0"}, {"2x", "2"},
                          {"4x", "3"},            {"8x", "4"},  {"16x", "5"}};
+const Choice kTrickyCheats[] = {{"Normal", "0"}, {"Always Tricky", "1"}, {"Always Super Tricky", "2"}, {"Never", "3"}};
 
 struct Bind {
   const char* label;
@@ -100,7 +103,7 @@ const Bind kBinds[] = {
     {"Start", "keybind_start"},              {"Back", "keybind_back"},
 };
 
-const char* const kTabs[] = {"Display", "Graphics", "Audio", "Controls", "Profile", "Snowflakes"};
+const char* const kTabs[] = {"Display", "Graphics", "Audio", "Controls", "Profile", "Snowflakes", "Cheats"};
 
 // X_INPUT_GAMEPAD button bits -> ImGui gamepad keys (ImGui's nav: A activates, B cancels).
 const struct {
@@ -661,6 +664,62 @@ void SsxSettingsDialog::DrawSnowflakesTab() {
   ImGui::EndTable();
 }
 
+// Cheats (issue #21, ssx_cheats.cpp). Most apply at once; the outfit ones (max gear, big head and hands,
+// glowing) from the next ride. Only what is bought and the credits given end up in the save.
+void SsxSettingsDialog::DrawCheatsTab() {
+  if (!BeginRows("##cheats")) return;
+  Row("Infinite boost", "Boost never runs out. Tricky doesn't start from tricks while it's on.");
+  Checkbox("##cheat_boost", "ssx_cheat_infinite_boost");
+  Row("Tricky", "Always Tricky stays in Tricky (never Super Tricky). Never: boost without Tricky.");
+  Combo("##cheat_tricky", "ssx_cheat_tricky", kTrickyCheats, std::size(kTrickyCheats));
+  Row("Infinite credits", "Buying costs nothing. Stores show 9,999,999; your own credits come back when it's off.");
+  Checkbox("##cheat_credits", "ssx_cheat_infinite_credits");
+  Row("Give credits", "Adds 1,000,000 to your own credits, kept like a reward.");
+  static int given = 0;
+  if (ImGui::Button("+1,000,000")) {
+    SsxCheatsGiveCredits();
+    ++given;
+  }
+  if (given) {
+    ImGui::SameLine();
+    ImGui::TextDisabled("added %dx", given);
+  }
+  Row("Infinite rewinds", "Rewinds (LB) are never used up, also where a drop gives only a few.");
+  Checkbox("##cheat_rewinds", "ssx_cheat_infinite_rewinds");
+  Row("Infinite lift (wingsuits)", "A wingsuit flight keeps its lift, and the wingsuit meter stays full.");
+  Checkbox("##cheat_lift", "ssx_cheat_infinite_lift");
+  Row("Infinite battery life (headlamps)", "The headlamp never goes dark.");
+  Checkbox("##cheat_headlamp", "ssx_cheat_infinite_headlamp");
+  Row("Infinite battery life (pulse goggles)", "The pulse goggles never run out.");
+  Checkbox("##cheat_goggles", "ssx_cheat_infinite_goggles");
+  Row("Infinite durability (wingsuit)", "The wingsuit never wears out.");
+  Checkbox("##cheat_wingsuit", "ssx_cheat_infinite_wingsuit");
+  Row("Infinite durability (armour)", "Armour never wears out.");
+  Checkbox("##cheat_armour", "ssx_cheat_infinite_armour");
+  Row("Infinite durability (ice axes)", "Ice axes never wear out.");
+  Checkbox("##cheat_ice_axes", "ssx_cheat_infinite_ice_axes");
+  Row("Infinite tank size (oxygen tanks)", "Oxygen and the oxygen tanks never run out.");
+  Checkbox("##cheat_oxygen", "ssx_cheat_infinite_oxygen");
+  Row("Infinite cold protection (solar panels)", "The cold never lowers your core temperature.");
+  Checkbox("##cheat_warmth", "ssx_cheat_infinite_warmth");
+  Row("Never lose combo", "A wipeout banks your combo (with its bonus) instead of losing it.");
+  Checkbox("##cheat_combo", "ssx_cheat_keep_combo");
+  Row("Never lose multiplier", "The trick multiplier only goes up during a ride.");
+  Checkbox("##cheat_multiplier", "ssx_cheat_keep_multiplier");
+  Row("Max gear stats", "From your next ride: board, wingsuit and other gear at their best.");
+  Checkbox("##cheat_max_gear", "ssx_cheat_max_gear");
+  Row("Big head mode", "From your next ride, like the suits with that perk.");
+  Checkbox("##cheat_big_head", "ssx_cheat_big_head");
+  Row("Big hands mode", "From your next ride, like the suits with that perk.");
+  Checkbox("##cheat_big_hands", "ssx_cheat_big_hands");
+  Row("Glowing suit", "From your next ride: your suit's glowing parts light up.");
+  Checkbox("##cheat_glowing", "ssx_cheat_glowing");
+  ImGui::EndTable();
+  ImGui::Spacing();
+  ImGui::TextDisabled("Turn a cheat off and the game plays as before. Your own credits are never spent.");
+  ImGui::TextDisabled("Scores, medals and what you buy with a cheat on are kept like any others.");
+}
+
 void SsxSettingsDialog::DrawControlsTab() {
   if (BeginRows("##controls")) {
     Row("Keyboard controls", "Play without a controller.");
@@ -781,7 +840,8 @@ void SsxSettingsDialog::OnDraw(ImGuiIO& io) {
     case 2: DrawAudioTab(); break;
     case 3: DrawControlsTab(); break;
     case 4: DrawProfileTab(); break;
-    default: DrawSnowflakesTab(); break;
+    case 5: DrawSnowflakesTab(); break;
+    default: DrawCheatsTab(); break;
   }
   ImGui::EndChild();
 

@@ -92,6 +92,12 @@ if (Test-Path $Iso -PathType Container) {
     if (-not (Test-Path (Join-Path $Iso 'default.xex'))) {
         Fail "That folder has no default.xex: pick the extracted SSX disc's folder, or the disc image (.iso)." 11
     }
+    # The whole disc, not default.xex alone (like game-dump\files here): the game reads its data from
+    # this folder, and without it crashes at once (issue #23).
+    if (-not (Test-Path (Join-Path $Iso 'data0.big'))) {
+        Fail ("That folder has default.xex but not the rest of the disc (data0.big and the other files): " +
+              "pick your whole extracted SSX disc's folder, or the disc image (.iso).") 11
+    }
     $GameFolder = (Resolve-Path $Iso).Path
     $Iso = $GameFolder  # what ssx.toml points the game at
 }
