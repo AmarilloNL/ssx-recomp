@@ -26,6 +26,8 @@
 #include <rex/kernel/xboxkrnl/video.h>
 #include <cstring>
 #include <fstream>
+#include <iterator>
+#include <string>
 #include <vector>
 #include <rex/logging.h>
 #include <rex/filesystem.h>
@@ -382,6 +384,17 @@ std::vector<regpu::ScannedShader> ReadStaticShaders()
 
 // The screen ReGPU shows while it compiles the static shaders on the first start (a black window for half
 // a minute looks like a hang): dark, with a progress bar of done / total. No text (no font here).
+// The pipeline list shipped with the port (issue #17): pipeline-seed.txt beside the exe, in pipelines.manifest's
+// format (P lines: shader hashes and render state). ReGPU builds them on the first start, after the static shaders.
+const char* PipelineSeed()
+{
+    static const std::string text = [] {
+        std::ifstream f(rex::filesystem::GetExecutableFolder() / "pipeline-seed.txt", std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+    }();
+    return text.c_str();
+}
+
 bool BootScreen(const wchar_t*, uint32_t done, uint32_t total, std::vector<uint8_t>& rgba)
 {
     constexpr uint32_t kW = 1280, kH = 720, kBarW = 640, kBarH = 12, kX = (kW - kBarW) / 2, kY = kH * 3 / 4;
@@ -423,6 +436,7 @@ void ReGpuGraphicsSystem::FillHost()
     host.staticShaders = ReadStaticShaders;
     host.staticShadersSaved = [] { return true; };  // reading the file is quick: no "searching" screen
     host.bootScreen = BootScreen;
+    host.pipelineSeed = PipelineSeed;
 }
 
 X_STATUS ReGpuGraphicsSystem::SetupGuestGpu(rex::runtime::FunctionDispatcher* dispatcher,
