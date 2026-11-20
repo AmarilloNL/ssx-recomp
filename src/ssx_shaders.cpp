@@ -18,7 +18,6 @@
 #include <cstring>
 #include <fstream>
 #include <map>
-#include <memory>
 #include <set>
 #include <string>
 #include <thread>
@@ -143,9 +142,10 @@ void WriteShaders(const Shaders& shaders, size_t scans) {
 void SsxShadersSetQuit(std::function<void()> quit) { g_quit = std::move(quit); }
 
 // The game's effect loader: with --ssx_collect_shaders its first call (at startup) loads all of them; the
-// shaders are read out twice, then the game quits the normal way: right after the loads, before the game
-// draws with them (it patches a vertex shader's fetches in place for each draw, so later reads see patched
-// copies), and 10 s later for loads that finish late. The two reads are kept together.
+// shaders are read out right after the loads, before the game draws with them, then the game quits the
+// normal way. (A read 10 s later, as before, also saw copies the game had patched in place for its draws:
+// a different set on every PC, 3701 here vs 3684 on the Linux box, so a pipeline list recorded on one PC
+// named shaders another didn't have. Right after the loads both read the same 3687.)
 REX_EXTERN(SSX_FN_LOAD_EFFECT_IMP);
 REX_HOOK_RAW(SSX_FN_LOAD_EFFECT) {
   SSX_FN_LOAD_EFFECT_IMP(ctx, base);
@@ -153,14 +153,12 @@ REX_HOOK_RAW(SSX_FN_LOAD_EFFECT) {
   if (started || !REXCVAR_GET(ssx_collect_shaders)) return;
   started = true;  // (also keeps LoadAllEffects' own calls from coming back here)
   LoadAllEffects(ctx, base);
-  auto shaders = std::make_shared<Shaders>();
-  const size_t early = ScanShaders(*shaders);
-  REXLOG_INFO("shaders: read 1 (right after the loads): {} containers, {} shaders", early, shaders->size());
-  std::thread([shaders] {
-    std::this_thread::sleep_for(std::chrono::seconds(10));
-    const size_t late = ScanShaders(*shaders);
-    REXLOG_INFO("shaders: read 2 (10 s later): {} containers, {} shaders in all", late, shaders->size());
-    WriteShaders(*shaders, 2);
+  Shaders shaders;
+  const size_t containers = ScanShaders(shaders);
+  REXLOG_INFO("shaders: {} containers right after the loads", containers);
+  WriteShaders(shaders, 1);
+  std::thread([] {
+    std::this_thread::sleep_for(std::chrono::seconds(1));  // (quit from outside the game's own call)
     if (g_quit) g_quit();
   }).detach();
 }
