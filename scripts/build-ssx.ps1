@@ -549,6 +549,8 @@ if (Test-Path "$root\dist\SSX\rexgpu-regpu.dll") {
         Stop-Process -Id $collect.Id -ErrorAction SilentlyContinue
         Remove-Item "$root\dist\SSX\regpu-starting.flag" -ErrorAction SilentlyContinue
     }
+    # The pipelines (shader pairs and render states) rides need, so ReGPU builds them at the first start too.
+    Copy-Item "$root\regpu-plugin\pipeline-seed.txt" "$root\dist\SSX\" -Force
     if (Test-Path "$root\dist\SSX\static-shaders.bin") { Write-Host "  Shaders collected." }
     else { Write-Host "  Couldn't collect them; the game compiles each shader the first time it's used instead." -ForegroundColor Yellow }
 }

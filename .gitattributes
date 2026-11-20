@@ -2,3 +2,5 @@
 *.patch text eol=lf
 # Shell scripts run on Linux.
 *.sh text eol=lf
+# ReGPU reads the pipeline list line by line (LF).
+regpu-plugin/pipeline-seed.txt text eol=lf

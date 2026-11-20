@@ -451,6 +451,8 @@ if [ -f "$dist/librexgpu-regpu.so" ]; then
   (cd "$dist" && timeout 120 ./ssx --ssx_collect_shaders=true --audio_mute --fullscreen=false >/dev/null 2>&1) || collect=$?
   # Stopped here after 2 minutes: not a failed renderer start, so its start marker goes (a crash keeps it).
   if [ "$collect" = 124 ]; then rm -f "$dist/regpu-starting.flag"; fi
+  # The pipelines (shader pairs and render states) rides need, so ReGPU builds them at the first start too.
+  cp -f "$root/regpu-plugin/pipeline-seed.txt" "$dist/"
   if [ -f "$dist/static-shaders.bin" ]; then echo "  Shaders collected."
   else echo "  Couldn't collect them; the game compiles each shader the first time it's used instead."; fi
 fi
