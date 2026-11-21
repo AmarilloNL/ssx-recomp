@@ -977,6 +977,8 @@ class InstallerForm : Form {
   Stopwatch clock = new Stopwatch();
   Process buildProcess;
   bool running, failed, cancelled, shortcutMade;
+  // No game in the folder when this build started: a first install.
+  bool firstBuild;
   int page;
 
   // folder: the SSX folder. With the game built there the window opens on the Play page, or with
@@ -1546,6 +1548,7 @@ class InstallerForm : Form {
     string[] dlc = dlcFiles.ToArray();
     string titleUpdate = titleUpdateFile;
     lock (sync) { stage = 0; stageFrac = 0; tool = null; pendingLog.Length = 0; }
+    firstBuild = !Install.Built(folder);
     running = true;
     failed = cancelled = false;
     logBox.Clear();
@@ -1733,7 +1736,9 @@ class InstallerForm : Form {
       stageList.Current = Stages.Length;
       TimeSpan t = clock.Elapsed;
       doneSub.Text = "Built in " + Math.Max(1, (int)Math.Round(t.TotalMinutes)) + " min.  In " + folder;
-      shortcutCheck.Checked = true;
+      // Offered on the first install only: after an update or rebuild the box stays as it was, so
+      // Check for updates or Close doesn't point the desktop shortcut at this folder unasked.
+      if (firstBuild) shortcutCheck.Checked = true;
       ShowPage(3);
     } else {
       failed = true;
