@@ -28,9 +28,9 @@ using System.Windows.Forms;
 [assembly: AssemblyProduct("SSX PC Port")]
 [assembly: AssemblyCompany("AmarilloNL")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 AmarilloNL, MIT License")]
-[assembly: AssemblyVersion("1.9.0.0")]
-[assembly: AssemblyFileVersion("1.9.0.0")]
-[assembly: AssemblyInformationalVersion("1.9.0")]
+[assembly: AssemblyVersion("1.9.1.0")]
+[assembly: AssemblyFileVersion("1.9.1.0")]
+[assembly: AssemblyInformationalVersion("1.9.1")]
 
 // Windows shell link (.lnk) interfaces, for the desktop shortcut.
 [ComImport, Guid("00021401-0000-0000-C000-000000000046")] class ShellLink { }
@@ -767,17 +767,29 @@ class Field : Panel {
   }
 }
 
-// Rounded panel with a coloured edge, a title and wrapped body text.
+// Rounded panel with a coloured edge, a title and wrapped body text, or a list of items.
 class Card : Painted {
   public string Title = "", Body = "";
+  // Instead of Body: one item per row, each with a dot.
+  public string[] Items;
   public Color Tone = Th.Accent;
   readonly Font titleFont = Th.Semi(10.5f), bodyFont = Th.F(10f, FontStyle.Regular);
 
   public int FitHeight(int width) {
     int inner = width - Th.D(44);
     int t = TextRenderer.MeasureText(Title, titleFont, new Size(inner, 1000), TextFormatFlags.WordBreak).Height;
-    int b = TextRenderer.MeasureText(Body, bodyFont, new Size(inner, 1000), TextFormatFlags.WordBreak).Height;
-    return Th.D(18) + t + Th.D(6) + b + Th.D(18);
+    return Th.D(18) + t + Th.D(6) + BodyHeight(inner) + Th.D(18);
+  }
+
+  int ItemHeight(string item, int inner) {
+    return TextRenderer.MeasureText(item, bodyFont, new Size(inner - Th.D(18), 1000), TextFormatFlags.WordBreak).Height;
+  }
+
+  int BodyHeight(int inner) {
+    if (Items == null) return TextRenderer.MeasureText(Body, bodyFont, new Size(inner, 1000), TextFormatFlags.WordBreak).Height;
+    int h = 0;
+    foreach (string item in Items) h += ItemHeight(item, inner) + Th.D(8);
+    return h - Th.D(8);
   }
 
   protected override void OnPaint(PaintEventArgs e) {
@@ -794,8 +806,21 @@ class Card : Painted {
     int x = Th.D(24), inner = Width - Th.D(44);
     int th = TextRenderer.MeasureText(Title, titleFont, new Size(inner, 1000), TextFormatFlags.WordBreak).Height;
     TextRenderer.DrawText(g, Title, titleFont, new Rectangle(x, Th.D(18), inner, th), Tone, TextFormatFlags.WordBreak);
-    TextRenderer.DrawText(g, Body, bodyFont, new Rectangle(x, Th.D(24) + th, inner, Height), Th.Text,
-                          TextFormatFlags.WordBreak);
+    if (Items == null) {
+      TextRenderer.DrawText(g, Body, bodyFont, new Rectangle(x, Th.D(24) + th, inner, Height), Th.Text,
+                            TextFormatFlags.WordBreak);
+      return;
+    }
+    int y = Th.D(24) + th;
+    float r = Th.Scale * 2.5f;
+    foreach (string item in Items) {
+      int h = ItemHeight(item, inner);
+      float cy = y + bodyFont.Height / 2f;
+      using (var b = new SolidBrush(Tone)) g.FillEllipse(b, x + Th.D(3), cy - r, 2 * r, 2 * r);
+      TextRenderer.DrawText(g, item, bodyFont, new Rectangle(x + Th.D(18), y, inner - Th.D(18), h), Th.Text,
+                            TextFormatFlags.WordBreak);
+      y += h + Th.D(8);
+    }
   }
 }
 
@@ -977,6 +1002,10 @@ class InstallerForm : Form {
   Stopwatch clock = new Stopwatch();
   Process buildProcess;
   bool running, failed, cancelled, shortcutMade;
+  // No game in the folder when this build started: a first install.
+  bool firstBuild;
+  // A middle dot between the parts of a subtitle: version or build time, then the folder.
+  static readonly string Dot = "  " + (char)0xB7 + "  ";
   int page;
 
   // folder: the SSX folder. With the game built there the window opens on the Play page, or with
@@ -1031,7 +1060,7 @@ class InstallerForm : Form {
   void ShowPlayStatus() {
     doneSub.Text = Install.NeedsRebuild(folder)
         ? "Version " + Install.AppVersion + " isn't built yet: click Add DLC / rebuild, then Rebuild."
-        : "Version " + Install.AppVersion + ", in " + folder;
+        : "Version " + Install.AppVersion + Dot + folder;
   }
 
   protected override void OnHandleCreated(EventArgs e) {
@@ -1054,7 +1083,7 @@ class InstallerForm : Form {
                             Th.F(10.5f, FontStyle.Regular), Th.Dim, x, Th.D(70), w, Th.D(46)));
     p.Controls.Add(new Bullets {
       Items = new[] { "Up to 300 fps, or match your monitor's refresh rate",
-                      "Sharper rendering, 2x resolution scale and AMD FSR upscaling",
+                      "Drawn at your screen's resolution, up to 4K",
                       "Settings menu in game: F1, or Back + Start on a controller",
                       "Keyboard and controller, DLC from your console, and your own music" },
       Bounds = new Rectangle(x, Th.D(122), w, Th.D(120)) });
@@ -1168,12 +1197,10 @@ class InstallerForm : Form {
 
     var tips = new Card {
       Title = "Good to know",
-      Body = "F1 (or Back + Start) opens the settings: frame rate, resolution, FSR, controls.\r\n" +
-             "Keep your ISO (or extracted disc) where it is: the game reads its data from it.\r\n" +
-             "Everything stays in this folder: saves, settings, DLC and music (in source\\dist\\SSX\\userdata). " +
-             "DLC you added is installed when the game starts.\r\n" +
-             "Check for updates gets the latest ssx-recomp.exe and rebuilds SSX with it. Building needs no " +
-             "download of the port: this program carries its source.",
+      Items = new[] { "F1 (or Back + Start) opens the settings: frame rate, resolution, controls.",
+                      "Keep your ISO (or extracted disc) where it is: the game reads its data from it.",
+                      "Saves, settings, DLC and music all stay in this folder.",
+                      "Check for updates gets the newest version and rebuilds SSX with it." },
       Tone = Th.Accent };
     tips.Bounds = new Rectangle(x, Th.D(112), w, tips.FitHeight(w));
     p.Controls.Add(tips);
@@ -1344,9 +1371,8 @@ class InstallerForm : Form {
     ShowPage(3);
   }
 
-  const string DlcHelp = "Copied off your own Xbox 360 with a tool like FATXplorer or Velocity. In " +
-                         "Content\\0000000000000000\\4541096D, the DLC (long-named files) is in 00000002 and the title " +
-                         "update in 000B0000 (if there are two, the larger one). Add them once: later updates keep them.";
+  // Where they are on the console and which tool copies them off: the README (Where do I find these?).
+  const string DlcHelp = "Copied off your own Xbox 360. Add them once: later updates keep them.";
 
   // With nothing picked: what this SSX folder already has (issue #18: no need to add it again), or the help text.
   void ShowAddedHint() {
@@ -1442,7 +1468,7 @@ class InstallerForm : Form {
         SetHint(folderHint, "This folder has other files. Put ssx-recomp.exe in a folder of its own first, e.g. C:\\Games\\SSX.",
                 Th.Warn);
       } else {
-        SetHint(folderHint, string.Format("{0} free on {1}  (needs about 10 GB)", FormatGb(gb), drive.Name.TrimEnd('\\')),
+        SetHint(folderHint, string.Format("{0} free on {1} (needs about 10 GB)", FormatGb(gb), drive.Name.TrimEnd('\\')),
                 gb >= 10 ? Th.Faint : Th.Warn);
       }
     } catch (Exception) {
@@ -1546,6 +1572,7 @@ class InstallerForm : Form {
     string[] dlc = dlcFiles.ToArray();
     string titleUpdate = titleUpdateFile;
     lock (sync) { stage = 0; stageFrac = 0; tool = null; pendingLog.Length = 0; }
+    firstBuild = !Install.Built(folder);
     running = true;
     failed = cancelled = false;
     logBox.Clear();
@@ -1732,8 +1759,10 @@ class InstallerForm : Form {
       percentLabel.Text = "100%";
       stageList.Current = Stages.Length;
       TimeSpan t = clock.Elapsed;
-      doneSub.Text = "Built in " + Math.Max(1, (int)Math.Round(t.TotalMinutes)) + " min.  In " + folder;
-      shortcutCheck.Checked = true;
+      doneSub.Text = "Built in " + Math.Max(1, (int)Math.Round(t.TotalMinutes)) + " min" + Dot + folder;
+      // Offered on the first install only: after an update or rebuild the box stays as it was, so
+      // Check for updates or Close doesn't point the desktop shortcut at this folder unasked.
+      if (firstBuild) shortcutCheck.Checked = true;
       ShowPage(3);
     } else {
       failed = true;
