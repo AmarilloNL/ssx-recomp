@@ -435,6 +435,11 @@ The game is playable and is being tested by playing through the whole World Tour
 <summary><b>✅ Fixed so far</b></summary>
 <br>
 
+- ✅ Cheats, second round: infinite boost runs down but never empties (Tricky starts as normal),
+  wingsuits steer again with infinite lift, gear meters stay full on screen, new **No rewinds** and
+  **Ride uphill**; the setup says which build tool it's installing and when Windows is waiting for
+  your permission, and reminds you to keep your ISO (1.9.0)
+
 - ✅ The main menu comes about 10 seconds sooner: the game no longer waits for Xbox Live after loading
   the save; cheats (infinite boost, always Tricky or Super Tricky, no Tricky, infinite credits and
   rewinds, +1,000,000 credits, infinite wingsuit lift, one switch each for the headlamp and pulse
