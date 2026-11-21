@@ -41,7 +41,7 @@ class SsxSettingsDialog : public rex::ui::ImGuiDialog {
   bool BeginRows(const char* id);
   void Row(const char* label, const char* help);
   bool Combo(const char* label, const char* cvar, const Choice* choices, size_t count);
-  void Checkbox(const char* label, const char* cvar);
+  bool Checkbox(const char* label, const char* cvar);
   int TabFlags(const char* name);
   void PollPad(ImGuiIO& io);
   void DrawFps();

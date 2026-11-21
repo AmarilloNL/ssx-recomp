@@ -78,6 +78,10 @@
 // rewinds are infinite ([r3+148] points at that flag, as in a race).
 #define SSX_FN_USE_REWIND SSX_GUEST(sub_82CF30E0, sub_82CCE650)
 #define SSX_FN_USE_REWIND_IMP SSX_GUEST(__imp__sub_82CF30E0, __imp__sub_82CCE650)
+// ...and its check "can the rider rewind now?" (r3 the same component; answers r3 1 or 0): yes while rewinds
+// are infinite or left, or a rewind is still going on. Called by the rewind update when LB has started one.
+#define SSX_FN_CAN_REWIND SSX_GUEST(sub_82CF3028, sub_82CCE598)
+#define SSX_FN_CAN_REWIND_IMP SSX_GUEST(__imp__sub_82CF3028, __imp__sub_82CCE598)
 // The in-ride HUD's update, once a frame (this r3): [this+144] is the rider's stats object, stat N's
 // value at *[stats + (N+1)*4] (N in the game's own sorted stat list, e.g. 148 FLT_Armour).
 #define SSX_FN_HUD_UPDATE SSX_GUEST(sub_824C8DB0, sub_82492D28)
@@ -119,11 +123,16 @@
 #define SSX_FN_GEAR_STAT SSX_GUEST(sub_82C64778, sub_82C3FB78)
 #define SSX_FN_GEAR_STAT_IMP SSX_GUEST(__imp__sub_82C64778, __imp__sub_82C3FB78)
 // A wingsuit flight's node of the rider's behaviour graph, once a frame while flying (node r4, [r4+48] its
-// ports): it adds the frame to the time flown (port +216, a float the graph keeps), and the lift fades as
-// that time nears the flight's length; it also publishes the share used as stat 232
-// (FLT_WingsuitUsePercentage, the HUD's wingsuit meter). The graph's floats are set through the second
-// (port r3, value f1; returns the value's address in r3).
+// ports): it adds the frame to the time flown (port +216) and reads its three curves (ports +192, +196, +200)
+// at the share of the flight flown so far (0 at the start), which it also publishes as the wingsuit meter
+// (port +44; stat 232 FLT_WingsuitUsePercentage, the HUD's). The lift fades as that share grows. The curves
+// are read through the second (out r3, curve r4, in r5: a vector of that share).
 #define SSX_FN_WING_FLIGHT SSX_GUEST(sub_82CB9770, sub_82C94B78)
 #define SSX_FN_WING_FLIGHT_IMP SSX_GUEST(__imp__sub_82CB9770, __imp__sub_82C94B78)
-#define SSX_FN_GRAPH_SET_FLOAT SSX_GUEST(sub_831A9D48, sub_83186728)
-#define SSX_FN_GRAPH_SET_FLOAT_IMP SSX_GUEST(__imp__sub_831A9D48, __imp__sub_83186728)
+#define SSX_FN_CURVE_EVAL SSX_GUEST(sub_82C7B420, sub_82C567F0)
+#define SSX_FN_CURVE_EVAL_IMP SSX_GUEST(__imp__sub_82C7B420, __imp__sub_82C567F0)
+// The rider's out-of-bounds correction, once a frame (rider r3): unless [r3+0x20380] points at a set byte (stat 23,
+// the game's switch for it), it looks the rider's position up in the drop's map of where the course is and pushes
+// the rider back from the cells outside it.
+#define SSX_FN_OOB_CORRECTION SSX_GUEST(sub_82CF7A70, sub_82CD3080)
+#define SSX_FN_OOB_CORRECTION_IMP SSX_GUEST(__imp__sub_82CF7A70, __imp__sub_82CD3080)
