@@ -435,6 +435,8 @@ The game is playable and is being tested by playing through the whole World Tour
 <summary><b>✅ Fixed so far</b></summary>
 <br>
 
+- ✅ Laptops with two GPUs (built-in graphics next to an NVIDIA or AMD card) run the game on the
+  fast one (1.9.3)
 - ✅ After the build tools change (a newer LLVM, or another Visual Studio installed), the next update
   builds the game from scratch once instead of mixing files from both (1.9.2)
 - ✅ With No rewinds, the rewind counter shows 0; a tidier setup, whose desktop shortcut box is only
