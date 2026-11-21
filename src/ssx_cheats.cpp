@@ -225,6 +225,7 @@ void TopUpGear(uint8_t* base, uint32_t stats) {
 
 REX_EXTERN(SSX_FN_HUD_UPDATE_IMP);
 REX_HOOK_RAW(SSX_FN_HUD_UPDATE) {
+  uint32_t rewinds = 0;
   if (const uint32_t stats = REX_LOAD_U32(ctx.r3.u32 + 144)) {
     TopUpGear(base, stats);
     if (const uint32_t meter = REX_LOAD_U32(stats + (232 + 1) * 4);  // FLT_WingsuitUsePercentage
@@ -232,8 +233,14 @@ REX_HOOK_RAW(SSX_FN_HUD_UPDATE) {
       const float used = LoadFloat(base, meter);
       if (used > 0.0f && used <= 1.0f) REX_STORE_U32(meter, 0);  // 0.0f
     }
+    if (REXCVAR_GET(ssx_cheat_no_rewinds)) rewinds = REX_LOAD_U32(stats + (246 + 1) * 4);  // INT_RewindCountCurrent
   }
+  // No rewinds: the HUD's rewind counter shows none left. Only while the HUD updates: the count is put
+  // back right after, so the rest of the game (behaviour graphs, the rewind snapshot) reads it unchanged.
+  const uint32_t left = rewinds ? REX_LOAD_U32(rewinds) : 0;
+  if (rewinds) REX_STORE_U32(rewinds, 0);
   SSX_FN_HUD_UPDATE_IMP(ctx, base);
+  if (rewinds) REX_STORE_U32(rewinds, left);
 }
 
 // ...and the cold: the rider's core temperature can't go above a maximum that drops with the cold taken
