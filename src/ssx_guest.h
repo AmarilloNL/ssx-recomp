@@ -123,15 +123,12 @@
 #define SSX_FN_GEAR_STAT SSX_GUEST(sub_82C64778, sub_82C3FB78)
 #define SSX_FN_GEAR_STAT_IMP SSX_GUEST(__imp__sub_82C64778, __imp__sub_82C3FB78)
 // A wingsuit flight's node of the rider's behaviour graph, once a frame while flying (node r4, [r4+48] its
-// ports): it adds the frame to the time flown (port +216, a float the graph keeps, 60 a second) and publishes
-// the share of the flight used (port +44; stat 232 FLT_WingsuitUsePercentage, the HUD's wingsuit meter); the
-// flight ends near 1. Three curves of the node (ports +192, +196, +200) are read at a point that moves with
-// the time flown. The graph's floats are set through the second (port r3, value f1; returns the value's
-// address in r3), the curves read through the third (out r3, curve r4, in r5: a vector of the point).
+// ports): it adds the frame to the time flown (port +216) and reads its three curves (ports +192, +196, +200)
+// at the share of the flight flown so far (0 at the start), which it also publishes as the wingsuit meter
+// (port +44; stat 232 FLT_WingsuitUsePercentage, the HUD's). The lift fades as that share grows. The curves
+// are read through the second (out r3, curve r4, in r5: a vector of that share).
 #define SSX_FN_WING_FLIGHT SSX_GUEST(sub_82CB9770, sub_82C94B78)
 #define SSX_FN_WING_FLIGHT_IMP SSX_GUEST(__imp__sub_82CB9770, __imp__sub_82C94B78)
-#define SSX_FN_GRAPH_SET_FLOAT SSX_GUEST(sub_831A9D48, sub_83186728)
-#define SSX_FN_GRAPH_SET_FLOAT_IMP SSX_GUEST(__imp__sub_831A9D48, __imp__sub_83186728)
 #define SSX_FN_CURVE_EVAL SSX_GUEST(sub_82C7B420, sub_82C567F0)
 #define SSX_FN_CURVE_EVAL_IMP SSX_GUEST(__imp__sub_82C7B420, __imp__sub_82C567F0)
 // The rider's out-of-bounds correction, once a frame (rider r3): unless [r3+0x20380] points at a set byte (stat 23,

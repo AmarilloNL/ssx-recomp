@@ -324,23 +324,14 @@ REX_HOOK_RAW(SSX_FN_GEAR_STAT) {
   if (full && (ctx.r3.u32 & 0xFF) < kFullPoints) ctx.r3.u64 = kFullPoints;
 }
 
-// Infinite lift: the flight node reads its three time curves at the share of the flight flown so far (from 0
-// at the start; the flight ends near 1), and publishes that share as the wingsuit meter. With the cheat on the
-// curves are read at the start of a flight every frame, so the meter stays at 0 too (as when the time flown was
-// held at 0 before, see the HUD update above for the bar), and the time flown itself is held at half the
-// flight (scaled back each frame by the share the node had worked out), so the flight never ends either way.
-// Holding the time at 0, as before, also stopped the steering.
+// Infinite lift: the flight node reads its three time curves at the share of the flight flown so far (0 at the
+// start, the wingsuit meter shows it), and the lift fades with it until the flight is a fall. With the cheat on
+// the curves are read at the start of a flight every frame, so the lift stays and the meter stays at 0 (see the
+// HUD update above for the bar). The time flown itself runs as normal: holding it at 0, as 1.8.0 did, also
+// stopped the steering.
 namespace {
-constexpr float kLiftHold = 0.5f;  // the share of the flight the time flown is held at
-
-struct Flight {
-  uint32_t time_port = 0;
-  uint32_t curves[3] = {};
-  uint32_t time = 0;     // the time flown's address, once the node has set it this frame
-  float share = -1.0f;   // the share of the flight the node worked out this frame
-};
-thread_local Flight* flight = nullptr;  // while the flight node runs with the cheat on
-}  // namespace
+thread_local const uint32_t* flight_curves = nullptr;  // the flight node's curves, while it runs with the cheat on
+}
 
 REX_EXTERN(SSX_FN_WING_FLIGHT_IMP);
 REX_HOOK_RAW(SSX_FN_WING_FLIGHT) {
@@ -349,31 +340,17 @@ REX_HOOK_RAW(SSX_FN_WING_FLIGHT) {
     SSX_FN_WING_FLIGHT_IMP(ctx, base);
     return;
   }
-  Flight f;
-  f.time_port = REX_LOAD_U32(ports + 216);
-  for (uint32_t i = 0; i < 3; ++i) f.curves[i] = REX_LOAD_U32(ports + 192 + i * 4);
-  flight = &f;
+  const uint32_t curves[3] = {REX_LOAD_U32(ports + 192), REX_LOAD_U32(ports + 196), REX_LOAD_U32(ports + 200)};
+  flight_curves = curves;
   SSX_FN_WING_FLIGHT_IMP(ctx, base);
-  flight = nullptr;
-  if (f.time && f.share > kLiftHold) {
-    StoreFloat(base, f.time, FloatBits(LoadFloat(base, f.time) * (kLiftHold / f.share)));
-  }
-}
-
-REX_EXTERN(SSX_FN_GRAPH_SET_FLOAT_IMP);
-REX_HOOK_RAW(SSX_FN_GRAPH_SET_FLOAT) {
-  const uint32_t port = ctx.r3.u32;
-  SSX_FN_GRAPH_SET_FLOAT_IMP(ctx, base);
-  if (flight && port && port == flight->time_port) flight->time = ctx.r3.u32;
+  flight_curves = nullptr;
 }
 
 REX_EXTERN(SSX_FN_CURVE_EVAL_IMP);
 REX_HOOK_RAW(SSX_FN_CURVE_EVAL) {
-  if (flight && ctx.r5.u32) {
+  if (flight_curves && ctx.r5.u32) {
     const uint32_t curve = ctx.r4.u32;
-    if (curve && (curve == flight->curves[0] || curve == flight->curves[1] || curve == flight->curves[2])) {
-      const float share = LoadFloat(base, ctx.r5.u32);
-      if (share > flight->share) flight->share = share;
+    if (curve && (curve == flight_curves[0] || curve == flight_curves[1] || curve == flight_curves[2])) {
       for (uint32_t i = 0; i < 4; ++i) REX_STORE_U32(ctx.r5.u32 + i * 4, 0);  // the point: the flight's start
     }
   }
