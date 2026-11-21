@@ -41,6 +41,7 @@ REXCVAR_DEFINE_BOOL(ssx_cheat_max_gear, false, "SSX", "Cheat: every gear stat at
 REXCVAR_DEFINE_BOOL(ssx_cheat_big_head, false, "SSX", "Cheat: a big head");
 REXCVAR_DEFINE_BOOL(ssx_cheat_big_hands, false, "SSX", "Cheat: big hands");
 REXCVAR_DEFINE_BOOL(ssx_cheat_glowing, false, "SSX", "Cheat: a glowing suit");
+REXCVAR_DEFINE_BOOL(ssx_cheat_ride_uphill, false, "SSX", "Cheat: no push back when leaving the course");
 REXCVAR_DEFINE_INT32(ssx_cheat_tricky, 0, "SSX",
                      "Cheat: 0 Tricky as normal, 1 always Tricky, 2 always Super Tricky, 3 never Tricky");
 
@@ -377,4 +378,16 @@ REX_HOOK_RAW(SSX_FN_CURVE_EVAL) {
     }
   }
   SSX_FN_CURVE_EVAL_IMP(ctx, base);
+}
+
+// Ride uphill: a rider who leaves the drop's course (riding back up past where it starts, or off its sides) is
+// pushed back by the game's out-of-bounds correction, which looks the rider's place up in a map of the drop.
+// With the cheat on, that map is skipped, as when the game's own switch for it is on (stat 23,
+// BLN_ForceSpatialDataOutOfBoundsCorrectionOff; [rider+0x20380] points at it), turned on only for the
+// correction's own call. Corrections the game forces for its own reasons still happen.
+REX_EXTERN(SSX_FN_OOB_CORRECTION_IMP);
+REX_HOOK_RAW(SSX_FN_OOB_CORRECTION) {
+  ScopedSwitch off;
+  if (REXCVAR_GET(ssx_cheat_ride_uphill)) off.On(base, REX_LOAD_U32(ctx.r3.u32 + 0x20380));
+  SSX_FN_OOB_CORRECTION_IMP(ctx, base);
 }

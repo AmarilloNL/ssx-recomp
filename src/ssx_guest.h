@@ -134,3 +134,8 @@
 #define SSX_FN_GRAPH_SET_FLOAT_IMP SSX_GUEST(__imp__sub_831A9D48, __imp__sub_83186728)
 #define SSX_FN_CURVE_EVAL SSX_GUEST(sub_82C7B420, sub_82C567F0)
 #define SSX_FN_CURVE_EVAL_IMP SSX_GUEST(__imp__sub_82C7B420, __imp__sub_82C567F0)
+// The rider's out-of-bounds correction, once a frame (rider r3): unless [r3+0x20380] points at a set byte (stat 23,
+// the game's switch for it), it looks the rider's position up in the drop's map of where the course is and pushes
+// the rider back from the cells outside it.
+#define SSX_FN_OOB_CORRECTION SSX_GUEST(sub_82CF7A70, sub_82CD3080)
+#define SSX_FN_OOB_CORRECTION_IMP SSX_GUEST(__imp__sub_82CF7A70, __imp__sub_82CD3080)

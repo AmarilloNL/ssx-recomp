@@ -725,6 +725,9 @@ void SsxSettingsDialog::DrawCheatsTab() {
   Checkbox("##cheat_big_hands", "ssx_cheat_big_hands");
   Row("Glowing suit", "Your suit's glowing parts light up.");
   Checkbox("##cheat_glowing", "ssx_cheat_glowing");
+  Row("Ride uphill",
+      "No invisible push back when you leave the course: ride back up past the start, or off its sides.");
+  Checkbox("##cheat_uphill", "ssx_cheat_ride_uphill");
   ImGui::EndTable();
   ImGui::Spacing();
   ImGui::TextDisabled("Turn a cheat off and the game plays as before. Your own credits are never spent.");
