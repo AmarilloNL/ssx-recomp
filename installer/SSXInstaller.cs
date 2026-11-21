@@ -174,14 +174,8 @@ class PrepareProgress {
   public void OnLine(string text) {
     if (text == null) return;
     if (text.StartsWith("ERROR: ")) { Error = text.Substring(7).Trim(); return; }
-    // A build tool being installed (CMake, Ninja, LLVM, Visual Studio's Build Tools): it can take
-    // minutes and Windows asks for permission (UAC), so the step says which one.
-    Match tool = Regex.Match(text, @"^\s+installing (.+?)(?: \(.*\))?(?: with winget| from its official download)?(?:\.\.\.|\.)?$");
-    if (tool.Success && stage == 2) {
-      string name = tool.Groups[1].Value;
-      if (name == "Kitware.CMake" || name == "cmake") name = "CMake";
-      else if (name == "Ninja-build.Ninja" || name == "ninja") name = "Ninja";
-      else if (name == "LLVM.LLVM") name = "LLVM";
+    string name = stage == 2 ? InstallerForm.ToolOf(text) : null;
+    if (name != null) {
       Console.WriteLine(string.Format(System.Globalization.CultureInfo.InvariantCulture,
                                       "progress {0:0.000} Installing {1}: Windows may ask for permission",
                                       Math.Max(shown, InstallerForm.StageStart[2]), name));
@@ -928,6 +922,21 @@ class InstallerForm : Form {
   // Where each stage starts on the overall bar (the last entry is the end).
   internal static readonly float[] StageStart = { 0f, .02f, .04f, .10f, .18f, .36f, 1f };
   internal static readonly Regex NinjaStep = new Regex(@"^\[(\d+)/(\d+)\]");
+  static readonly Regex ToolLine =
+      new Regex(@"^\s+installing (.+?)(?: \(.*\))?(?: with winget| from its official download)?(?:\.\.\.|\.)?$");
+
+  // The build tool a build-ssx.ps1 line says it's installing (CMake, Ninja, LLVM, Visual Studio's
+  // Build Tools), or null: it can take many minutes and Windows asks for permission (UAC), so the
+  // build tools step says which one.
+  internal static string ToolOf(string text) {
+    Match m = ToolLine.Match(text);
+    if (!m.Success) return null;
+    string name = m.Groups[1].Value;
+    if (name == "Kitware.CMake" || name == "cmake") return "CMake";
+    if (name == "Ninja-build.Ninja" || name == "ninja") return "Ninja";
+    if (name == "LLVM.LLVM") return "LLVM";
+    return name;
+  }
 
   readonly StepRail rail = new StepRail();
   readonly Panel[] pages = new Panel[4];
@@ -961,6 +970,8 @@ class InstallerForm : Form {
   readonly StringBuilder pendingLog = new StringBuilder();
   int stage;
   float stageFrac;
+  // The build tool being installed in the build tools step (ToolOf), for the status line.
+  string tool;
   Stopwatch clock = new Stopwatch();
   Process buildProcess;
   bool running, failed, cancelled, shortcutMade;
@@ -1532,7 +1543,7 @@ class InstallerForm : Form {
     string iso = isoField.Box.Text.Trim();
     string[] dlc = dlcFiles.ToArray();
     string titleUpdate = titleUpdateFile;
-    lock (sync) { stage = 0; stageFrac = 0; pendingLog.Length = 0; }
+    lock (sync) { stage = 0; stageFrac = 0; tool = null; pendingLog.Length = 0; }
     running = true;
     failed = cancelled = false;
     logBox.Clear();
@@ -1643,6 +1654,8 @@ class InstallerForm : Form {
         if (s > stage) { stage = s; stageFrac = 0; }
         return;
       }
+      // "  cmake: found", "  clang: C:\...\clang.exe": past that tool.
+      if (stage == 2) tool = ToolOf(line) ?? (Regex.IsMatch(line, @"^\s+(.+: found|clang: .+)$") ? null : tool);
       Match m = NinjaStep.Match(line);
       if (m.Success && (stage == 4 || stage == 5)) {
         float total = float.Parse(m.Groups[2].Value);
@@ -1665,11 +1678,13 @@ class InstallerForm : Form {
     string text;
     int s;
     float frac;
+    string installing;
     lock (sync) {
       text = pendingLog.ToString();
       pendingLog.Length = 0;
       s = stage;
       frac = stageFrac;
+      installing = tool;
     }
     if (text.Length > 0) {
       if (logBox.TextLength > 600000) logBox.Text = logBox.Text.Substring(300000);
@@ -1680,9 +1695,9 @@ class InstallerForm : Form {
       bar.Value = Math.Max(bar.Value, value);
       percentLabel.Text = (int)(bar.Value * 100) + "%";
       stageList.Current = s;
-      installStatus.Text = Stages[s] + "..." +
-          (s == 2 ? "  Windows may ask for administrator permission." :
-           s == 5 ? "  This is the longest step." : "");
+      installStatus.Text = s == 2 && installing != null ? "Installing " + installing + ": Windows may ask for permission." :
+          Stages[s] + "..." + (s == 2 ? "  Windows may ask for administrator permission." :
+                               s == 5 ? "  This is the longest step." : "");
     }
     TimeSpan t = clock.Elapsed;
     elapsedLabel.Text = "Elapsed " + (int)t.TotalMinutes + ":" + t.Seconds.ToString("00");
