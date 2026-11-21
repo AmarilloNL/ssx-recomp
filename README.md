@@ -435,6 +435,8 @@ The game is playable and is being tested by playing through the whole World Tour
 <summary><b>✅ Fixed so far</b></summary>
 <br>
 
+- ✅ After the build tools change (a newer LLVM, or another Visual Studio installed), the next update
+  builds the game from scratch once instead of mixing files from both (1.9.2)
 - ✅ With No rewinds, the rewind counter shows 0; a tidier setup, whose desktop shortcut box is only
   ticked on the first install, so updating no longer moves your shortcut to that folder (1.9.1)
 - ✅ Cheats, second round: infinite boost runs down but never empties (Tricky starts as normal),
