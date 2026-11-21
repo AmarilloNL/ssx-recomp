@@ -1666,8 +1666,9 @@ class InstallerForm : Form {
     }
   }
 
-  // Whether Windows' permission prompt (UAC) is open: consent.exe shows it, and its name is visible
-  // to programs that aren't elevated.
+  // Whether Windows' permission prompt (UAC) is open: consent.exe shows it (checked on Windows 11 26200),
+  // and its name is visible to programs that aren't elevated. Best effort: Windows doesn't promise that
+  // name, and without it the step just shows its usual text.
   internal static bool UacPromptOpen() {
     Process[] found = Process.GetProcessesByName("consent");
     foreach (Process p in found) p.Dispose();
