@@ -30,7 +30,7 @@ Settings
        Snowflakes  how many snowflakes you have on every drop
        Cheats    infinite boost; Tricky or Super Tricky the whole ride, or no Tricky;
                  infinite credits (your own credits are never spent) or +1,000,000;
-                 infinite rewinds; wingsuit lift; one switch each for the headlamp
+                 infinite rewinds or none; wingsuit lift; one switch each for the headlamp
                  and pulse goggles batteries, the wingsuit, armour and ice axes
                  durability, oxygen tanks and cold protection;
                  never lose a combo (a wipeout banks it) or the multiplier;

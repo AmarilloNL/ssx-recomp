@@ -26,6 +26,7 @@
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_boost, false, "SSX", "Cheat: boost never runs out");
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_credits, false, "SSX", "Cheat: buying costs nothing, the stores show 9,999,999");
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_rewinds, false, "SSX", "Cheat: rewinds are never used up");
+REXCVAR_DEFINE_BOOL(ssx_cheat_no_rewinds, false, "SSX", "Cheat: rewinds can't be used");
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_lift, false, "SSX", "Cheat: a wingsuit's lift never fades during a flight");
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_headlamp, false, "SSX", "Cheat: the headlamp's battery never runs out");
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_goggles, false, "SSX", "Cheat: the pulse goggles' battery never runs out");
@@ -67,6 +68,21 @@ struct ScopedSwitch {
 void StoreFloat(uint8_t* base, uint32_t field, uint32_t bits) {
   if (field) REX_STORE_U32(field, bits);
 }
+
+float LoadFloat(uint8_t* base, uint32_t field) {
+  const uint32_t bits = REX_LOAD_U32(field);
+  float f;
+  std::memcpy(&f, &bits, 4);
+  return f;
+}
+
+uint32_t FloatBits(float f) {
+  uint32_t bits;
+  std::memcpy(&bits, &f, 4);
+  return bits;
+}
+
+constexpr float kBoostFloor = 0.05f;  // infinite boost: the least boost left, a part of full
 }  // namespace
 
 REX_EXTERN(SSX_FN_BOOST_UPDATE_IMP);
@@ -93,9 +109,16 @@ REX_HOOK_RAW(SSX_FN_BOOST_UPDATE) {
     }
   }
   if (REXCVAR_GET(ssx_cheat_infinite_boost)) {
-    const uint32_t tuning = REX_LOAD_U32(self + 76);
-    if (tuning) StoreFloat(base, REX_LOAD_U32(self + 148), REX_LOAD_U32(tuning + 540));  // full boost
-    StoreFloat(base, REX_LOAD_U32(self + 152), 0x3F800000u);  // 1.0f: the HUD's meter full too
+    // Boost is used and filled as normal (so tricks and flare start Tricky as usual), but never drops
+    // below a sliver: boosting never stops, and the end of Tricky doesn't leave a full meter.
+    const uint32_t tuning = REX_LOAD_U32(self + 76), raw = REX_LOAD_U32(self + 148), meter = REX_LOAD_U32(self + 152);
+    if (tuning && raw && meter) {
+      const float floor = kBoostFloor * LoadFloat(base, tuning + 540);
+      if (LoadFloat(base, raw) < floor) {
+        StoreFloat(base, raw, FloatBits(floor));
+        StoreFloat(base, meter, FloatBits(kBoostFloor));  // the HUD's meter, 0 to 1
+      }
+    }
   }
 }
 
@@ -159,27 +182,24 @@ REX_HOOK_RAW(SSX_FN_USE_REWIND) {
   SSX_FN_USE_REWIND_IMP(ctx, base);
 }
 
+// No rewinds: the game's "can the rider rewind now?" check always answers no, as it does when a drop's
+// rewinds are used up. LB still starts the slow-down that comes before a rewind (time dilation); only the
+// rewind itself doesn't follow.
+REX_EXTERN(SSX_FN_CAN_REWIND_IMP);
+REX_HOOK_RAW(SSX_FN_CAN_REWIND) {
+  SSX_FN_CAN_REWIND_IMP(ctx, base);
+  if (REXCVAR_GET(ssx_cheat_no_rewinds)) ctx.r3.u64 = 0;
+}
+
 // Infinite gear: the rider's armour, oxygen (and the tank's), the wingsuit's and ice axes' effectiveness and
 // the headlamp and pulse goggles batteries are stats from 0 to 1 that the game takes off directly (a hit, a
-// frame of breathing, flying or light); right after each frame's HUD update the ones with their cheat on are
-// full again. -1 means not in use (between rides): left alone.
-// Infinite lift (below) leaves one frame of flight on the wingsuit meter (232, read only by the HUD and
-// the rewind snapshot): it's cleared before the HUD shows it, so the bar stays full.
-REX_EXTERN(SSX_FN_HUD_UPDATE_IMP);
-REX_HOOK_RAW(SSX_FN_HUD_UPDATE) {
-  const uint32_t hud = ctx.r3.u32;
-  if (const uint32_t stats = REX_LOAD_U32(hud + 144); stats && REXCVAR_GET(ssx_cheat_infinite_lift)) {
-    const uint32_t meter = REX_LOAD_U32(stats + (232 + 1) * 4);  // FLT_WingsuitUsePercentage
-    if (meter) {
-      const uint32_t bits = REX_LOAD_U32(meter);
-      float used;
-      std::memcpy(&used, &bits, 4);
-      if (used > 0.0f && used <= 1.0f) REX_STORE_U32(meter, 0);  // 0.0f
-    }
-  }
-  SSX_FN_HUD_UPDATE_IMP(ctx, base);
-  const uint32_t stats = REX_LOAD_U32(hud + 144);
-  if (!stats) return;
+// frame of breathing, flying, digging in or light); right before each frame's HUD update the ones with their
+// cheat on are full again, so the meters never show the wear of the frame before. -1 means not in use
+// (between rides): left alone.
+// With infinite lift (below) the wingsuit meter (232, read only by the HUD and the rewind snapshot) stays at 0;
+// it's also cleared here before the HUD shows it, so the bar stays full.
+namespace {
+void TopUpGear(uint8_t* base, uint32_t stats) {
   const struct {
     uint32_t id;
     bool on;
@@ -196,11 +216,23 @@ REX_HOOK_RAW(SSX_FN_HUD_UPDATE) {
     if (!on) continue;
     const uint32_t value = REX_LOAD_U32(stats + (id + 1) * 4);
     if (!value) continue;
-    const uint32_t bits = REX_LOAD_U32(value);
-    float level;
-    std::memcpy(&level, &bits, 4);
+    const float level = LoadFloat(base, value);
     if (level >= 0.0f && level < 1.0f) REX_STORE_U32(value, 0x3F800000u);  // 1.0f
   }
+}
+}  // namespace
+
+REX_EXTERN(SSX_FN_HUD_UPDATE_IMP);
+REX_HOOK_RAW(SSX_FN_HUD_UPDATE) {
+  if (const uint32_t stats = REX_LOAD_U32(ctx.r3.u32 + 144)) {
+    TopUpGear(base, stats);
+    if (const uint32_t meter = REX_LOAD_U32(stats + (232 + 1) * 4);  // FLT_WingsuitUsePercentage
+        meter && REXCVAR_GET(ssx_cheat_infinite_lift)) {
+      const float used = LoadFloat(base, meter);
+      if (used > 0.0f && used <= 1.0f) REX_STORE_U32(meter, 0);  // 0.0f
+    }
+  }
+  SSX_FN_HUD_UPDATE_IMP(ctx, base);
 }
 
 // ...and the cold: the rider's core temperature can't go above a maximum that drops with the cold taken
@@ -291,23 +323,58 @@ REX_HOOK_RAW(SSX_FN_GEAR_STAT) {
   if (full && (ctx.r3.u32 & 0xFF) < kFullPoints) ctx.r3.u64 = kFullPoints;
 }
 
-// Infinite lift: while the flight node runs with the cheat on, the time flown it stores goes back to 0, so
-// each frame of a flight flies like its first (the meter: see the HUD update above).
+// Infinite lift: the flight node reads its three time curves at the share of the flight flown so far (from 0
+// at the start; the flight ends near 1), and publishes that share as the wingsuit meter. With the cheat on the
+// curves are read at the start of a flight every frame, so the meter stays at 0 too (as when the time flown was
+// held at 0 before, see the HUD update above for the bar), and the time flown itself is held at half the
+// flight (scaled back each frame by the share the node had worked out), so the flight never ends either way.
+// Holding the time at 0, as before, also stopped the steering.
 namespace {
-thread_local uint32_t flight_time_port = 0;
-}
+constexpr float kLiftHold = 0.5f;  // the share of the flight the time flown is held at
+
+struct Flight {
+  uint32_t time_port = 0;
+  uint32_t curves[3] = {};
+  uint32_t time = 0;     // the time flown's address, once the node has set it this frame
+  float share = -1.0f;   // the share of the flight the node worked out this frame
+};
+thread_local Flight* flight = nullptr;  // while the flight node runs with the cheat on
+}  // namespace
 
 REX_EXTERN(SSX_FN_WING_FLIGHT_IMP);
 REX_HOOK_RAW(SSX_FN_WING_FLIGHT) {
   const uint32_t ports = REX_LOAD_U32(ctx.r4.u32 + 48);
-  flight_time_port = REXCVAR_GET(ssx_cheat_infinite_lift) && ports ? REX_LOAD_U32(ports + 216) : 0;
+  if (!ports || !REXCVAR_GET(ssx_cheat_infinite_lift)) {
+    SSX_FN_WING_FLIGHT_IMP(ctx, base);
+    return;
+  }
+  Flight f;
+  f.time_port = REX_LOAD_U32(ports + 216);
+  for (uint32_t i = 0; i < 3; ++i) f.curves[i] = REX_LOAD_U32(ports + 192 + i * 4);
+  flight = &f;
   SSX_FN_WING_FLIGHT_IMP(ctx, base);
-  flight_time_port = 0;
+  flight = nullptr;
+  if (f.time && f.share > kLiftHold) {
+    StoreFloat(base, f.time, FloatBits(LoadFloat(base, f.time) * (kLiftHold / f.share)));
+  }
 }
 
 REX_EXTERN(SSX_FN_GRAPH_SET_FLOAT_IMP);
 REX_HOOK_RAW(SSX_FN_GRAPH_SET_FLOAT) {
-  const bool flight_time = flight_time_port && ctx.r3.u32 == flight_time_port;
+  const uint32_t port = ctx.r3.u32;
   SSX_FN_GRAPH_SET_FLOAT_IMP(ctx, base);
-  if (flight_time) REX_STORE_U32(ctx.r3.u32, 0);  // 0.0f
+  if (flight && port && port == flight->time_port) flight->time = ctx.r3.u32;
+}
+
+REX_EXTERN(SSX_FN_CURVE_EVAL_IMP);
+REX_HOOK_RAW(SSX_FN_CURVE_EVAL) {
+  if (flight && ctx.r5.u32) {
+    const uint32_t curve = ctx.r4.u32;
+    if (curve && (curve == flight->curves[0] || curve == flight->curves[1] || curve == flight->curves[2])) {
+      const float share = LoadFloat(base, ctx.r5.u32);
+      if (share > flight->share) flight->share = share;
+      for (uint32_t i = 0; i < 4; ++i) REX_STORE_U32(ctx.r5.u32 + i * 4, 0);  // the point: the flight's start
+    }
+  }
+  SSX_FN_CURVE_EVAL_IMP(ctx, base);
 }

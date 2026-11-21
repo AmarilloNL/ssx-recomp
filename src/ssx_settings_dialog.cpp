@@ -351,9 +351,11 @@ bool SsxSettingsDialog::Combo(const char* label, const char* cvar, const Choice*
   return changed;
 }
 
-void SsxSettingsDialog::Checkbox(const char* label, const char* cvar) {
+bool SsxSettingsDialog::Checkbox(const char* label, const char* cvar) {
   bool value = rex::cvar::GetFlagByName(cvar) == "true";
-  if (ImGui::Checkbox(label, &value)) Set(cvar, value ? "true" : "false");
+  if (!ImGui::Checkbox(label, &value)) return false;
+  Set(cvar, value ? "true" : "false");
+  return true;
 }
 
 void SsxSettingsDialog::DrawFps() {
@@ -664,11 +666,12 @@ void SsxSettingsDialog::DrawSnowflakesTab() {
   ImGui::EndTable();
 }
 
-// Cheats (issue #21, ssx_cheats.cpp). Most apply at once; the outfit ones (max gear, big head and hands,
-// glowing) from the next ride. Only what is bought and the credits given end up in the save.
+// Cheats (issue #21, ssx_cheats.cpp). All apply at once except max gear stats, which the game reads when a
+// ride starts. Only what is bought and the credits given end up in the save.
 void SsxSettingsDialog::DrawCheatsTab() {
   if (!BeginRows("##cheats")) return;
-  Row("Infinite boost", "Boost never runs out. Tricky doesn't start from tricks while it's on.");
+  Row("Infinite boost",
+      "Boost never runs out: the meter goes down as you boost, but never empties. Tricky starts as normal.");
   Checkbox("##cheat_boost", "ssx_cheat_infinite_boost");
   Row("Tricky", "Always Tricky stays in Tricky (never Super Tricky). Never: boost without Tricky.");
   Combo("##cheat_tricky", "ssx_cheat_tricky", kTrickyCheats, std::size(kTrickyCheats));
@@ -685,7 +688,15 @@ void SsxSettingsDialog::DrawCheatsTab() {
     ImGui::TextDisabled("added %dx", given);
   }
   Row("Infinite rewinds", "Rewinds (LB) are never used up, also where a drop gives only a few.");
-  Checkbox("##cheat_rewinds", "ssx_cheat_infinite_rewinds");
+  if (Checkbox("##cheat_rewinds", "ssx_cheat_infinite_rewinds") &&
+      rex::cvar::GetFlagByName("ssx_cheat_infinite_rewinds") == "true") {
+    Set("ssx_cheat_no_rewinds", "false");
+  }
+  Row("No rewinds", "As if every drop's rewinds were used up: LB still slows time down, but doesn't rewind.");
+  if (Checkbox("##cheat_no_rewinds", "ssx_cheat_no_rewinds") &&
+      rex::cvar::GetFlagByName("ssx_cheat_no_rewinds") == "true") {
+    Set("ssx_cheat_infinite_rewinds", "false");
+  }
   Row("Infinite lift (wingsuits)", "A wingsuit flight keeps its lift, and the wingsuit meter stays full.");
   Checkbox("##cheat_lift", "ssx_cheat_infinite_lift");
   Row("Infinite battery life (headlamps)", "The headlamp never goes dark.");
@@ -708,11 +719,11 @@ void SsxSettingsDialog::DrawCheatsTab() {
   Checkbox("##cheat_multiplier", "ssx_cheat_keep_multiplier");
   Row("Max gear stats", "From your next ride: board, wingsuit and other gear at their best.");
   Checkbox("##cheat_max_gear", "ssx_cheat_max_gear");
-  Row("Big head mode", "From your next ride, like the suits with that perk.");
+  Row("Big head mode", "Like the suits with that perk.");
   Checkbox("##cheat_big_head", "ssx_cheat_big_head");
-  Row("Big hands mode", "From your next ride, like the suits with that perk.");
+  Row("Big hands mode", "Like the suits with that perk.");
   Checkbox("##cheat_big_hands", "ssx_cheat_big_hands");
-  Row("Glowing suit", "From your next ride: your suit's glowing parts light up.");
+  Row("Glowing suit", "Your suit's glowing parts light up.");
   Checkbox("##cheat_glowing", "ssx_cheat_glowing");
   ImGui::EndTable();
   ImGui::Spacing();
