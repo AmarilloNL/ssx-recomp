@@ -33,6 +33,20 @@ if (Test-Path $cache) {
         Remove-Item $build -Recurse -Force
     }
 }
+# The compiler and the Visual Studio C++ tools that built the folder. When they change (a newer LLVM, or
+# Visual Studio 2026 installed next to 2022), an update rebuilds only the changed files with the new ones
+# and links them with the old: start it over, once, so the whole game comes from one set of tools.
+$tools = "$build\ssx-tools.txt"
+$clangExe = if ($Clang) { $Clang } else { 'clang' }
+$toolset = "$((& $clangExe --version 2>$null) | Select-Object -First 1) | MSVC $env:VCToolsVersion | SDK $env:WindowsSDKVersion"
+if ((Test-Path $tools) -and (Get-Content $tools -Raw).Trim() -ne $toolset) {
+    Write-Host "  The build tools changed since the last build: building from scratch once."
+    Write-Host "    was: $((Get-Content $tools -Raw).Trim())"
+    Write-Host "    now: $toolset"
+    Remove-Item $build -Recurse -Force
+}
+New-Item -ItemType Directory $build -Force | Out-Null
+Set-Content $tools $toolset -Encoding ascii
 Push-Location $root
 # The recompiled sources are only added to the build if codegen output exists at configure
 # time, so on a fresh tree: configure, run codegen, then configure again to pick them up.
