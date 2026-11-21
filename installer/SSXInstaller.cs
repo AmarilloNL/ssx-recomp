@@ -972,6 +972,8 @@ class InstallerForm : Form {
   float stageFrac;
   // The build tool being installed in the build tools step (ToolOf), for the status line.
   string tool;
+  int uacCheck;
+  bool uacOpen;
   Stopwatch clock = new Stopwatch();
   Process buildProcess;
   bool running, failed, cancelled, shortcutMade;
@@ -1664,6 +1666,14 @@ class InstallerForm : Form {
     }
   }
 
+  // Whether Windows' permission prompt (UAC) is open: consent.exe shows it, and its name is visible
+  // to programs that aren't elevated.
+  internal static bool UacPromptOpen() {
+    Process[] found = Process.GetProcessesByName("consent");
+    foreach (Process p in found) p.Dispose();
+    return found.Length > 0;
+  }
+
   internal static int StageOf(string text) {
     if (text.StartsWith("Unpacking the SSX")) return 0;
     if (text.StartsWith("Select your SSX")) return 1;
@@ -1695,7 +1705,11 @@ class InstallerForm : Form {
       bar.Value = Math.Max(bar.Value, value);
       percentLabel.Text = (int)(bar.Value * 100) + "%";
       stageList.Current = s;
-      installStatus.Text = s == 2 && installing != null ? "Installing " + installing + ": Windows may ask for permission." :
+      // Windows' permission prompt (UAC) for a build tool's installer can open minimized in the
+      // taskbar, and the step waits for it: say so while it's open (checked about once a second).
+      if (s == 2 && ++uacCheck % 12 == 0) uacOpen = UacPromptOpen();
+      installStatus.Text = s == 2 && uacOpen ? "Windows is asking for administrator permission: allow it (look in the taskbar)." :
+          s == 2 && installing != null ? "Installing " + installing + ": Windows may ask for permission." :
           Stages[s] + "..." + (s == 2 ? "  Windows may ask for administrator permission." :
                                s == 5 ? "  This is the longest step." : "");
     }
