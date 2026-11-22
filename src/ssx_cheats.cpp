@@ -24,7 +24,7 @@
 #include "ssx_guest.h"
 
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_boost, false, "SSX", "Cheat: boost never runs out");
-REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_credits, false, "SSX", "Cheat: buying costs nothing, the stores show 9,999,999");
+REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_credits, false, "SSX", "Cheat: everything is free, your credits stay as they are");
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_rewinds, false, "SSX", "Cheat: rewinds are never used up");
 REXCVAR_DEFINE_BOOL(ssx_cheat_no_rewinds, false, "SSX", "Cheat: rewinds can't be used");
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_lift, false, "SSX", "Cheat: a wingsuit's lift never fades during a flight");
@@ -123,11 +123,13 @@ REX_HOOK_RAW(SSX_FN_BOOST_UPDATE) {
   }
 }
 
-// Infinite credits. Every change to the profile's credits goes through one function (a purchase adds a
+// Everything is free. Every change to the profile's credits goes through one function (a purchase adds a
 // negative amount), which also updates the credits the menus show: with the cheat on, a purchase adds
 // nothing. The menus and stores read the credits through a getter that reports at least 9,999,999, so
-// everything is affordable; adding reads the profile itself, so the saved credits stay the real ones
-// (and rewards still add to them).
+// everything is affordable, except the reads that put the credits on screen (SSX_CREDITS_SHOWN_*):
+// those get the real ones, so the credits shown don't change. The store checks a price against the credits
+// shown, so with the cheat on that check always finds enough. Adding reads the profile itself, so the saved
+// credits stay the real ones (and rewards still add to them).
 //
 // +1,000,000 credits (a button in F1 > Cheats) is a gift that stays: the next time the game reads the credits
 // (on its own thread), the profile gets it through the game's own add, like a reward, and the menus their
@@ -146,10 +148,20 @@ REX_HOOK_RAW(SSX_FN_CHANGE_CREDITS) {
   SSX_FN_CHANGE_CREDITS_IMP(ctx, base);
 }
 
+REX_EXTERN(SSX_FN_STORE_CHECK_CREDITS_IMP);
+REX_HOOK_RAW(SSX_FN_STORE_CHECK_CREDITS) {
+  if (REXCVAR_GET(ssx_cheat_infinite_credits)) {
+    ctx.r3.u64 = 0;  // enough
+    return;
+  }
+  SSX_FN_STORE_CHECK_CREDITS_IMP(ctx, base);
+}
+
 REX_EXTERN(SSX_FN_GET_CREDITS_IMP);
 REX_EXTERN(SSX_FN_ADD_CREDITS);
 REX_EXTERN(SSX_FN_MENU_SET_CREDITS);
 REX_HOOK_RAW(SSX_FN_GET_CREDITS) {
+  const uint32_t caller = uint32_t(ctx.lr);
   const int gifts = credit_gifts.exchange(0);
   const PPCContext saved = ctx;
   ctx.r1.u32 = saved.r1.u32 - 256;  // a frame of our own below the caller's
@@ -161,12 +173,15 @@ REX_HOOK_RAW(SSX_FN_GET_CREDITS) {
   }
   ctx = saved;
   SSX_FN_GET_CREDITS_IMP(ctx, base);
-  if (REXCVAR_GET(ssx_cheat_infinite_credits) && int32_t(ctx.r3.u32) < kCheatCredits) ctx.r3.u64 = kCheatCredits;
+  const uint32_t credits = ctx.r3.u32;
+  const bool shown =
+      caller == SSX_CREDITS_SHOWN_REFRESH || caller == SSX_CREDITS_SHOWN_CHANGE || caller == SSX_CREDITS_SHOWN_TOP;
+  if (REXCVAR_GET(ssx_cheat_infinite_credits) && !shown && int32_t(credits) < kCheatCredits) ctx.r3.u64 = kCheatCredits;
   if (const uint32_t menus = gifts ? REX_LOAD_U32(SSX_MENU_DATA) : 0) {
     const PPCContext got = ctx;
     ctx.r1.u32 = got.r1.u32 - 256;
     const uint32_t value = ctx.r1.u32 + 128;
-    REX_STORE_U32(value, got.r3.u32);
+    REX_STORE_U32(value, credits);
     ctx.r3.u64 = menus;
     ctx.r4.u64 = SSX_MENU_ID_CREDITS;
     ctx.r5.u64 = value;

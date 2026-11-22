@@ -99,6 +99,31 @@
 #define SSX_FN_MENU_SET_CREDITS SSX_GUEST(sub_8239FE40, sub_8256A820)
 #define SSX_MENU_DATA SSX_GUEST(0x838AB660u, 0x8388F3F0u)
 #define SSX_MENU_ID_CREDITS SSX_GUEST(552u, 571u)
+// The getter's callers that put the credits on screen (their return addresses), each handing the value to the
+// menus as above: the menus' refresh, the change above after a purchase, and (title update only) the update
+// of the credits shown at the top of the menus; the disc's adds the credits still to show to those shown,
+// without reading the profile.
+#define SSX_CREDITS_SHOWN_REFRESH SSX_GUEST(0x82393A98u, 0x8239BCE8u)
+#define SSX_CREDITS_SHOWN_CHANGE SSX_GUEST(0x82402078u, 0x823DB5D8u)
+#define SSX_CREDITS_SHOWN_TOP SSX_GUEST(0u, 0x82585228u)
+// The store's check before a purchase (r3 this, r4 the items, r5 the one bought; answers r3 1 when there
+// aren't enough credits, after it has put up the "need more credits" message): it compares the price with
+// the credits shown in the menus, not the profile's.
+#define SSX_FN_STORE_CHECK_CREDITS SSX_GUEST(sub_825F6FC0, sub_825C4868)
+#define SSX_FN_STORE_CHECK_CREDITS_IMP SSX_GUEST(__imp__sub_825F6FC0, __imp__sub_825C4868)
+
+// The equipment menus' item lists, 172 bytes an item: [+100] the level, [+108] and [+116] the game's order
+// (highest first: a rider's or board's rank, then rarity), [+120] a gear item's type (1 wingsuit, 2 ice axes,
+// 3 armour, 6 headlamp, ...). The first builds a category's owned row and the store's (r4 the category, 2 the
+// gear; for gear it then puts the best item of each type first, the types most useful on the drop first);
+// the second updates a category (r4 the same) and sorts its full list, the one "View More" shows, with
+// only the game's order. Both sort with the third (begin r3, end r4, compare r5), used only for these lists.
+#define SSX_FN_EQUIP_LISTS_BUILD SSX_GUEST(sub_8248EB80, sub_82457CF8)
+#define SSX_FN_EQUIP_LISTS_BUILD_IMP SSX_GUEST(__imp__sub_8248EB80, __imp__sub_82457CF8)
+#define SSX_FN_EQUIP_LISTS_UPDATE SSX_GUEST(sub_824943F0, sub_8245D568)
+#define SSX_FN_EQUIP_LISTS_UPDATE_IMP SSX_GUEST(__imp__sub_824943F0, __imp__sub_8245D568)
+#define SSX_FN_EQUIP_LIST_SORT SSX_GUEST(sub_8249BBA8, sub_82464E50)
+#define SSX_FN_EQUIP_LIST_SORT_IMP SSX_GUEST(__imp__sub_8249BBA8, __imp__sub_82464E50)
 // The rider's trick scoring (this r3; same fields in both versions): [r3+264] points at the combo's trick
 // count, [r3+280] at its points, [r3+596] at the multiplier level. Each frame the scoring update first
 // checks for a wipeout (the first, r4 a flag it sets): when [r3+300] and [r3+308] are set it loses the

@@ -60,8 +60,9 @@ code runs natively, and its Xbox 360 graphics are drawn with Direct3D 12 (on Lin
 | 🎵 **Your own music** | your music folders as playlists in the game's Music menu, remixed live as you ride ([how](#your-music)) |
 | ❄️ **Snowflake tracker** | how many snowflakes you have on every drop, per range and peak (settings → **Snowflakes**) |
 | 🏂 **Boost meter in freeride** | the boost and tricky meters while you freeride (settings → **Display**) |
+| 🎒 **Gear by type** | View More lists your gear by type, the highest level first (settings → **Display**) |
 | 🏅 **Online-only badges** | the badges that need EA's servers, shown as earned (settings → **Profile**) |
-| 🎮 **Cheats** | infinite boost; Tricky or Super Tricky the whole ride, or no Tricky at all; infinite credits (your own are never spent) or +1,000,000 credits; infinite rewinds or none; infinite wingsuit lift; armour, oxygen, warmth, the wingsuit, ice axes and batteries that never run out (one switch each); never lose a combo or the multiplier; max gear stats; big head and hands; a glowing suit; ride uphill: no push back when you leave the course (settings → **Cheats**) |
+| 🎮 **Cheats** | infinite boost; Tricky or Super Tricky the whole ride, or no Tricky at all; everything is free (your own credits stay as they are) or +1,000,000 credits; infinite rewinds or none; infinite wingsuit lift; armour, oxygen, warmth, the wingsuit, ice axes and batteries that never run out (one switch each); never lose a combo or the multiplier; max gear stats; big head and hands; a glowing suit; ride uphill: no push back when you leave the course (settings → **Cheats**) |
 
 <a id="installing"></a>
 
@@ -435,6 +436,8 @@ The game is playable and is being tested by playing through the whole World Tour
 <summary><b>✅ Fixed so far</b></summary>
 <br>
 
+- ✅ View More lists your gear by type, then the highest level first (#25); the credits cheat is now
+  Everything is free: the credits shown stay your own, and the store lets you buy anything (1.9.4)
 - ✅ Laptops with two GPUs (built-in graphics next to an NVIDIA or AMD card) run the game on the
   fast one (1.9.3)
 - ✅ After the build tools change (a newer LLVM, or another Visual Studio installed), the next update
