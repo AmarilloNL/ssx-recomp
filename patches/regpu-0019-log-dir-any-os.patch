@@ -1,0 +1,21 @@
+diff --git a/src/log.cpp b/src/log.cpp
+index 527926a..d7d3af1 100644
+--- a/src/log.cpp
++++ b/src/log.cpp
+@@ -22,13 +22,14 @@ const auto g_start = std::chrono::steady_clock::now();
+ std::deque<std::string> g_recent; // the last lines, for the debug server's log command
+ 
+ // REGPU_LOG_DIR: where the log file goes (FM4 port: a slow or removable drive stalled game threads on
+-// every write).
++// every write). Joined with "/", which Windows takes too (with "\\" Linux made a file named
++// "<folder>\regpu.log" beside the folder).
+ FILE* LogFile()
+ {
+     if (!g_logFile)
+     {
+         const char* dir = getenv("REGPU_LOG_DIR");
+-        g_logFile = fopen(dir && *dir ? (std::string(dir) + "\\regpu.log").c_str() : "regpu.log", "w");
++        g_logFile = fopen(dir && *dir ? (std::string(dir) + "/regpu.log").c_str() : "regpu.log", "w");
+     }
+     return g_logFile;
+ }
