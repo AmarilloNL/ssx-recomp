@@ -353,7 +353,8 @@ void MoveOldCaches(const std::filesystem::path& from, const std::filesystem::pat
     std::error_code ec;
     if (fs::equivalent(from, to, ec))
         return;
-    for (const char* name : { "shadercache", "pipelines.manifest", "pipelines.bin" })
+    // (Linux: also vkd3d-proton's pipeline cache, which it kept in the working folder too.)
+    for (const char* name : { "shadercache", "pipelines.manifest", "pipelines.bin", "vkd3d-proton.cache" })
     {
         const fs::path old = from / name, now = to / name;
         if (!fs::exists(old, ec) || fs::exists(now, ec))
@@ -512,6 +513,11 @@ X_STATUS ReGpuGraphicsSystem::SetupGuestGpu(rex::runtime::FunctionDispatcher* di
         std::error_code ec;
         std::filesystem::create_directories(config.userDir, ec);
         MoveOldCaches(rex::filesystem::GetExecutableFolder(), config.userDir);
+#ifndef _WIN32
+        // vkd3d-proton (D3D12 on Vulkan) writes its pipeline cache to the working folder unless told where.
+        if (!std::getenv("VKD3D_SHADER_CACHE_PATH"))
+            setenv("VKD3D_SHADER_CACHE_PATH", config.userDir.string().c_str(), 1);
+#endif
     }
     // regpu.log beside the game's own logs (logs next to ssx.exe), which a bug report takes.
     if (!std::getenv("REGPU_LOG_DIR"))
