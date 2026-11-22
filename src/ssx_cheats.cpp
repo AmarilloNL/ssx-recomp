@@ -43,6 +43,8 @@ REXCVAR_DEFINE_BOOL(ssx_cheat_big_head, false, "SSX", "Cheat: a big head");
 REXCVAR_DEFINE_BOOL(ssx_cheat_big_hands, false, "SSX", "Cheat: big hands");
 REXCVAR_DEFINE_BOOL(ssx_cheat_glowing, false, "SSX", "Cheat: a glowing suit");
 REXCVAR_DEFINE_BOOL(ssx_cheat_ride_uphill, false, "SSX", "Cheat: no push back when leaving the course");
+REXCVAR_DEFINE_BOOL(ssx_cheat_no_reverse_camera, false, "SSX",
+                    "Cheat: the avalanche drops use the normal camera behind the rider");
 REXCVAR_DEFINE_INT32(ssx_cheat_tricky, 0, "SSX",
                      "Cheat: 0 Tricky as normal, 1 always Tricky, 2 always Super Tricky, 3 never Tricky");
 
@@ -265,7 +267,41 @@ void TopUpGear(uint8_t* base, uint32_t stats) {
     if (level >= 0.0f && level < 1.0f) REX_STORE_U32(value, 0x3F800000u);  // 1.0f
   }
 }
+
+// No reverse camera. On the avalanche drops the camera looks back up the mountain: the camera node's
+// CameraType value is set to the reverse type (its CameraTypeReverse value, 2) when the drop starts.
+// We note where the node's two values are when the game first looks them up, and each frame of a ride
+// put the camera type back to the normal one (0) while it is the reverse one.
+constexpr uint32_t kReverseCameraType = 2;  // the camera's CameraTypeReverse value
+std::atomic<uint32_t> camera_node{0}, camera_type_at{0}, camera_reverse_at{0};
+
+void NormalCamera(uint8_t* base) {
+  if (!REXCVAR_GET(ssx_cheat_no_reverse_camera)) return;
+  const uint32_t type = camera_type_at, reverse = camera_reverse_at;
+  if (!type || !reverse) return;
+  const uint32_t reverse_type = REX_LOAD_U32(reverse);
+  if (reverse_type == kReverseCameraType && REX_LOAD_U32(type) == reverse_type) REX_STORE_U32(type, 0);
+}
 }  // namespace
+
+REX_EXTERN(SSX_FN_CAMERA_SETUP_IMP);
+REX_HOOK_RAW(SSX_FN_CAMERA_SETUP) {
+  const uint32_t node = ctx.r4.u32;
+  camera_type_at = 0;
+  camera_reverse_at = 0;
+  SSX_FN_CAMERA_SETUP_IMP(ctx, base);
+  camera_node = node;
+}
+
+REX_EXTERN(SSX_FN_ATTR_WRITABLE_IMP);
+REX_HOOK_RAW(SSX_FN_ATTR_WRITABLE) {
+  const uint32_t port = ctx.r4.u32;
+  SSX_FN_ATTR_WRITABLE_IMP(ctx, base);
+  const uint32_t node = camera_node;
+  if (!node || !port || !ctx.r3.u32) return;
+  if (port == REX_LOAD_U32(node + SSX_CAMERA_TYPE_PORT)) camera_type_at = ctx.r3.u32;
+  else if (port == REX_LOAD_U32(node + SSX_CAMERA_REVERSE_PORT)) camera_reverse_at = ctx.r3.u32;
+}
 
 REX_EXTERN(SSX_FN_HUD_UPDATE_IMP);
 REX_HOOK_RAW(SSX_FN_HUD_UPDATE) {
@@ -286,6 +322,7 @@ REX_HOOK_RAW(SSX_FN_HUD_UPDATE) {
   // unchanged.
   const uint32_t left = rewinds ? REX_LOAD_U32(rewinds) : 0;
   if (rewinds) REX_STORE_U32(rewinds, 0);
+  NormalCamera(base);
   SSX_FN_HUD_UPDATE_IMP(ctx, base);
   if (rewinds) REX_STORE_U32(rewinds, left);
 }
