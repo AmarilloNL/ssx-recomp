@@ -736,6 +736,10 @@ void SsxSettingsDialog::DrawCheatsTab() {
   Row("Ride uphill",
       "No invisible push back when you leave the course: ride back up past the start, or off its sides.");
   Checkbox("##cheat_uphill", "ssx_cheat_ride_uphill");
+  Row("No reverse camera",
+      "The avalanche drops use the normal camera behind you, instead of the one looking back up the "
+      "mountain. Turned off during a ride, it applies from the next one.");
+  Checkbox("##cheat_no_reverse", "ssx_cheat_no_reverse_camera");
   ImGui::EndTable();
   ImGui::Spacing();
   ImGui::TextDisabled("Turn a cheat off and the game plays as before. Your own credits are never spent.");

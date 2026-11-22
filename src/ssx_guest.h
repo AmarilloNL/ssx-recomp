@@ -88,6 +88,16 @@
 // time passes the tuning's limit (about a second), then sets state 8 and the time to 0.
 #define SSX_FN_REWIND_UPDATE SSX_GUEST(sub_82CF3428, sub_82CCE998)
 #define SSX_FN_REWIND_UPDATE_IMP SSX_GUEST(__imp__sub_82CF3428, __imp__sub_82CCE998)
+// The ride camera's setup, once a ride (node r4): its ports, among them CameraType (SSX_CAMERA_TYPE_PORT)
+// and CameraTypeReverse (SSX_CAMERA_REVERSE_PORT, the reverse camera's type).
+#define SSX_FN_CAMERA_SETUP SSX_GUEST(sub_82CB37D8, sub_82C8EBD8)
+#define SSX_FN_CAMERA_SETUP_IMP SSX_GUEST(__imp__sub_82CB37D8, __imp__sub_82C8EBD8)
+#define SSX_CAMERA_TYPE_PORT 60u
+#define SSX_CAMERA_REVERSE_PORT 132u
+// The behaviour graphs' values: the address of an instance's value for a port, made writable
+// (r3 the instance's values, r4 the port).
+#define SSX_FN_ATTR_WRITABLE SSX_GUEST(sub_831A58E8, sub_831825D0)
+#define SSX_FN_ATTR_WRITABLE_IMP SSX_GUEST(__imp__sub_831A58E8, __imp__sub_831825D0)
 // The in-ride HUD's update, once a frame (this r3): [this+144] is the rider's stats object, stat N's
 // value at *[stats + (N+1)*4] (N in the game's own sorted stat list, e.g. 148 FLT_Armour).
 #define SSX_FN_HUD_UPDATE SSX_GUEST(sub_824C8DB0, sub_82492D28)
