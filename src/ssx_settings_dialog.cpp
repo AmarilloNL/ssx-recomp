@@ -693,10 +693,16 @@ void SsxSettingsDialog::DrawCheatsTab() {
   if (Checkbox("##cheat_rewinds", "ssx_cheat_infinite_rewinds") &&
       rex::cvar::GetFlagByName("ssx_cheat_infinite_rewinds") == "true") {
     Set("ssx_cheat_no_rewinds", "false");
+    Set("ssx_cheat_slow_motion", "false");
   }
   Row("No rewinds", "As if every drop's rewinds were used up: LB still slows time down, but doesn't rewind.");
   if (Checkbox("##cheat_no_rewinds", "ssx_cheat_no_rewinds") &&
       rex::cvar::GetFlagByName("ssx_cheat_no_rewinds") == "true") {
+    Set("ssx_cheat_infinite_rewinds", "false");
+  }
+  Row("Slow motion", "Hold LB to slow time down for as long as you hold it. LB doesn't rewind then.");
+  if (Checkbox("##cheat_slow_motion", "ssx_cheat_slow_motion") &&
+      rex::cvar::GetFlagByName("ssx_cheat_slow_motion") == "true") {
     Set("ssx_cheat_infinite_rewinds", "false");
   }
   Row("Infinite lift (wingsuits)", "A wingsuit flight keeps its lift, and the wingsuit meter stays full.");

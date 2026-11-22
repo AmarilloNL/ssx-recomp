@@ -82,6 +82,12 @@
 // are infinite or left, or a rewind is still going on. Called by the rewind update when LB has started one.
 #define SSX_FN_CAN_REWIND SSX_GUEST(sub_82CF3028, sub_82CCE598)
 #define SSX_FN_CAN_REWIND_IMP SSX_GUEST(__imp__sub_82CF3028, __imp__sub_82CCE598)
+// ...and its update, once a frame (r3 the same component): a state ([r3+228]) and the time in it ([r3+232], a
+// float, 60 a second). LB (held: the byte [r3+128] points at when [[r3+124]] is set, else [r3+120]'s) starts
+// state 0; when the rider can't rewind, that leads to state 6, which slows time down along a curve until its
+// time passes the tuning's limit (about a second), then sets state 8 and the time to 0.
+#define SSX_FN_REWIND_UPDATE SSX_GUEST(sub_82CF3428, sub_82CCE998)
+#define SSX_FN_REWIND_UPDATE_IMP SSX_GUEST(__imp__sub_82CF3428, __imp__sub_82CCE998)
 // The in-ride HUD's update, once a frame (this r3): [this+144] is the rider's stats object, stat N's
 // value at *[stats + (N+1)*4] (N in the game's own sorted stat list, e.g. 148 FLT_Armour).
 #define SSX_FN_HUD_UPDATE SSX_GUEST(sub_824C8DB0, sub_82492D28)
