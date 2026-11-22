@@ -74,7 +74,8 @@
     "{install}/source/dist/SSX/ssx.toml"
   ],
   "start": {
-    "program": ["source/dist/SSX/ssx.exe", "ssx-recomp.exe"]
+    "program": ["ssx-recomp.exe"],
+    "args": ["--play"]
   },
   "config": [
     {
