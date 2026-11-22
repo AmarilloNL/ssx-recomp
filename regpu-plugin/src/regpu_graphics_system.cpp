@@ -353,8 +353,7 @@ void MoveOldCaches(const std::filesystem::path& from, const std::filesystem::pat
     std::error_code ec;
     if (fs::equivalent(from, to, ec))
         return;
-    // (Linux: also vkd3d-proton's pipeline cache, which it kept in the working folder too.)
-    for (const char* name : { "shadercache", "pipelines.manifest", "pipelines.bin", "vkd3d-proton.cache" })
+    for (const char* name : { "shadercache", "pipelines.manifest", "pipelines.bin" })
     {
         const fs::path old = from / name, now = to / name;
         if (!fs::exists(old, ec) || fs::exists(now, ec))
@@ -514,7 +513,8 @@ X_STATUS ReGpuGraphicsSystem::SetupGuestGpu(rex::runtime::FunctionDispatcher* di
         std::filesystem::create_directories(config.userDir, ec);
         MoveOldCaches(rex::filesystem::GetExecutableFolder(), config.userDir);
 #ifndef _WIN32
-        // vkd3d-proton (D3D12 on Vulkan) writes its pipeline cache to the working folder unless told where.
+        // vkd3d-proton (D3D12 on Vulkan) writes its pipeline cache to the working folder unless told where
+        // (then it names it vkd3d-proton.ssx.cache: an old vkd3d-proton.cache isn't moved, it would go unused).
         if (!std::getenv("VKD3D_SHADER_CACHE_PATH"))
             setenv("VKD3D_SHADER_CACHE_PATH", config.userDir.string().c_str(), 1);
 #endif
