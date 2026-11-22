@@ -3,16 +3,17 @@
   "format": 1,
   "name": "SSX",
   "repo": "AmarilloNL/ssx-recomp",
-  "min": "0.90.0-beta.51",
-  "game": {
-    "kind": "iso_or_folder",
-    "label": "Your copy of SSX for Xbox 360, from your own disc (serial EA-2413, the USA, Europe and Australia release): its disc image (.iso), or the extracted disc's folder with default.xex. Keep it where it is: the game reads it as it runs.",
-    "check": { "file": "default.xex", "xdvdfs": "default.xex" },
-    "dumps": [
-      { "name": "USA, Europe and Australia", "size": 7838695424, "crc32": "72791ccd" }
-    ]
-  },
+  "system": { "windows": { "version": "10" } },
   "inputs": [
+    {
+      "id": "game", "role": "game",
+      "label": "Your copy of SSX for Xbox 360, from your own disc (serial EA-2413, the USA, Europe and Australia release): its disc image (.iso), or the extracted disc's folder with default.xex. Keep it where it is: the game reads it as it runs.",
+      "formats": [{ "type": "file", "extensions": ["iso"] }, { "type": "folder" }],
+      "check": { "file": "default.xex", "xdvdfs": "default.xex" },
+      "dumps": [
+        { "name": "USA, Europe and Australia", "size": 7838695424, "crc32": "72791ccd" }
+      ]
+    },
     {
       "id": "titleupdate", "role": "update", "optional": true,
       "label": "Title update 0.0.3.2 (about 9 MB, in Content\\0000000000000000\\4541096D\\000B0000 on your Xbox 360; if there are two files, the larger one): the gear for levels 11 to 15",
@@ -47,13 +48,12 @@
   "prepare": {
     "program": ["ssx-recomp.exe"],
     "args": [
-      "--prepare", "--game", "{game}",
+      "--prepare", "--game", "{input:game}",
       "--title-update={input:titleupdate}",
       "--dlc={input:dlc-mounteddie}", "--dlc={input:dlc-presell}", "--dlc={input:dlc-japan}",
       "--dlc={input:dlc-eddie}", "--dlc={input:dlc-macboard}"
     ],
     "label": "Recompiling SSX for your PC from your disc (10 to 30 minutes the first time)",
-    "timeout": 7200,
     "options": [
       {
         "id": "vs_build_tools",
@@ -65,7 +65,6 @@
         "license": { "name": "Microsoft Visual Studio license terms", "url": "https://visualstudio.microsoft.com/license-terms/" }
       }
     ],
-    "version": "1.9.5",
     "done": ["{install}/source/dist/SSX/ssx.exe"]
   },
   "saves": [

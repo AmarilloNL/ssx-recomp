@@ -26,18 +26,13 @@ Remove-Item $zip, $id -ErrorAction SilentlyContinue
 if ($failed) { throw "compile failed" }
 
 # The release zip for RecompLauncher (recomplauncher.json, docs at recomplauncher.com): ssx-recomp.exe and
-# recomplauncher.json at its top. prepare.version is this version, so after an update the launcher runs
-# the build again (each release carries new source). Upload it next to ssx-recomp.exe.
+# recomplauncher.json at its top. The launcher runs the build again after every update (each release
+# carries new source). Upload it next to ssx-recomp.exe.
 $version = (Get-Item "$here\ssx-recomp.exe").VersionInfo.ProductVersion
-$json = [IO.File]::ReadAllText("$root\recomplauncher.json")
-$versionKey = '("version"\s*:\s*")[^"]*(")'  # prepare.version: the file's only "version"
-if ([regex]::Matches($json, $versionKey).Count -ne 1) { throw "recomplauncher.json needs exactly one `"version`" (prepare.version)" }
-$json = [regex]::Replace($json, $versionKey, "`${1}$version`${2}")
 $stage = Join-Path $env:TEMP "ssx-recomp-release"
 Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory $stage | Out-Null
-Copy-Item "$here\ssx-recomp.exe" $stage
-[IO.File]::WriteAllText("$stage\recomplauncher.json", $json, (New-Object Text.UTF8Encoding $false))
+Copy-Item "$here\ssx-recomp.exe", "$root\recomplauncher.json" $stage
 $release = "$here\ssx-recomp-v$version-Windows-x64.zip"
 Remove-Item $release -ErrorAction SilentlyContinue
 Compress-Archive "$stage\*" $release
