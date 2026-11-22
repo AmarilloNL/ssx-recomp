@@ -27,6 +27,7 @@ REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_boost, false, "SSX", "Cheat: boost never 
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_credits, false, "SSX", "Cheat: everything is free, your credits stay as they are");
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_rewinds, false, "SSX", "Cheat: rewinds are never used up");
 REXCVAR_DEFINE_BOOL(ssx_cheat_no_rewinds, false, "SSX", "Cheat: rewinds can't be used");
+REXCVAR_DEFINE_BOOL(ssx_cheat_slow_motion, false, "SSX", "Cheat: hold LB for slow motion (LB doesn't rewind)");
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_lift, false, "SSX", "Cheat: a wingsuit's lift never fades during a flight");
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_headlamp, false, "SSX", "Cheat: the headlamp's battery never runs out");
 REXCVAR_DEFINE_BOOL(ssx_cheat_infinite_goggles, false, "SSX", "Cheat: the pulse goggles' battery never runs out");
@@ -204,7 +205,35 @@ REX_HOOK_RAW(SSX_FN_USE_REWIND) {
 REX_EXTERN(SSX_FN_CAN_REWIND_IMP);
 REX_HOOK_RAW(SSX_FN_CAN_REWIND) {
   SSX_FN_CAN_REWIND_IMP(ctx, base);
-  if (REXCVAR_GET(ssx_cheat_no_rewinds)) ctx.r3.u64 = 0;
+  if (REXCVAR_GET(ssx_cheat_no_rewinds) || REXCVAR_GET(ssx_cheat_slow_motion)) ctx.r3.u64 = 0;
+}
+
+// Slow motion: LB doesn't rewind (as with No rewinds), so it starts the game's slow-down without a rewind
+// after it, the rewind update's state 6. While LB is held, the time in that state doesn't move on, so the
+// slow-down lasts; when LB is let go, it ends at once, the way the game ends it when that time runs out.
+namespace {
+constexpr uint32_t kRewindSlowDown = 6, kRewindSlowDownOver = 8;
+
+bool RewindButtonHeld(uint8_t* base, uint32_t rewind) {
+  const uint32_t which = REX_LOAD_U32(rewind + 124);
+  const uint32_t held = (which && REX_LOAD_U8(which)) ? REX_LOAD_U32(rewind + 128) : REX_LOAD_U32(rewind + 120);
+  return held && REX_LOAD_U8(held);
+}
+}  // namespace
+
+REX_EXTERN(SSX_FN_REWIND_UPDATE_IMP);
+REX_HOOK_RAW(SSX_FN_REWIND_UPDATE) {
+  const uint32_t self = ctx.r3.u32;
+  const uint32_t state = REX_LOAD_U32(self + 228), time = REX_LOAD_U32(self + 232);
+  SSX_FN_REWIND_UPDATE_IMP(ctx, base);
+  if (!REXCVAR_GET(ssx_cheat_slow_motion) || state != kRewindSlowDown) return;
+  if (RewindButtonHeld(base, self)) {
+    REX_STORE_U32(self + 228, kRewindSlowDown);  // also when its time just ran out
+    REX_STORE_U32(self + 232, time);
+  } else if (REX_LOAD_U32(self + 228) == kRewindSlowDown) {
+    REX_STORE_U32(self + 228, kRewindSlowDownOver);
+    REX_STORE_U32(self + 232, 0);  // 0.0f
+  }
 }
 
 // Infinite gear: the rider's armour, oxygen (and the tank's), the wingsuit's and ice axes' effectiveness and
@@ -248,10 +277,13 @@ REX_HOOK_RAW(SSX_FN_HUD_UPDATE) {
       const float used = LoadFloat(base, meter);
       if (used > 0.0f && used <= 1.0f) REX_STORE_U32(meter, 0);  // 0.0f
     }
-    if (REXCVAR_GET(ssx_cheat_no_rewinds)) rewinds = REX_LOAD_U32(stats + (246 + 1) * 4);  // INT_RewindCountCurrent
+    if (REXCVAR_GET(ssx_cheat_no_rewinds) || REXCVAR_GET(ssx_cheat_slow_motion)) {
+      rewinds = REX_LOAD_U32(stats + (246 + 1) * 4);  // INT_RewindCountCurrent
+    }
   }
-  // No rewinds: the HUD's rewind counter shows none left. Only while the HUD updates: the count is put
-  // back right after, so the rest of the game (behaviour graphs, the rewind snapshot) reads it unchanged.
+  // No rewinds and slow motion: the HUD's rewind counter shows none left. Only while the HUD updates: the
+  // count is put back right after, so the rest of the game (behaviour graphs, the rewind snapshot) reads it
+  // unchanged.
   const uint32_t left = rewinds ? REX_LOAD_U32(rewinds) : 0;
   if (rewinds) REX_STORE_U32(rewinds, 0);
   SSX_FN_HUD_UPDATE_IMP(ctx, base);
