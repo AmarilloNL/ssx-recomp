@@ -451,6 +451,8 @@ void SsxSettingsDialog::DrawDisplayTab() {
   Checkbox("##fps", "ssx_show_fps");
   Row("Boost meter in freeride", "Shows the score panel with the boost and tricky meters in freeride. From the next ride.");
   Checkbox("##freeride_hud", "ssx_freeride_hud");
+  Row("Gear by type", "View More lists your gear by type (wingsuits, armour, ...), then the highest level first.");
+  Checkbox("##sort_gear", "ssx_sort_gear");
   ImGui::EndTable();
 }
 
