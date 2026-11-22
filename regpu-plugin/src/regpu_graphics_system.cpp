@@ -23,6 +23,7 @@
 #endif
 
 #include <rex/cvar.h>
+#include <rex/filesystem.h>
 #include <rex/kernel/xboxkrnl/video.h>
 #include <rex/logging.h>
 #include <rex/runtime.h>
@@ -333,6 +334,33 @@ void SetDefaultSwitch(const char* name)
         regpu::driver::SetSwitch(name, true);
     }
 }
+
+// Up to 1.9.5 ReGPU kept its caches in the working folder, which is ssx.exe's folder for a start
+// from its shortcut, play.bat or RecompLauncher: moved from there once, so a warm cache stays warm.
+// What the new folder has already is kept; other working folders aren't searched.
+void MoveOldCaches(const std::filesystem::path& from, const std::filesystem::path& to)
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (fs::equivalent(from, to, ec))
+        return;
+    for (const char* name : { "shadercache", "pipelines.manifest", "pipelines.bin" })
+    {
+        const fs::path old = from / name, now = to / name;
+        if (!fs::exists(old, ec) || fs::exists(now, ec))
+            continue;
+        fs::rename(old, now, ec);
+        if (ec) // another drive (Documents elsewhere): copied, and the old one removed after
+        {
+            fs::copy(old, now, fs::copy_options::recursive, ec);
+            fs::remove_all(ec ? now : old, ec);
+        }
+        if (fs::exists(old, ec))
+            REXLOG_WARN("ReGPU: couldn't move {} to {}", old.string(), now.string());
+        else
+            REXLOG_INFO("ReGPU: moved {} to {}", old.string(), now.string());
+    }
+}
 } // namespace
 
 ReGpuGraphicsSystem::~ReGpuGraphicsSystem() { Shutdown(); }
@@ -398,12 +426,28 @@ X_STATUS ReGpuGraphicsSystem::SetupGuestGpu(rex::runtime::FunctionDispatcher* di
     config.vsync = Vsync();
     config.maxFps = TargetFps();
     config.windowTitle = L"SSX (ReGPU)";
-    // ReXGlue calls InitializeShaderStorage after this, so the cache root comes from its setting.
+    // ReGPU's caches (shadercache, pipelines.*) go in regpu in SSX's cache folder (userdata\cache in a
+    // portable install, Documents\ssx\cache otherwise, or --cache_root), never in the working folder
+    // (ReGPU's default): a start from another folder found no warm cache and left files there.
+    // ReXGlue calls InitializeShaderStorage only after this, but its runtime has the folder already.
     if (cacheRoot_.empty())
-        if (const std::string root = rex::cvar::GetFlagByName("cache_root"); !root.empty())
-            cacheRoot_ = root;
+        if (auto* runtime = rex::Runtime::instance())
+            cacheRoot_ = runtime->cache_root();
     if (!cacheRoot_.empty())
+    {
         config.userDir = cacheRoot_ / "regpu";
+        std::error_code ec;
+        std::filesystem::create_directories(config.userDir, ec);
+        MoveOldCaches(rex::filesystem::GetExecutableFolder(), config.userDir);
+    }
+    // regpu.log beside the game's own logs (logs next to ssx.exe), which a bug report takes.
+    if (!std::getenv("REGPU_LOG_DIR"))
+    {
+        const auto logs = rex::filesystem::GetExecutableFolder() / "logs";
+        std::error_code ec;
+        std::filesystem::create_directories(logs, ec);
+        _putenv_s("REGPU_LOG_DIR", logs.string().c_str());
+    }
 
     // Same range, mask and size as ReXGlue's own GraphicsSystem.
     g_memory->AddVirtualMappedRange(

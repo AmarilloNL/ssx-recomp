@@ -244,6 +244,6 @@
   "actions": [
     { "id": "data", "label": "Saves, DLC and music", "help": "Put DLC packages in its dlc folder and your music in its music folder.", "open": "data" },
     { "id": "logs", "label": "Logs", "help": "The game's logs, for a bug report.", "open": "logs" },
-    { "id": "shaders", "label": "Shader cache", "help": "Shaders the game has built, so later runs don't stutter. Clearing only helps if graphics look wrong after an update.", "clear": "game/shadercache" }
+    { "id": "shaders", "label": "Shader cache", "help": "Shaders the game has built, so later runs don't stutter. Clearing only helps if graphics look wrong after an update.", "clear": "data/cache/regpu/shadercache" }
   ]
 }
