@@ -675,7 +675,7 @@ void SsxSettingsDialog::DrawCheatsTab() {
   Checkbox("##cheat_boost", "ssx_cheat_infinite_boost");
   Row("Tricky", "Always Tricky stays in Tricky (never Super Tricky). Never: boost without Tricky.");
   Combo("##cheat_tricky", "ssx_cheat_tricky", kTrickyCheats, std::size(kTrickyCheats));
-  Row("Infinite credits", "Buying costs nothing. Stores show 9,999,999; your own credits come back when it's off.");
+  Row("Everything is free", "Buying costs nothing. Prices still show; your credits stay as they are.");
   Checkbox("##cheat_credits", "ssx_cheat_infinite_credits");
   Row("Give credits", "Adds 1,000,000 to your own credits, kept like a reward.");
   static int given = 0;
