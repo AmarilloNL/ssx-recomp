@@ -33,6 +33,7 @@ set(SSX_SOURCES
     src/ssx_snowflakes.cpp
     src/ssx_badges.cpp
     src/ssx_cheats.cpp
+    src/ssx_shaders.cpp
     src/ssx_input_lock.cpp
     src/ssx_dlc.cpp
     src/ssx_frame_stats.cpp

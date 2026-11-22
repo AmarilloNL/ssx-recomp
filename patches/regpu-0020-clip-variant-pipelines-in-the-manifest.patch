@@ -1,0 +1,98 @@
+diff --git a/src/gpu/renderer.cpp b/src/gpu/renderer.cpp
+index 21413a6..ec562b9 100644
+--- a/src/gpu/renderer.cpp
++++ b/src/gpu/renderer.cpp
+@@ -4045,6 +4045,13 @@ const CompiledShader* ClipShader(const CompiledShader& base)
+ {
+     return Variant(base, base.clip, g_clipShaders, ClipVariant, "user clip plane");
+ }
++// The vertex shader a recorded pipeline key was built with: its user clip plane variant when the key
++// has that bit (0x800, GetPipeline), so the manifest and the title's pipeline list rebuild those
++// pipelines too. Null when the variant can't be made.
++const CompiledShader* KeyVertexShader(const CompiledShader& vs, const PipelineKey& key)
++{
++    return (key.flags & 0x800) && !vs.userClip ? ClipShader(vs) : &vs;
++}
+ 
+ const CompiledShader* VariantLookup(const CompiledShader& base, VariantMap& map, std::string (*make)(const std::string&, bool),
+     const char* what)
+@@ -4476,9 +4483,12 @@ std::shared_ptr<PipelineEntry> EnsurePipeline(const CompiledShader& vs, const Co
+     }
+     auto entry = std::make_shared<PipelineEntry>();
+     g_r.pipelines[key] = entry;
+-    if (!motion && !vs.userClip && !IsPsEditAlias(key.ps) && !IsPsEditAlias(key.vs)) // the manifest rebuilds pipelines from the base shaders (not live edits or variants)
++    // The manifest rebuilds pipelines from the base shaders (not live edits or motion variants); a user
++    // clip plane variant's pipeline is kept as its base shader's key with the clip bit (KeyVertexShader).
++    const auto clipBase = vs.userClip ? g_r.shaders.find(key.vs) : g_r.shaders.end();
++    if (!motion && !IsPsEditAlias(key.ps) && !IsPsEditAlias(key.vs) && (!vs.userClip || clipBase != g_r.shaders.end()))
+     {
+-        g_manifest.RecordShader(false, key.vs, vs.ucodeBE);
++        g_manifest.RecordShader(false, key.vs, vs.userClip ? clipBase->second->ucodeBE : vs.ucodeBE);
+         g_manifest.RecordShader(true, key.ps, ps.ucodeBE);
+         g_manifest.RecordPipeline(key);
+     }
+@@ -7752,7 +7762,12 @@ void SeedStep()
+         const auto vs = g_r.shaders.find(key.vs), ps = g_r.shaders.find(key.ps);
+         if (vs == g_r.shaders.end() || ps == g_r.shaders.end() || !vs->second->IsReady() || !ps->second->IsReady())
+             return false;
+-        EnsurePipeline(*vs->second, *ps->second, key);
++        const CompiledShader* kvs = KeyVertexShader(*vs->second, key);
++        if (!kvs || kvs->state.load() == CompiledShader::Failed)
++            return true; // (no clip variant of it: dropped)
++        if (!kvs->IsReady())
++            return false;
++        EnsurePipeline(*kvs, *ps->second, key);
+         started++;
+         return true;
+     });
+@@ -7799,10 +7814,19 @@ void WarmupStep()
+                 break;
+             continue;
+         }
++        const CompiledShader* kvs = vs.IsReady() ? KeyVertexShader(vs, key) : nullptr;
++        if (kvs && kvs->state.load() == CompiledShader::Pending)
++        {
++            // Its clip variant still compiling: as above.
++            std::rotate(g_manifest.pending.begin() + g_manifest.next, g_manifest.pending.begin() + g_manifest.next + 1, g_manifest.pending.end());
++            if (++skipped > 64)
++                break;
++            continue;
++        }
+         g_manifest.next++;
+         g_stats.warmDone++;
+-        if (vs.IsReady() && ps.IsReady())
+-            EnsurePipeline(vs, ps, key);
++        if (kvs && kvs->IsReady() && ps.IsReady())
++            EnsurePipeline(*kvs, ps, key);
+     }
+ }
+ 
+@@ -11418,8 +11442,11 @@ void BuildSeedPipelines()
+             const auto [vs, ps] = shaders;
+             while (vs->state.load() == CompiledShader::Pending || ps->state.load() == CompiledShader::Pending)
+                 Sleep(1);
+-            if (vs->IsReady() && ps->IsReady())
+-                building.push_back(EnsurePipeline(*vs, *ps, key));
++            const CompiledShader* kvs = vs->IsReady() ? KeyVertexShader(*vs, key) : nullptr;
++            while (kvs && kvs->state.load() == CompiledShader::Pending)
++                Sleep(1);
++            if (kvs && kvs->IsReady() && ps->IsReady())
++                building.push_back(EnsurePipeline(*kvs, *ps, key));
+             else
+                 failed++;
+         }
+@@ -11516,9 +11543,12 @@ void PrecompileAll()
+                 break; // wait for this one to finish compiling before going on
+             if (vs && ps && vs->state.load() == CompiledShader::Ready && ps->state.load() == CompiledShader::Ready)
+             {
+-                if (!g_r.pipelines.count(key))
++                const CompiledShader* kvs = KeyVertexShader(*vs, key);
++                if (kvs && kvs->state.load() == CompiledShader::Pending)
++                    break; // its clip variant: as above
++                if (kvs && kvs->IsReady() && !g_r.pipelines.count(key))
+                 {
+-                    EnsurePipeline(*vs, *ps, key);
++                    EnsurePipeline(*kvs, *ps, key);
+                     pipelinesStarted++;
+                 }
+             }

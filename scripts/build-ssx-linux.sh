@@ -441,6 +441,22 @@ Categories=Game;
 EOF
 fi
 
+# SSX's shaders for ReGPU's first-boot compile (issue #17): the game starts once, loads all its effects,
+# writes static-shaders.bin beside ssx and quits (about 15 s). Without the file ReGPU compiles each shader
+# the first time it is drawn, as before, so a failure here (no display, for one) only warns.
+if [ -f "$dist/librexgpu-regpu.so" ]; then
+  step "Collecting the game's shaders for the renderer"
+  rm -f "$dist/static-shaders.bin"
+  collect=0
+  (cd "$dist" && timeout 120 ./ssx --ssx_collect_shaders=true --audio_mute --fullscreen=false >/dev/null 2>&1) || collect=$?
+  # Stopped here after 2 minutes: not a failed renderer start, so its start marker goes (a crash keeps it).
+  if [ "$collect" = 124 ]; then rm -f "$dist/regpu-starting.flag"; fi
+  # The pipelines (shader pairs and render states) rides need, so ReGPU builds them at the first start too.
+  cp -f "$root/regpu-plugin/pipeline-seed.txt" "$dist/"
+  if [ -f "$dist/static-shaders.bin" ]; then echo "  Shaders collected."
+  else echo "  Couldn't collect them; the game compiles each shader the first time it's used instead."; fi
+fi
+
 echo
 printf '\033[32mDONE. Your game is in: %s\033[0m\n' "$dist"
 if [ -z "$no_menu" ]; then echo "Start it from your app menu (SSX) or with $dist/ssx (F1 opens the settings)."

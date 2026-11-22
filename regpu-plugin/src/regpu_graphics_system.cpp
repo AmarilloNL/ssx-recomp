@@ -25,7 +25,13 @@
 #include <rex/cvar.h>
 #include <rex/filesystem.h>
 #include <rex/kernel/xboxkrnl/video.h>
+#include <cstring>
+#include <fstream>
+#include <iterator>
+#include <string>
+#include <vector>
 #include <rex/logging.h>
+#include <rex/filesystem.h>
 #include <rex/runtime.h>
 #include <rex/system/function_dispatcher.h>
 #include <rex/system/kernel_state.h>
@@ -49,6 +55,9 @@ REXCVAR_DEFINE_STRING(regpu_resolution, "screen", "GPU",
 REXCVAR_DEFINE_INT32(anisotropic_override, 3, "GPU",
                      "Texture filtering: -1 the game's, 0 off, 1-5 1x-16x anisotropic")
     .range(-1, 5);
+// ReGPU's count of the dwords a shader uses (src/gpu/ucode.h).
+namespace ucode { uint32_t UsedDwords(const uint32_t* microcodeBE, uint32_t dwords); }
+
 namespace glue2gpu
 {
 namespace
@@ -373,6 +382,66 @@ X_STATUS ReGpuGraphicsSystem::SetupPresentation(rex::ui::WindowedAppContext*)
     return X_STATUS_SUCCESS;
 }
 
+// SSX's shaders for the first-boot compile (issue #17): static-shaders.bin beside the exe, written by
+// ssx.exe --ssx_collect_shaders ("SSXS", the count, then per shader u8 pixel, u32 dwords, big-endian code),
+// each cut to the dwords it uses, as ReGPU's own scanner does, so the hashes match the shaders the game draws.
+std::vector<regpu::ScannedShader> ReadStaticShaders()
+{
+    std::vector<regpu::ScannedShader> out;
+    std::ifstream f(rex::filesystem::GetExecutableFolder() / "static-shaders.bin", std::ios::binary);
+    char magic[4];
+    uint32_t count = 0;
+    if (!f.read(magic, 4) || std::memcmp(magic, "SSXS", 4) != 0 || !f.read(reinterpret_cast<char*>(&count), 4))
+        return out;
+    for (uint32_t i = 0; i < count; i++)
+    {
+        uint8_t pixel = 0;
+        uint32_t dwords = 0;
+        if (!f.read(reinterpret_cast<char*>(&pixel), 1) || !f.read(reinterpret_cast<char*>(&dwords), 4) || dwords == 0 ||
+            dwords > 0x2000)
+            break;
+        std::vector<uint32_t> code(dwords);
+        if (!f.read(reinterpret_cast<char*>(code.data()), std::streamsize(dwords) * 4))
+            break;
+        code.resize(ucode::UsedDwords(code.data(), dwords));
+        out.push_back({ pixel != 0, std::move(code) });
+    }
+    REXLOG_INFO("ReGPU: {} shaders from static-shaders.bin", out.size());
+    return out;
+}
+
+// The screen ReGPU shows while it compiles the static shaders on the first start (a black window for half
+// a minute looks like a hang): dark, with a progress bar of done / total. No text (no font here).
+// The pipeline list shipped with the port (issue #17): pipeline-seed.txt beside the exe, in pipelines.manifest's
+// format (P lines: shader hashes and render state). ReGPU builds them on the first start, after the static shaders.
+const char* PipelineSeed()
+{
+    static const std::string text = [] {
+        std::ifstream f(rex::filesystem::GetExecutableFolder() / "pipeline-seed.txt", std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+    }();
+    return text.c_str();
+}
+
+bool BootScreen(const wchar_t*, uint32_t done, uint32_t total, std::vector<uint8_t>& rgba)
+{
+    constexpr uint32_t kW = 1280, kH = 720, kBarW = 640, kBarH = 12, kX = (kW - kBarW) / 2, kY = kH * 3 / 4;
+    rgba.assign(size_t(kW) * kH * 4, 0);
+    for (size_t i = 3; i < rgba.size(); i += 4)
+        rgba[i] = 255;  // opaque black
+    const uint32_t filled = total ? uint32_t(uint64_t(kBarW) * std::min(done, total) / total) : 0;
+    for (uint32_t y = kY; y < kY + kBarH; y++)
+        for (uint32_t x = kX; x < kX + kBarW; x++)
+        {
+            uint8_t* p = &rgba[(size_t(y) * kW + x) * 4];
+            const bool on = x - kX < filled;
+            p[0] = on ? 0x4F : 0x20; // RGBA: the menus' cyan, on a dim track
+            p[1] = on ? 0xC3 : 0x30;
+            p[2] = on ? 0xF7 : 0x38;
+        }
+    return true;
+}
+
 void ReGpuGraphicsSystem::FillHost()
 {
     regpu::Host& host = regpu::GetHost();
@@ -392,6 +461,10 @@ void ReGpuGraphicsSystem::FillHost()
         OverlayFramePresented();
     };
     host.drawOverlay = DrawOverlay;
+    host.staticShaders = ReadStaticShaders;
+    host.staticShadersSaved = [] { return true; };  // reading the file is quick: no "searching" screen
+    host.bootScreen = BootScreen;
+    host.pipelineSeed = PipelineSeed;
 }
 
 X_STATUS ReGpuGraphicsSystem::SetupGuestGpu(rex::runtime::FunctionDispatcher* dispatcher,

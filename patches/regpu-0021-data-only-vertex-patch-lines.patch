@@ -1,0 +1,96 @@
+diff --git a/src/gpu/renderer.cpp b/src/gpu/renderer.cpp
+index ec562b9..b462570 100644
+--- a/src/gpu/renderer.cpp
++++ b/src/gpu/renderer.cpp
+@@ -3245,13 +3245,48 @@ std::string Line(uint64_t hash, const std::vector<uint32_t>& code)
+     return line;
+ }
+ 
+-// A "V" line's runtime shader rebuilt from its shipped one; false if the line doesn't fit (the hash checks it).
++// An "F" line's patched fetch: the vertex declaration fields written into the shipped shader's vertex fetch at
++// that slot (natural bit order, after the byte swap): data format, stride, offset, destination swizzle, prefetch
++// count and the format flags, and where the declaration moves an element the destination register and the
++// fetch constant selector. No instruction words.
++void SetFetchFields(uint32_t* slotBE, unsigned format, unsigned stride, unsigned offset, unsigned swizzle, unsigned prefetch,
++                    unsigned flags, int reg, int sel)
++{
++    auto put = [](uint32_t& w, int shift, int bits, uint32_t v) {
++        const uint32_t m = ((1u << bits) - 1) << shift;
++        w = (w & ~m) | ((v << shift) & m);
++    };
++    uint32_t w[3];
++    for (int k = 0; k < 3; k++)
++        w[k] = __builtin_bswap32(slotBE[k]);
++    put(w[0], 27, 3, prefetch);
++    if (reg >= 0)
++    {
++        put(w[0], 12, 6, uint32_t(reg));
++        put(w[0], 25, 2, uint32_t(sel));
++    }
++    put(w[1], 0, 12, swizzle);
++    put(w[1], 12, 1, flags & 1);        // format_comp_all (signed)
++    put(w[1], 13, 1, (flags >> 1) & 1); // num_format_all (integer)
++    put(w[1], 16, 6, format);
++    put(w[1], 30, 1, (flags >> 2) & 1); // is_mini_fetch
++    put(w[2], 0, 8, stride);
++    put(w[2], 8, 23, offset);
++    for (int k = 0; k < 3; k++)
++        slotBE[k] = __builtin_bswap32(w[k]);
++}
++
++// A "V" line's runtime shader rebuilt from its shipped one ("V shipped runtime group:w0.w1.w2 ..."), or an "F"
++// line's ("F shipped runtime slot:format.stride.offset.swizzle.prefetch.flags[.register.selector] ...", only
++// the fetches' declaration fields); false if the line doesn't fit (the hash checks it).
+ bool Rebuild(const char* line, uint64_t& hash, std::vector<uint32_t>& code)
+ {
++    const bool fields = line[0] == 'F';
+     unsigned long long shipped = 0, runtime = 0;
+     int used = 0;
+-    if (sscanf(line, "V %llx %llx%n", &shipped, &runtime, &used) < 2 || !used)
++    if ((line[0] != 'V' && !fields) || sscanf(line + 1, " %llx %llx%n", &shipped, &runtime, &used) < 2 || !used)
+         return false;
++    used += 1;
+     {
+         std::lock_guard lock(g_mutex);
+         const auto it = g_byHash.find(shipped);
+@@ -3259,7 +3294,30 @@ bool Rebuild(const char* line, uint64_t& hash, std::vector<uint32_t>& code)
+             return false;
+         code = g_byLength[it->second.first][it->second.second].second;
+     }
+-    for (const char* p = line + used; *p;)
++    for (const char* p = line + used; fields && *p;)
++    {
++        unsigned long long g;
++        unsigned format, stride, offset, swizzle, prefetch, flags;
++        int n = 0;
++        if (sscanf(p, " %llx:%x.%x.%x.%x.%x.%x%n", &g, &format, &stride, &offset, &swizzle, &prefetch, &flags, &n) < 7 || !n)
++            break;
++        p += n;
++        int reg = -1, sel = -1;
++        if (*p == '.')
++        {
++            unsigned r, s;
++            int m = 0;
++            if (sscanf(p, ".%x.%x%n", &r, &s, &m) < 2 || !m)
++                return false;
++            p += m;
++            reg = int(r);
++            sel = int(s);
++        }
++        if (g * 3 + 2 >= code.size())
++            return false;
++        SetFetchFields(&code[g * 3], format, stride, offset, swizzle, prefetch, flags, reg, sel);
++    }
++    for (const char* p = line + used; !fields && *p;)
+     {
+         unsigned long long g;
+         unsigned w0, w1, w2;
+@@ -11638,7 +11696,7 @@ void PrecompileAll()
+             const char* end = strchr(p, '\n');
+             const std::string line(p, end ? end : p + strlen(p));
+             p = end ? end + 1 : p + line.size();
+-            if (line.rfind("V ", 0) != 0)
++            if (line.rfind("V ", 0) != 0 && line.rfind("F ", 0) != 0)
+                 continue;
+             variantLines++;
+             uint64_t hash;

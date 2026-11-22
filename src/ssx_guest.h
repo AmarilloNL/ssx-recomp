@@ -153,6 +153,10 @@
 // best one by these.
 #define SSX_FN_GEAR_STAT SSX_GUEST(sub_82C64778, sub_82C3FB78)
 #define SSX_FN_GEAR_STAT_IMP SSX_GUEST(__imp__sub_82C64778, __imp__sub_82C3FB78)
+// The game's effect loader (ssx_shaders.cpp): out slot r3 (the effect, referenced), name r5 ("terrain_default.fx":
+// loads data\xenon\shaders\terrain_default.fxo, or finds it loaded).
+#define SSX_FN_LOAD_EFFECT SSX_GUEST(sub_829E5548, sub_829B53D0)
+#define SSX_FN_LOAD_EFFECT_IMP SSX_GUEST(__imp__sub_829E5548, __imp__sub_829B53D0)
 // A wingsuit flight's node of the rider's behaviour graph, once a frame while flying (node r4, [r4+48] its
 // ports): it adds the frame to the time flown (port +216) and reads its three curves (ports +192, +196, +200)
 // at the share of the flight flown so far (0 at the start), which it also publishes as the wingsuit meter

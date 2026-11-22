@@ -46,8 +46,8 @@ $OlderXexpSha256 = '3ED16A2D3590277EF6277BD726AF7C035AB6303D624C12F01000F9A4F1D1
 $SdkPackage = 'sdk-10'
 $SdkPackageUrl = "https://github.com/AmarilloNL/ssx-recomp/releases/download/$SdkPackage/rexglue-sdk-ssx-10.zip"
 # The ReGPU renderer, prebuilt against that SDK package by scripts\build-regpu-package.ps1 (no game code).
-$ReGpuPackage = 'regpu-4'
-$ReGpuPackageUrl = "https://github.com/AmarilloNL/ssx-recomp/releases/download/$ReGpuPackage/rexgpu-regpu-4.zip"
+$ReGpuPackage = 'regpu-5'
+$ReGpuPackageUrl = "https://github.com/AmarilloNL/ssx-recomp/releases/download/$ReGpuPackage/rexgpu-regpu-5.zip"
 
 function Step($text) { Write-Host ""; Write-Host "==> $text" -ForegroundColor Cyan }
 function Fail($text, [int]$code = 50) {
@@ -535,6 +535,24 @@ $toml = "$root\dist\SSX\ssx.toml"
 if (-not (Test-Path $toml)) {
     $isoEscaped = $Iso.Replace('\', '\\').Replace('"', '\"')
     Set-Content $toml "# SSX settings - written by the game. Edit in-game with F1.`ngame_data_root = `"$isoEscaped`"" -Encoding ascii
+}
+
+# SSX's shaders for ReGPU's first-boot compile (issue #17): the game starts once, loads all its effects,
+# writes static-shaders.bin beside ssx.exe and quits (about 15 s). Without the file ReGPU compiles each
+# shader the first time it is drawn, as before, so a failure here only warns.
+if (Test-Path "$root\dist\SSX\rexgpu-regpu.dll") {
+    Step "Collecting the game's shaders for the renderer"
+    Remove-Item "$root\dist\SSX\static-shaders.bin" -ErrorAction SilentlyContinue
+    $collect = Start-Process "$root\dist\SSX\ssx.exe" -WorkingDirectory "$root\dist\SSX" -WindowStyle Minimized -PassThru `
+        -ArgumentList '--ssx_collect_shaders=true', '--audio_mute', '--fullscreen=false'
+    if (-not $collect.WaitForExit(120000)) {
+        Stop-Process -Id $collect.Id -ErrorAction SilentlyContinue
+        Remove-Item "$root\dist\SSX\regpu-starting.flag" -ErrorAction SilentlyContinue
+    }
+    # The pipelines (shader pairs and render states) rides need, so ReGPU builds them at the first start too.
+    Copy-Item "$root\regpu-plugin\pipeline-seed.txt" "$root\dist\SSX\" -Force
+    if (Test-Path "$root\dist\SSX\static-shaders.bin") { Write-Host "  Shaders collected." }
+    else { Write-Host "  Couldn't collect them; the game compiles each shader the first time it's used instead." -ForegroundColor Yellow }
 }
 
 Write-Host ""
