@@ -414,17 +414,22 @@ bool SsxSettingsDialog::BeginRows(const char* id) {
 // A rounded card with a small title, as tall as what's in it. With rows, it starts the settings
 // table too and returns whether to draw the rows (then end them with ImGui::EndTable()); without,
 // whether to draw the content. EndCard() in both cases.
+// The card is a one-column table in the page (its width keeps what's in it inside the card), with the
+// background drawn behind it once its height is known. Not a child window: a controller can't move
+// into child windows nested in the page, so their settings couldn't be reached.
 bool SsxSettingsDialog::BeginCard(const char* title, bool rows) {
   const float s = ui_scale_;
-  ImGui::PushStyleColor(ImGuiCol_ChildBg, kSurface);
-  ImGui::PushStyleColor(ImGuiCol_Border, kBorder);
-  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(24.0f * s, 18.0f * s));
-  bool visible = ImGui::BeginChild(title, ImVec2(-12.0f * s, 0.0f),
-                                   ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_NavFlattened);
-  ImGui::PopStyleVar();
-  ImGui::PopStyleColor(2);
-  ImGui::SetWindowFontScale(font_scale_);  // child windows don't inherit it
-  if (!visible) return false;
+  const ImVec2 pad(24.0f * s, 18.0f * s);
+  ImGui::PushID(title);
+  card_start_ = ImGui::GetCursorScreenPos();
+  card_width_ = ImGui::GetContentRegionAvail().x - 12.0f * s;
+  ImDrawList* draw = ImGui::GetWindowDrawList();
+  draw->ChannelsSplit(2);
+  draw->ChannelsSetCurrent(1);  // the content; the background goes to channel 0 in EndCard()
+  ImGui::SetCursorScreenPos(ImVec2(card_start_.x + pad.x, card_start_.y + pad.y));
+  card_table_ = ImGui::BeginTable("##card", 1, ImGuiTableFlags_None, ImVec2(card_width_ - 2.0f * pad.x, 0.0f));
+  if (!card_table_) return false;
+  ImGui::TableNextColumn();
   if (title_font) ImGui::PushFont(title_font);
   ImGui::SetWindowFontScale(font_scale_ * (title_font ? 0.5f : 0.85f));
   ImGui::TextColored(kAccent, "%s", title);
@@ -435,8 +440,23 @@ bool SsxSettingsDialog::BeginCard(const char* title, bool rows) {
 }
 
 void SsxSettingsDialog::EndCard() {
-  ImGui::EndChild();
-  ImGui::Dummy(ImVec2(0.0f, 4.0f * ui_scale_));
+  const float s = ui_scale_;
+  float bottom = card_start_.y;
+  if (card_table_) {
+    ImGui::EndTable();
+    bottom = ImGui::GetItemRectMax().y + 18.0f * s;
+  }
+  card_table_ = false;
+  ImDrawList* draw = ImGui::GetWindowDrawList();
+  draw->ChannelsSetCurrent(0);
+  const ImVec2 a = card_start_, b(card_start_.x + card_width_, bottom);
+  const float round = ImGui::GetStyle().ChildRounding;
+  draw->AddRectFilled(a, b, Col(kSurface), round);
+  draw->AddRect(a, b, Col(kBorder), round, 0, 1.0f * s);
+  draw->ChannelsMerge();
+  ImGui::SetCursorScreenPos(ImVec2(a.x, b.y));
+  ImGui::Dummy(ImVec2(card_width_, 4.0f * s));
+  ImGui::PopID();
 }
 
 // An on/off switch (the menu's checkbox): a pill that turns blue with the knob on the right.
@@ -1064,7 +1084,9 @@ void SsxSettingsDialog::DrawSidebar(float width) {
   for (int i = 0; i < int(std::size(kTabs)); ++i) {
     ImGui::PushID(i);
     const bool selected = i == current_tab_;
+    ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);  // a controller moves through the page; LB / RB switch pages
     if (ImGui::Selectable("##page", selected, ImGuiSelectableFlags_None, ImVec2(iw, ih))) current_tab_ = i;
+    ImGui::PopItemFlag();
     const bool hovered = ImGui::IsItemHovered();
     const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
     if (selected) {

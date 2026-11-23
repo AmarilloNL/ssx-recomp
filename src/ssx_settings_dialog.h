@@ -46,6 +46,9 @@ class SsxSettingsDialog : public rex::ui::ImGuiDialog {
   bool Button(const char* label, bool primary);
   bool BeginCard(const char* title, bool rows = true);
   void EndCard();
+  ImVec2 card_start_ = {};   // the card being drawn: its top left corner,
+  float card_width_ = 0.0f;  // its width,
+  bool card_table_ = false;  // and whether its table is open
   void DrawSidebar(float width);
   void DrawMain();
   void PollPad(ImGuiIO& io);
