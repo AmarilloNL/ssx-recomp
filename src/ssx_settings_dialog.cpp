@@ -734,7 +734,8 @@ void SsxSettingsDialog::DrawCheatsTab() {
   Row("Glowing suit", "Your suit's glowing parts light up.");
   Checkbox("##cheat_glowing", "ssx_cheat_glowing");
   Row("Ride uphill",
-      "No invisible push back when you leave the course: ride back up past the start, or off its sides.");
+      "Ride back up the mountain as far as you like, past the start or off the sides of the course, without "
+      "the invisible push back or the slowdown.");
   Checkbox("##cheat_uphill", "ssx_cheat_ride_uphill");
   Row("No reverse camera",
       "The avalanche drops use the normal camera behind you, instead of the one looking back up the "
