@@ -65,6 +65,10 @@ class SsxApp : public rex::ReXApp {
   // shader cache in a userdata folder there instead of Documents\ssx. --user_data_root still wins.
   void OnConfigurePaths(rex::PathConfig& paths) override {
     const auto exe_dir = rex::filesystem::GetExecutableFolder();
+    // Up to 1.9.5 ReGPU wrote regpu.log next to the exe; now it's in logs. The old one would only be
+    // mistaken for the current one in a bug report. (ReGPU starts later and rewrites its log anyway.)
+    std::error_code ec;
+    std::filesystem::remove(exe_dir / "regpu.log", ec);
     if (!std::filesystem::exists(exe_dir / "portable.txt") ||
         !rex::cvar::GetFlagByName("user_data_root").empty()) {
       return;
