@@ -2067,6 +2067,7 @@ class InstallerForm : Form {
     logBox.Clear();
     bar.Failed = stageList.Failed = false;
     installTitle.Text = "Installing SSX";
+    doneSub.Text = "Building version " + Install.AppVersion + Dot + folder;
     installTitle.ForeColor = Th.Text;
     percentLabel.ForeColor = Th.Accent;
     installStatus.ForeColor = Th.Dim;
@@ -2259,6 +2260,7 @@ class InstallerForm : Form {
       failed = true;
       bar.Failed = stageList.Failed = true;
       installTitle.Text = cancelled ? "Installation cancelled" : "Installation failed";
+      doneSub.Text = installTitle.Text + Dot + folder;
       installTitle.ForeColor = Th.Bad;
       percentLabel.ForeColor = Th.Bad;
       installStatus.Text = message;
