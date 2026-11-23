@@ -196,9 +196,11 @@ REX_HOOK_RAW(SSX_FN_LOAD_EFFECT) {
 
 // The menus' and HUD's shaders are written and compiled by the game at run time, one variant of a fixed table
 // at a time, so no effect holds them. With --ssx_collect_shaders, once the game has built its first one (the
-// builder is ready), the collection asks the builder for every variant of the table, with and without the colour
-// transform, and keeps each shader D3D creates meanwhile (the game frees the compiled code right after).
+// builders are ready), the collection asks the vertex shader builder for every variant of its table, with and
+// without the colour transform, and the pixel shader builder for every key of its table with each of the 16
+// extra bits, and keeps each shader made meanwhile (the game frees the compiled code right after).
 REX_EXTERN(SSX_FN_UI_SHADER_BUILD_IMP);
+REX_EXTERN(SSX_FN_UI_PIXEL_BUILD);
 REX_HOOK_RAW(SSX_FN_UI_SHADER_BUILD) {
   const uint32_t self = ctx.r3.u32;  // (r3 is the result after the call)
   SSX_FN_UI_SHADER_BUILD_IMP(ctx, base);
@@ -221,14 +223,36 @@ REX_HOOK_RAW(SSX_FN_UI_SHADER_BUILD) {
       SSX_FN_UI_SHADER_BUILD_IMP(ctx, base);
     }
   }
+  for (uint32_t i = 0; i < SSX_UI_PIXEL_KEY_COUNT; ++i) {
+    for (uint32_t bits = 0; bits < 16; ++bits) {
+      ctx = saved;
+      ctx.r1.u32 = saved.r1.u32 - 1024;
+      ctx.r3.u64 = self;
+      ctx.r4.u64 = REX_LOAD_U32(SSX_UI_PIXEL_KEYS + i * 4) | bits;
+      SSX_FN_UI_PIXEL_BUILD(ctx, base);
+    }
+  }
   t_capture = false;
   ctx = saved;
   {
     std::lock_guard lock(g_mutex);
-    REXLOG_INFO("shaders: {} from the menus' shader builder ({} variants)", g_shaders.size() - before,
-                SSX_UI_SHADER_VARIANTS * 2);
+    REXLOG_INFO("shaders: {} from the menus' shader builders ({} vertex, {} pixel variants)", g_shaders.size() - before,
+                SSX_UI_SHADER_VARIANTS * 2, SSX_UI_PIXEL_KEY_COUNT * 16);
   }
   g_ui_done = true;
+}
+
+REX_EXTERN(SSX_FN_PIXEL_SHADER_OBJECT_IMP);
+REX_HOOK_RAW(SSX_FN_PIXEL_SHADER_OBJECT) {
+  if (t_capture && ctx.r3.u32) {
+    std::vector<uint8_t> code;
+    bool pixel = false;
+    if (ContainerCode(rex::system::kernel_memory(), ctx.r3.u32, code, pixel)) {
+      std::lock_guard lock(g_mutex);
+      g_shaders.emplace(std::move(code), pixel);
+    }
+  }
+  SSX_FN_PIXEL_SHADER_OBJECT_IMP(ctx, base);
 }
 
 REX_EXTERN(SSX_FN_CREATE_VERTEX_SHADER_IMP);

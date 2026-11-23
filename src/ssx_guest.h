@@ -177,6 +177,13 @@
 // D3D's CreateVertexShader (r3 the shader container, 0x102A1101): the UI builder's shaders come through it.
 #define SSX_FN_CREATE_VERTEX_SHADER SSX_GUEST(sub_827D5DA0, sub_827A5830)
 #define SSX_FN_CREATE_VERTEX_SHADER_IMP SSX_GUEST(__imp__sub_827D5DA0, __imp__sub_827A5830)
+// Its pixel shader builder (same this r3; r4 = a key of its 12-key table at SSX_UI_PIXEL_KEYS, ORed with 4 more
+// bits), and the engine's pixel shader object made from the compiled container (r3, 0x102A1100).
+#define SSX_FN_UI_PIXEL_BUILD SSX_GUEST(sub_827374B8, sub_82707080)
+#define SSX_UI_PIXEL_KEYS SSX_GUEST(0x83813E60u, 0x837F7560u)
+#define SSX_UI_PIXEL_KEY_COUNT 12u
+#define SSX_FN_PIXEL_SHADER_OBJECT SSX_GUEST(sub_8232D5C8, sub_8233D5C8)
+#define SSX_FN_PIXEL_SHADER_OBJECT_IMP SSX_GUEST(__imp__sub_8232D5C8, __imp__sub_8233D5C8)
 // A wingsuit flight's node of the rider's behaviour graph, once a frame while flying (node r4, [r4+48] its
 // ports): it adds the frame to the time flown (port +216) and reads its three curves (ports +192, +196, +200)
 // at the share of the flight flown so far (0 at the start), which it also publishes as the wingsuit meter
