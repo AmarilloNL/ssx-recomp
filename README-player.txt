@@ -6,13 +6,13 @@ extracted from it). No game data is included.
 
 Starting
   Double-click ssx-recomp.exe in your SSX folder (or use the desktop
-  shortcut) and click Play SSX. It starts the game, ssx.exe in this folder,
+  shortcut) and click Play. It starts the game, ssx.exe in this folder,
   which you can also start directly. If the game doesn't know your game files,
   it asks: pick the .iso, or default.xex inside the extracted disc folder. It
   remembers the choice.
   (You can also put the .iso, or a folder named "game", next to ssx.exe.)
   To update SSX: click Check for updates in ssx-recomp.exe (the only thing
-  that goes online). To add DLC or the title update: Add DLC / rebuild.
+  that goes online). To add DLC or the title update: Install / Manage.
 
 Settings
   F1   Settings menu (F1 or Esc closes it). On a controller: Back + Start
@@ -59,7 +59,7 @@ Title update (optional, not included - you need it from your own Xbox 360)
   console it is
   in Content\0000000000000000\4541096D\000B0000\ (if there are two files, use
   the larger one).
-  In ssx-recomp.exe click Add DLC / rebuild, then "Add files...": the game is
+  In ssx-recomp.exe click Install / Manage, then "Add files...": the game is
   rebuilt with it (the "update" folder next to ssx.exe). Saves work with and
   without it.
 

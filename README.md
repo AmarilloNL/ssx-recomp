@@ -78,14 +78,14 @@ code runs natively, and its Xbox 360 graphics are drawn with Direct3D 12 (on Lin
    the game is built there and everything it keeps stays there.
 3. ▶️ Run it. SmartScreen may warn because it isn't code-signed: click
    **More info → Run anyway**. Its source is [`installer/SSXInstaller.cs`](installer/SSXInstaller.cs).
-4. ✅ The first time it opens the setup: click **Next**, select your ISO (or the extracted disc's
-   `default.xex`), optionally click
+4. ✅ The first time it opens the setup: click **Get started**, select your ISO (or the extracted
+   disc's `default.xex`), optionally click
    **Add files...** for DLC and the title update from your own console ([which files](#adding-dlc)),
    and click **Install**.
-5. 🏂 When it says **DONE**, click **Play SSX** or use the desktop shortcut.
+5. 🏂 When it's built, click **Play** or use the desktop shortcut.
 
-From then on **`ssx-recomp.exe` is the game's launcher**: it opens with **Play SSX**,
-**Check for updates** and **Add DLC / rebuild**. (`ssx-recomp.exe --play`, or any options for the
+From then on **`ssx-recomp.exe` is the game's launcher**: it opens on its overview with **Play**,
+**Check for updates** and **Install / Manage** (DLC, the title update, rebuilding). (`ssx-recomp.exe --play`, or any options for the
 game, starts the game straight away.)
 
 **Or with [RecompLauncher](https://recomplauncher.com/game/ssx-recomp):** install SSX there, drop in
@@ -107,8 +107,8 @@ against Redump, and shows the main settings on the game's page. Updates rebuild 
 > for it at the next start: pick the ISO itself, not the `default.xex` in `source\game-dump`.
 >
 > ♻️ **Installed with `SSX-Installer.exe` before?** Put `ssx-recomp.exe` in that install folder
-> (`SSX-PC` in your user folder, unless you picked another) and run it: it opens on **Play SSX**;
-> click **Add DLC / rebuild**, then **Rebuild**, to bring the game up to this version.
+> (`SSX-PC` in your user folder, unless you picked another) and run it: it opens on its overview;
+> click **Install / Manage**, then **Rebuild**, to bring the game up to this version.
 >
 > 🔄 **To update, click Check for updates**: it's the only thing that goes online for the port. If
 > there's a newer release, it replaces `ssx-recomp.exe` with that release's and rebuilds SSX (only
@@ -307,9 +307,10 @@ with Mount Eddie and the Presell Pack installed, Japan, Eddie and Mac's Ultimate
 there, so they add nothing new (installing them anyway does no harm).
 
 > [!TIP]
-> **Quick version:** in `ssx-recomp.exe`, click **Add DLC / rebuild** (or, the first time, **Next**), then **Add files...**, and select
+> **Quick version:** in `ssx-recomp.exe`, click **Install / Manage** (or, the first time, **Get started**), then **Add files...**, and select
 > the files (DLC and the title update together; the picks add up). It shows what each
-> file is, or why it isn't an SSX package. DLC can also be copied to `userdata\dlc` by hand:
+> file is, or why it isn't an SSX package. Then click **Add DLC** (**Rebuild** with the title
+> update, **Install** the first time). DLC can also be copied to `userdata\dlc` by hand:
 > the game installs it the next time it starts.
 
 <details>
@@ -359,7 +360,7 @@ rates, resolution, DLC, your name and picture) works the same.
   updates are in `Content\0000000000000000\4541096D\000B0000\`. If there are two files, use the
   larger one (about 9 MB, version 0.0.3.2); the smaller one (about 1 MB) is an older update that's
   already contained in it.
-- **Adding it:** in `ssx-recomp.exe`, **Add DLC / rebuild**, **Add files...**, then **Rebuild** (or **Install** the first time). It checks that
+- **Adding it:** in `ssx-recomp.exe`, **Install / Manage**, **Add files...**, then **Rebuild** (or **Install** the first time). It checks that
   it's the supported update. Updating later keeps it; you only add it once.
 - **Saves** work with both versions: the update loads saves from the disc version, and the disc
   version loads saves the update wrote.
