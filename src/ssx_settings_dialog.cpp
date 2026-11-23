@@ -507,6 +507,7 @@ bool SsxSettingsDialog::Combo(const char* label, const char* cvar, const Choice*
   }
   bool changed = false;
   if (ImGui::BeginCombo(label, preview)) {
+    ImGui::SetWindowFontScale(font_scale_);  // the list is a window of its own: same text size as the menu
     for (size_t i = 0; i < count; ++i) {
       if (ImGui::Selectable(choices[i].label, current == choices[i].value)) {
         Set(cvar, choices[i].value);
