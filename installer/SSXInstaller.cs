@@ -1557,6 +1557,7 @@ class InstallerForm : Form {
                                Location = new Point(Th.D(20) + TextRenderer.MeasureText(optional.Text, optional.Font).Width, Th.D(58)) };
     help.LinkClicked += delegate { Process.Start(RepoUrl + "#adding-dlc"); };
     dlc.Controls.Add(help);
+    help.BringToFront();  // over the line before it, which is wider than its text
     var addDlc = new FlatButton("Add files...", false) { Glyph = "dlc", Bounds = new Rectangle(Th.D(20) + inner - addW, Th.D(14), addW, Th.D(36)) };
     addDlc.Click += BrowseDlc;
     dlc.Controls.Add(addDlc);
@@ -1849,7 +1850,7 @@ class InstallerForm : Form {
   }
 
   // Where they are on the console and which tool copies them off: the README (Where do I find these?).
-  const string DlcHelp = "Copied off your own Xbox 360. Add them once: later updates keep them.";
+  const string DlcHelp = "Add them once: later updates keep them.";
 
   // With nothing picked: what this SSX folder already has (issue #18: no need to add it again), or the help text.
   void ShowAddedHint() {
