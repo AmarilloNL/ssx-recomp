@@ -448,7 +448,10 @@ if [ -f "$dist/librexgpu-regpu.so" ]; then
   step "Collecting the game's shaders for the renderer"
   rm -f "$dist/static-shaders.bin"
   collect=0
-  (cd "$dist" && timeout 120 ./ssx --ssx_collect_shaders=true --audio_mute --fullscreen=false >/dev/null 2>&1) || collect=$?
+  # With the standard renderer: under ReGPU on Linux the collection run stops drawing after its first frame,
+  # so the game never gets to the menus whose shaders it collects too. (The shaders come from the game's
+  # memory either way, and a renderer given on the command line isn't saved in ssx.toml.)
+  (cd "$dist" && timeout 120 ./ssx --ssx_collect_shaders=true --ssx_renderer=standard --audio_mute --fullscreen=false >/dev/null 2>&1) || collect=$?
   # Stopped here after 2 minutes: not a failed renderer start, so its start marker goes (a crash keeps it).
   if [ "$collect" = 124 ]; then rm -f "$dist/regpu-starting.flag"; fi
   # The pipelines (shader pairs and render states) rides need, so ReGPU builds them at the first start too.
