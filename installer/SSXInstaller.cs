@@ -66,7 +66,9 @@ static class Program {
   // by build-installer.ps1), so building never downloads the port: only the Update button goes
   // online for the port, and replaces this exe with the latest release's, which then rebuilds.
   // Without a built game it opens the setup; with one it opens on the Play page. Any other
-  // arguments, or --play, start the game straight away with them (minus --play).
+  // arguments, or --play, start the game straight away with them (minus --play), and this exe
+  // stays until the game exits and returns its exit code: RecompLauncher (start.program) and
+  // shortcuts start the game through it, so they see the game's whole run and its exit code.
   [STAThread]
   static int Main(string[] args) {
     Install.RemoveReplacedExe();
@@ -77,8 +79,7 @@ static class Program {
     bool setup = rebuild || (args.Length > 0 && args[0] == "--setup");
     if (!setup && args.Length > 0 && Install.Built(folder)) {
       try {
-        Install.StartGame(folder, Array.FindAll(args, a => a != "--play"));
-        return 0;
+        return Install.StartGame(folder, Array.FindAll(args, a => a != "--play"), true);
       } catch (Exception ex) {
         MessageBox.Show("SSX couldn't be started: " + ex.Message, "SSX", MessageBoxButtons.OK, MessageBoxIcon.Warning);
       }
@@ -402,13 +403,18 @@ static class Install {
     thread.Start();
   }
 
-  public static void StartGame(string folder, string[] args) {
+  // wait: stays until the game exits and returns its exit code (0 without waiting).
+  public static int StartGame(string folder, string[] args, bool wait = false) {
     UserData(folder);  // also an install built before the game was always portable
     string exe = GameExe(folder);
     var arguments = new StringBuilder();
     foreach (string arg in args) arguments.Append(arguments.Length > 0 ? " " : "").Append(Quote(arg));
-    Process.Start(new ProcessStartInfo(exe, arguments.ToString()) {
-      WorkingDirectory = Path.GetDirectoryName(exe), UseShellExecute = false });
+    using (Process game = Process.Start(new ProcessStartInfo(exe, arguments.ToString()) {
+             WorkingDirectory = Path.GetDirectoryName(exe), UseShellExecute = false })) {
+      if (!wait) return 0;
+      game.WaitForExit();
+      return game.ExitCode;
+    }
   }
 
   // One command-line argument, quoted the way the C runtime splits them again.
