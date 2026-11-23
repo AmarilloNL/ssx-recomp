@@ -181,3 +181,9 @@
 // the rider back from the cells outside it.
 #define SSX_FN_OOB_CORRECTION SSX_GUEST(sub_82CF7A70, sub_82CD3080)
 #define SSX_FN_OOB_CORRECTION_IMP SSX_GUEST(__imp__sub_82CF7A70, __imp__sub_82CD3080)
+// The rider's lowest ground height, once a frame (rider r3): while the rider rides on the ground (the bytes
+// [r3+0x200B4] clear, [r3+0x20128], [r3+0x20308], [r3+0x200B8] and [r3+0x202D8] point at set), the float
+// [r3+0x201EC] points at becomes the lower of itself and the rider's height (the float at [r3+0x20094] + 36).
+// The rider counts as riding uphill, slowed down and with less boost, the higher they are above it.
+#define SSX_FN_LOWEST_GROUND SSX_GUEST(sub_82CF79A8, sub_82CD2FB8)
+#define SSX_FN_LOWEST_GROUND_IMP SSX_GUEST(__imp__sub_82CF79A8, __imp__sub_82CD2FB8)

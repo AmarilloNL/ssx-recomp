@@ -42,7 +42,7 @@ REXCVAR_DEFINE_BOOL(ssx_cheat_max_gear, false, "SSX", "Cheat: every gear stat at
 REXCVAR_DEFINE_BOOL(ssx_cheat_big_head, false, "SSX", "Cheat: a big head");
 REXCVAR_DEFINE_BOOL(ssx_cheat_big_hands, false, "SSX", "Cheat: big hands");
 REXCVAR_DEFINE_BOOL(ssx_cheat_glowing, false, "SSX", "Cheat: a glowing suit");
-REXCVAR_DEFINE_BOOL(ssx_cheat_ride_uphill, false, "SSX", "Cheat: no push back when leaving the course");
+REXCVAR_DEFINE_BOOL(ssx_cheat_ride_uphill, false, "SSX", "Cheat: no push back or slowdown riding back up the mountain");
 REXCVAR_DEFINE_BOOL(ssx_cheat_no_reverse_camera, false, "SSX",
                     "Cheat: the avalanche drops use the normal camera behind the rider");
 REXCVAR_DEFINE_INT32(ssx_cheat_tricky, 0, "SSX",
@@ -458,4 +458,23 @@ REX_HOOK_RAW(SSX_FN_OOB_CORRECTION) {
   ScopedSwitch off;
   if (REXCVAR_GET(ssx_cheat_ride_uphill)) off.On(base, REX_LOAD_U32(ctx.r3.u32 + 0x20380));
   SSX_FN_OOB_CORRECTION_IMP(ctx, base);
+}
+
+// Ride uphill, the slope: the game keeps the lowest height the rider has ridden at, and once the rider is a few
+// dozen metres above it they count as riding uphill: slowed down hard and with boost fading out (even with Infinite
+// boost), so a rider can only ever climb so far behind where they've been. With the cheat on, that height follows
+// the rider up as well as down while they ride on the ground (the game's own conditions, checked after its update),
+// so they're never above it. In the air nothing changes.
+REX_EXTERN(SSX_FN_LOWEST_GROUND_IMP);
+REX_HOOK_RAW(SSX_FN_LOWEST_GROUND) {
+  const uint32_t rider = ctx.r3.u32;
+  SSX_FN_LOWEST_GROUND_IMP(ctx, base);
+  if (!REXCVAR_GET(ssx_cheat_ride_uphill)) return;
+  auto set = [&](uint32_t off) {
+    const uint32_t p = REX_LOAD_U32(rider + off);
+    return p && REX_LOAD_U8(p);
+  };
+  if (set(0x200B4) || !set(0x20128) || !set(0x20308) || !set(0x200B8) || !set(0x202D8)) return;
+  const uint32_t height = REX_LOAD_U32(rider + 0x20094), lowest = REX_LOAD_U32(rider + 0x201EC);
+  if (height && lowest) REX_STORE_U32(lowest, REX_LOAD_U32(height + 36));
 }
