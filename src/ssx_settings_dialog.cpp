@@ -464,7 +464,8 @@ bool SsxSettingsDialog::Switch(const char* id, bool* value) {
   const float s = ui_scale_, frame = ImGui::GetFrameHeight();
   const float h = frame * 0.8f, w = h * 1.85f;
   ImVec2 p = ImGui::GetCursorScreenPos();
-  bool pressed = ImGui::InvisibleButton(id, ImVec2(w, frame));
+  // (EnableNav: an invisible button is left out of controller navigation unless asked.)
+  bool pressed = ImGui::InvisibleButton(id, ImVec2(w, frame), ImGuiButtonFlags_EnableNav);
   if (pressed) *value = !*value;
   bool hovered = ImGui::IsItemHovered();
   ImDrawList* d = ImGui::GetWindowDrawList();
