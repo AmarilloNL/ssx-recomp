@@ -160,6 +160,9 @@ the file for you.
 
 ### 🐧 Linux (beta)
 
+> [!NOTE]
+> RecompLauncher can't build SSX on Linux yet (its setup step needs Windows): use the installer script below.
+
 A native Linux version: Vulkan, no Wine or Proton. Like on Windows, it's built on your PC from your
 own ISO, by an installer script:
 
