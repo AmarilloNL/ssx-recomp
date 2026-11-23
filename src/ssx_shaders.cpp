@@ -5,8 +5,10 @@
 // mid-ride. SSX's shaders are in its 92 effect files (data\xenon\shaders\<name>.fxo, in data0.big),
 // which the game only loads as materials need them. With --ssx_collect_shaders the game loads all of them
 // through its own loader as soon as it loads its first one at startup, then reads every shader out of
-// memory and writes them to static-shaders.bin beside the exe (the player's own copy of the game: nothing
-// of it ships), and quits. The ReGPU plugin hands that file to Host::staticShaders.
+// memory. The menus' and HUD's shaders aren't in any effect: the game writes and compiles them at run time,
+// so the collection also has the game's builder make every variant of its table. Then it writes them all to
+// static-shaders.bin beside the exe (the player's own copy of the game: nothing of it ships), and quits.
+// The ReGPU plugin hands that file to Host::staticShaders.
 //
 // A loaded effect keeps its shaders as Xbox 360 shader containers in physical memory: big-endian words,
 // [0] 0x102A1100 (pixel) or 0x102A1101 (vertex), [1] the offset of the code block, [2] the code's size,
@@ -14,10 +16,12 @@
 // offset within the code block and its size. (Checked against every shader ReGPU had met in a day of play.)
 #include "ssx_shaders.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <fstream>
 #include <map>
+#include <mutex>
 #include <set>
 #include <string>
 #include <thread>
@@ -90,6 +94,28 @@ void LoadAllEffects(PPCContext& ctx, uint8_t* base) {
 
 using Shaders = std::map<std::vector<uint8_t>, bool>;  // code -> pixel
 
+// A shader container's code: word 1 is the offset of its code block, word 2 its size; word 5 is 0 or the offset
+// of a block whose word 4 is its header size, followed by the code's offset within the code block and its size.
+bool ContainerCode(rex::memory::Memory* memory, uint32_t c, std::vector<uint8_t>& code, bool& pixel) {
+  if (!SsxGuestReadable(memory, c, 24)) return false;
+  auto word = [&](uint32_t a) { return __builtin_bswap32(*memory->TranslateVirtual<const uint32_t*>(a)); };
+  pixel = (word(c) & 0xFF) == 0;
+  const uint32_t code_block = word(c + 4), block = word(c + 20);
+  uint32_t start = c + code_block, size = word(c + 8);
+  if (code_block > 0x10000) return false;
+  if (block) {
+    if (block > 0x10000 || !SsxGuestReadable(memory, c + block, 20)) return false;
+    const uint32_t header = word(c + block + 16), pair = c + block + 20 + header;
+    if (header > 0x200 || !SsxGuestReadable(memory, pair, 8)) return false;
+    start += word(pair);
+    size = word(pair + 4);
+  }
+  if (size < 8 || size > 0x8000 || (size & 3) || !SsxGuestReadable(memory, start, size)) return false;
+  const uint8_t* p = memory->TranslateVirtual<const uint8_t*>(start);
+  code.assign(p, p + size);
+  return true;
+}
+
 // Adds every shader container in physical memory to `shaders` (de-duplicated); returns the containers seen.
 size_t ScanShaders(Shaders& shaders) {
   rex::memory::Memory* memory = rex::system::kernel_memory();
@@ -99,23 +125,10 @@ size_t ScanShaders(Shaders& shaders) {
       if (p[i] == 0x10 && p[i + 1] == 0x2A && p[i + 2] == 0x11 && p[i + 3] <= 1) containers.push_back(at + i);
     }
   });
-  auto word = [&](uint32_t a) { return __builtin_bswap32(*memory->TranslateVirtual<const uint32_t*>(a)); };
   for (uint32_t c : containers) {
-    if (!SsxGuestReadable(memory, c, 24)) continue;
-    const bool pixel = (word(c) & 0xFF) == 0;
-    const uint32_t code_block = word(c + 4), block = word(c + 20);
-    uint32_t start = c + code_block, size = word(c + 8);
-    if (code_block > 0x10000) continue;
-    if (block) {
-      if (block > 0x10000 || !SsxGuestReadable(memory, c + block, 20)) continue;
-      const uint32_t header = word(c + block + 16), pair = c + block + 20 + header;
-      if (header > 0x200 || !SsxGuestReadable(memory, pair, 8)) continue;
-      start += word(pair);
-      size = word(pair + 4);
-    }
-    if (size < 8 || size > 0x8000 || (size & 3) || !SsxGuestReadable(memory, start, size)) continue;
-    const uint8_t* code = memory->TranslateVirtual<const uint8_t*>(start);
-    shaders.emplace(std::vector<uint8_t>(code, code + size), pixel);
+    std::vector<uint8_t> code;
+    bool pixel = false;
+    if (ContainerCode(memory, c, code, pixel)) shaders.emplace(std::move(code), pixel);
   }
   return containers.size();
 }
@@ -137,15 +150,23 @@ void WriteShaders(const Shaders& shaders, size_t scans) {
   }
   REXLOG_INFO("shaders: {} shaders from {} scans written to {}", count, scans, path.string());
 }
+
+// What the collection gathers: the effects' shaders (at the first effect load) and the menus' and HUD's
+// shaders (at the UI builder's first call), written together once both are in, or after kUiWait without the UI's.
+std::mutex g_mutex;
+Shaders g_shaders;
+std::atomic<bool> g_ui_done{false};
+thread_local bool t_capture = false;  // while the collection runs the UI builder: keep what it creates
+constexpr auto kUiWait = std::chrono::seconds(30);
 }  // namespace
 
 void SsxShadersSetQuit(std::function<void()> quit) { g_quit = std::move(quit); }
 
 // The game's effect loader: with --ssx_collect_shaders its first call (at startup) loads all of them; the
-// shaders are read out right after the loads, before the game draws with them, then the game quits the
-// normal way. (A read 10 s later, as before, also saw copies the game had patched in place for its draws:
-// a different set on every PC, 3701 here vs 3684 on the Linux box, so a pipeline list recorded on one PC
-// named shaders another didn't have. Right after the loads both read the same 3687.)
+// shaders are read out right after the loads, before the game draws with them. (A read 10 s later, as before,
+// also saw copies the game had patched in place for its draws: a different set on every PC, 3701 here vs 3684
+// on the Linux box, so a pipeline list recorded on one PC named shaders another didn't have. Right after the
+// loads both read the same 3687.) Then it waits for the menus' shaders (below) and quits the normal way.
 REX_EXTERN(SSX_FN_LOAD_EFFECT_IMP);
 REX_HOOK_RAW(SSX_FN_LOAD_EFFECT) {
   SSX_FN_LOAD_EFFECT_IMP(ctx, base);
@@ -156,9 +177,69 @@ REX_HOOK_RAW(SSX_FN_LOAD_EFFECT) {
   Shaders shaders;
   const size_t containers = ScanShaders(shaders);
   REXLOG_INFO("shaders: {} containers right after the loads", containers);
-  WriteShaders(shaders, 1);
+  {
+    std::lock_guard lock(g_mutex);
+    g_shaders.insert(shaders.begin(), shaders.end());
+  }
   std::thread([] {
+    const auto until = std::chrono::steady_clock::now() + kUiWait;
+    while (!g_ui_done && std::chrono::steady_clock::now() < until) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    if (!g_ui_done) REXLOG_WARN("shaders: the menus' shader builder didn't run; their shaders aren't collected");
+    {
+      std::lock_guard lock(g_mutex);
+      WriteShaders(g_shaders, 1);
+    }
     std::this_thread::sleep_for(std::chrono::seconds(1));  // (quit from outside the game's own call)
     if (g_quit) g_quit();
   }).detach();
+}
+
+// The menus' and HUD's shaders are written and compiled by the game at run time, one variant of a fixed table
+// at a time, so no effect holds them. With --ssx_collect_shaders, once the game has built its first one (the
+// builder is ready), the collection asks the builder for every variant of the table, with and without the colour
+// transform, and keeps each shader D3D creates meanwhile (the game frees the compiled code right after).
+REX_EXTERN(SSX_FN_UI_SHADER_BUILD_IMP);
+REX_HOOK_RAW(SSX_FN_UI_SHADER_BUILD) {
+  const uint32_t self = ctx.r3.u32;  // (r3 is the result after the call)
+  SSX_FN_UI_SHADER_BUILD_IMP(ctx, base);
+  static std::atomic<bool> started{false};
+  if (!REXCVAR_GET(ssx_collect_shaders) || t_capture || started.exchange(true)) return;
+  const PPCContext saved = ctx;
+  size_t before = 0;
+  {
+    std::lock_guard lock(g_mutex);
+    before = g_shaders.size();
+  }
+  t_capture = true;
+  for (uint32_t i = 0; i < SSX_UI_SHADER_VARIANTS; ++i) {
+    for (uint32_t no_colour = 0; no_colour < 2; ++no_colour) {
+      ctx = saved;
+      ctx.r1.u32 = saved.r1.u32 - 1024;  // a frame of our own below the caller's
+      ctx.r3.u64 = self;
+      ctx.r4.u64 = SSX_UI_SHADER_TABLE + i * 4;
+      ctx.r5.u64 = no_colour;
+      SSX_FN_UI_SHADER_BUILD_IMP(ctx, base);
+    }
+  }
+  t_capture = false;
+  ctx = saved;
+  {
+    std::lock_guard lock(g_mutex);
+    REXLOG_INFO("shaders: {} from the menus' shader builder ({} variants)", g_shaders.size() - before,
+                SSX_UI_SHADER_VARIANTS * 2);
+  }
+  g_ui_done = true;
+}
+
+REX_EXTERN(SSX_FN_CREATE_VERTEX_SHADER_IMP);
+REX_HOOK_RAW(SSX_FN_CREATE_VERTEX_SHADER) {
+  if (t_capture && ctx.r3.u32) {
+    std::vector<uint8_t> code;
+    bool pixel = false;
+    if (ContainerCode(rex::system::kernel_memory(), ctx.r3.u32, code, pixel)) {
+      std::lock_guard lock(g_mutex);
+      g_shaders.emplace(std::move(code), pixel);
+    }
+  }
+  SSX_FN_CREATE_VERTEX_SHADER_IMP(ctx, base);
 }

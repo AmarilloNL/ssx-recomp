@@ -167,6 +167,16 @@
 // loads data\xenon\shaders\terrain_default.fxo, or finds it loaded).
 #define SSX_FN_LOAD_EFFECT SSX_GUEST(sub_829E5548, sub_829B53D0)
 #define SSX_FN_LOAD_EFFECT_IMP SSX_GUEST(__imp__sub_829E5548, __imp__sub_829B53D0)
+// The menus' and HUD's shader builder (ssx_shaders.cpp): this r3, r4 = an entry of its variant table (36 4-byte
+// entries at SSX_UI_SHADER_TABLE), r5 = 1 for the variant without the colour transform. It writes the variant's
+// HLSL and compiles it with the compiler built into the game, at run time (the shaders aren't in any effect).
+#define SSX_FN_UI_SHADER_BUILD SSX_GUEST(sub_82737370, sub_82706F38)
+#define SSX_FN_UI_SHADER_BUILD_IMP SSX_GUEST(__imp__sub_82737370, __imp__sub_82706F38)
+#define SSX_UI_SHADER_TABLE SSX_GUEST(0x83813DD0u, 0x837F74D0u)
+#define SSX_UI_SHADER_VARIANTS 36u
+// D3D's CreateVertexShader (r3 the shader container, 0x102A1101): the UI builder's shaders come through it.
+#define SSX_FN_CREATE_VERTEX_SHADER SSX_GUEST(sub_827D5DA0, sub_827A5830)
+#define SSX_FN_CREATE_VERTEX_SHADER_IMP SSX_GUEST(__imp__sub_827D5DA0, __imp__sub_827A5830)
 // A wingsuit flight's node of the rider's behaviour graph, once a frame while flying (node r4, [r4+48] its
 // ports): it adds the frame to the time flown (port +216) and reads its three curves (ports +192, +196, +200)
 // at the share of the flight flown so far (0 at the start), which it also publishes as the wingsuit meter
