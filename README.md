@@ -51,6 +51,7 @@ code runs natively, and its Xbox 360 graphics are drawn with Direct3D 12 (on Lin
 |---|---|
 | ⚡ **Up to 300 fps** | or match your monitor, at real-time game speed (the original runs at 30) |
 | 🖥️ **Up to 4K** | the [ReGPU renderer](#graphics) draws at your screen's resolution, 720p to 4K |
+| 🧊 **Far less first-ride stutter** | the game's shaders and render pipelines are prepared on the first start, from your own copy of the game |
 | ⚙️ **Settings menu** | in game: **F1**, or **Back + Start** on a controller |
 | ⌨️ **Keyboard & controller** | key rebinding, vibration, deadzone |
 | 🪪 **Your name & picture** | instead of "User" and an empty square (settings → **Profile**) |
@@ -62,7 +63,7 @@ code runs natively, and its Xbox 360 graphics are drawn with Direct3D 12 (on Lin
 | 🏂 **Boost meter in freeride** | the boost and tricky meters while you freeride (settings → **Display**) |
 | 🎒 **Gear by type** | View More lists your gear by type, the highest level first (settings → **Display**) |
 | 🏅 **Online-only badges** | the badges that need EA's servers, shown as earned (settings → **Profile**) |
-| 🎮 **Cheats** | infinite boost; Tricky or Super Tricky the whole ride, or no Tricky at all; everything is free (your own credits stay as they are) or +1,000,000 credits; infinite rewinds or none; slow motion while you hold LB; infinite wingsuit lift; armour, oxygen, warmth, the wingsuit, ice axes and batteries that never run out (one switch each); never lose a combo or the multiplier; max gear stats; big head and hands; a glowing suit; ride uphill: no push back when you leave the course (settings → **Cheats**) |
+| 🎮 **Cheats** | infinite boost; Tricky or Super Tricky the whole ride, or no Tricky at all; everything is free (your own credits stay as they are) or +1,000,000 credits; infinite rewinds or none; slow motion while you hold LB; infinite wingsuit lift; armour, oxygen, warmth, the wingsuit, ice axes and batteries that never run out (one switch each); never lose a combo or the multiplier; max gear stats; big head and hands; a glowing suit; ride back up the mountain as far as you like; the normal camera on the avalanche drops (settings → **Cheats**) |
 
 <a id="installing"></a>
 
@@ -194,8 +195,8 @@ own ISO, by an installer script:
   built on your PC, the script says so and the game uses the standard renderer, which runs at 1× on
   Linux (2× made the graphics driver hang in testing), scaled bilinear.
 - Not on Linux yet: the gamer picture.
-- The first ride in each new area can stutter briefly while the game's shaders are prepared.
-  They're kept for the next start.
+- The first start after installing or updating prepares the game's shaders (about a minute), so
+  the first rides barely stutter. What's left is kept for the next start.
 - The port goes to `~/SSX-PC` (`--folder` picks another place); the game is in `source/dist/SSX`.
   From a git clone, `./scripts/build-ssx-linux.sh --iso ~/Games/SSX.iso` does the same build.
 - If something goes wrong, attach `build-ssx-linux.log` (in `~/SSX-PC/source`) to an issue.
@@ -439,6 +440,11 @@ The game is playable and is being tested by playing through the whole World Tour
 <summary><b>✅ Fixed so far</b></summary>
 <br>
 
+- ✅ 2.0.0: a new look for the setup and the F1 menu; the game's shaders and render pipelines
+  are prepared on the first start, so the first rides barely stutter (#17, with @Xarishark);
+  ReGPU's caches are kept in the SSX folder's `userdata` (#26, by @Xarishark); RecompLauncher
+  starts the game through `ssx-recomp.exe` (#27, by @Xarishark); a No reverse camera cheat, and
+  Ride uphill no longer slows you down riding back up the mountain (#21)
 - ✅ A Slow motion cheat: hold LB to slow time down for as long as you hold it (1.9.5)
 - ✅ View More lists your gear by type, then the highest level first (#25); the credits cheat is now
   Everything is free: the credits shown stay your own, and the store lets you buy anything (1.9.4)
