@@ -13,7 +13,7 @@
 
 <a href="https://recomplauncher.com/game/ssx-recomp"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a>
 
-[**⬇️ Download**](../../releases/latest) · [🎬 Gameplay](#gameplay) · [✨ Features](#features) · [🛠️ Install](#installing) · [🐧 Linux](#linux) · [🎮 Controls](#playing) · [🖥️ Graphics](#graphics) · [📦 DLC & update](#adding-dlc) · [🎵 Music](#your-music) · [🗺️ Roadmap](#roadmap)
+[**⬇️ Download**](../../releases/latest) · [🎬 Gameplay](#gameplay) · [📸 Screenshots](#screenshots) · [✨ Features](#features) · [🛠️ Install](#installing) · [🐧 Linux](#linux) · [🎮 Controls](#playing) · [🖥️ Graphics](#graphics) · [📦 DLC & update](#adding-dlc) · [🎵 Music](#your-music) · [🗺️ Roadmap](#roadmap)
 
 </div>
 
@@ -31,6 +31,11 @@ executable to x86-64 with the [ReXGlue SDK](https://github.com/rexglue/rexglue-s
 code runs natively, and its Xbox 360 graphics are drawn with Direct3D 12 (on Linux through
 [vkd3d-proton](https://github.com/HansKristian-Work/vkd3d-proton) and Vulkan).
 
+> [!NOTE]
+> 🆕 **2.0.0 is out:** a [new look](#screenshots) for the setup and the F1 menu, far less stutter on
+> your first rides, and two cheat fixes. See [what's new](../../releases/tag/v2.0.0); **Check for
+> updates** in `ssx-recomp.exe` gets it.
+
 <a id="gameplay"></a>
 
 ## 🎬 Gameplay
@@ -40,6 +45,22 @@ code runs natively, and its Xbox 360 graphics are drawn with Direct3D 12 (on Lin
 [![SSX (2012) Native PC Port at High FPS – Pure Gameplay (No Emulator)](https://img.youtube.com/vi/ibGjbR-AqRo/maxresdefault.jpg)](https://www.youtube.com/watch?v=ibGjbR-AqRo)
 
 ▶️ *[SSX (2012) Native PC Port at High FPS – Pure Gameplay (No Emulator)](https://www.youtube.com/watch?v=ibGjbR-AqRo)*
+
+</div>
+
+<a id="screenshots"></a>
+
+## 📸 Screenshots
+
+<div align="center">
+
+<img src="art/screenshot-setup.png" alt="ssx-recomp.exe: the overview of your SSX, with Play, Check for updates and Install / Manage" width="720">
+
+*`ssx-recomp.exe` sets SSX up and is its launcher: Play, Check for updates, and Install / Manage for DLC, the title update and rebuilding.*
+
+<img src="art/screenshot-f1-display.png" alt="The F1 menu, Display page" width="400"> <img src="art/screenshot-f1-cheats.png" alt="The F1 menu, Cheats page" width="400">
+
+*The settings menu in the game: **F1**, or **Back + Start** on a controller.*
 
 </div>
 
@@ -209,7 +230,7 @@ own ISO, by an installer script:
 
 | | |
 |---|---|
-| ⚙️ **Settings** | **F1** / **Esc** (controller: **Back + Start**, LB/RB switch tabs, B closes); **Quit game** at the bottom |
+| ⚙️ **Settings** | **F1** / **Esc** (controller: **Back + Start**; the D-pad moves through the settings, **A** changes one, **LB/RB** switch pages, **B** closes); **Quit game** at the bottom |
 | 🎮 **Controller** | as on the console; vibration and deadzone in **F1 → Controls** |
 | ⌨️ **Keyboard** | WASD steer · Space jump · arrow keys = trick stick · Q/E triggers · 1/3 bumpers · Enter start · Tab back |
 
