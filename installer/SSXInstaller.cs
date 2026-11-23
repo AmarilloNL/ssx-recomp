@@ -483,23 +483,24 @@ static class Install {
 
 // Theme: colours, DPI scaling and shape helpers shared by the custom controls.
 static class Th {
-  public static readonly Color Bg = Color.FromArgb(11, 18, 27);
-  public static readonly Color Rail = Color.FromArgb(14, 23, 34);
-  public static readonly Color Surface = Color.FromArgb(19, 30, 43);
-  public static readonly Color Surface2 = Color.FromArgb(27, 41, 57);
-  public static readonly Color Surface3 = Color.FromArgb(35, 52, 71);
-  public static readonly Color Border = Color.FromArgb(40, 58, 78);
-  public static readonly Color Accent = Color.FromArgb(92, 209, 245);
-  public static readonly Color AccentHover = Color.FromArgb(132, 224, 250);
-  public static readonly Color AccentDown = Color.FromArgb(62, 178, 222);
-  public static readonly Color Ink = Color.FromArgb(6, 20, 30);
-  public static readonly Color Text = Color.FromArgb(232, 242, 250);
-  public static readonly Color Dim = Color.FromArgb(150, 172, 190);
-  public static readonly Color Faint = Color.FromArgb(96, 118, 138);
-  public static readonly Color Warn = Color.FromArgb(255, 196, 77);
-  public static readonly Color Good = Color.FromArgb(110, 231, 168);
-  public static readonly Color Bad = Color.FromArgb(255, 112, 112);
-  public static readonly Color Caption = Color.FromArgb(14, 36, 52);
+  // Deep navy, with a blue for actions and a mint green for good news.
+  public static readonly Color Bg = Color.FromArgb(13, 20, 44);
+  public static readonly Color Rail = Color.FromArgb(9, 14, 34);
+  public static readonly Color Surface = Color.FromArgb(19, 28, 60);
+  public static readonly Color Surface2 = Color.FromArgb(27, 38, 78);
+  public static readonly Color Surface3 = Color.FromArgb(36, 50, 98);
+  public static readonly Color Border = Color.FromArgb(37, 50, 94);
+  public static readonly Color Accent = Color.FromArgb(52, 120, 246);
+  public static readonly Color AccentHover = Color.FromArgb(84, 145, 255);
+  public static readonly Color AccentDown = Color.FromArgb(36, 96, 214);
+  public static readonly Color Sky = Color.FromArgb(118, 172, 255);
+  public static readonly Color Ink = Color.White;
+  public static readonly Color Text = Color.FromArgb(240, 244, 255);
+  public static readonly Color Dim = Color.FromArgb(170, 181, 210);
+  public static readonly Color Faint = Color.FromArgb(108, 120, 156);
+  public static readonly Color Warn = Color.FromArgb(255, 183, 77);
+  public static readonly Color Good = Color.FromArgb(46, 212, 167);
+  public static readonly Color Bad = Color.FromArgb(255, 110, 110);
 
   public static readonly float Scale;
   static Th() {
@@ -519,6 +520,14 @@ static class Th {
     return p;
   }
 
+  // A rounded panel: fill, border, and a faint light along its top edge.
+  public static void Panel(Graphics g, RectangleF r, float radius, Color fill, Color border) {
+    using (var path = Round(r, radius)) {
+      using (var b = new SolidBrush(fill)) g.FillPath(b, path);
+      using (var pen = new Pen(border, Scale)) g.DrawPath(pen, path);
+    }
+  }
+
   public static void Tick(Graphics g, Color c, float cx, float cy, float size, float width) {
     using (var pen = new Pen(c, width) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
       g.DrawLines(pen, new[] { new PointF(cx - size * 0.45f, cy + size * 0.02f),
@@ -528,10 +537,133 @@ static class Th {
 
   public static Font F(float pt, FontStyle style) { return new Font("Segoe UI", pt, style); }
   public static Font Semi(float pt) { return new Font("Segoe UI Semibold", pt); }
+  public static Font Bold(float pt) { return new Font("Segoe UI", pt, FontStyle.Bold); }
 
   public static Label Label(string text, Font font, Color color, int x, int y, int w, int h) {
     return new Label { Text = text, Font = font, ForeColor = color, BackColor = Bg,
                        Location = new Point(x, y), Size = new Size(w, h), UseMnemonic = false };
+  }
+
+  // Labels don't blend into what's behind them: give those in a container its colour.
+  public static void Adopt(Control parent) {
+    foreach (Control c in parent.Controls) if (c is Label) c.BackColor = parent.BackColor;
+  }
+
+  // Small capitals, the labels above values.
+  public static void Caps(Graphics g, string text, Font font, Color c, int x, int y) {
+    TextRenderer.DrawText(g, text.ToUpperInvariant(), font, new Point(x, y), c, TextFormatFlags.NoPadding);
+  }
+
+  [DllImport("user32.dll")] static extern bool ReleaseCapture();
+  [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam);
+  [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+  static extern int SHDefExtractIcon(string file, int index, uint flags, out IntPtr large, out IntPtr small, uint size);
+  [DllImport("user32.dll")] static extern bool DestroyIcon(IntPtr icon);
+
+  // The window has no title bar: dragging these areas moves it.
+  public static void DragWindow(Control c) {
+    Form f = c.FindForm();
+    if (f == null) return;
+    ReleaseCapture();
+    SendMessage(f.Handle, 0xA1, (IntPtr)2, IntPtr.Zero);  // WM_NCLBUTTONDOWN, HTCAPTION
+  }
+
+  // This exe's icon (ssx.ico, embedded at compile time) at the given size.
+  static readonly Dictionary<int, Bitmap> icons = new Dictionary<int, Bitmap>();
+  public static Bitmap AppIcon(int size) {
+    Bitmap b;
+    if (icons.TryGetValue(size, out b)) return b;
+    IntPtr large, small;
+    try {
+      if (SHDefExtractIcon(Application.ExecutablePath, 0, 0, out large, out small, (uint)size) == 0 && large != IntPtr.Zero) {
+        using (var icon = Icon.FromHandle(large)) b = icon.ToBitmap();
+        DestroyIcon(large);
+        if (small != IntPtr.Zero) DestroyIcon(small);
+      }
+    } catch (Exception) { }
+    icons[size] = b;
+    return b;
+  }
+}
+
+// Line icons, drawn in a square.
+static class Glyph {
+  public static void Draw(Graphics g, string name, RectangleF r, Color c) {
+    if (name == null) return;
+    float s = Math.Min(r.Width, r.Height), x = r.X + (r.Width - s) / 2, y = r.Y + (r.Height - s) / 2;
+    Func<float, float, PointF> P = (u, v) => new PointF(x + u * s, y + v * s);
+    var smooth = g.SmoothingMode;
+    g.SmoothingMode = SmoothingMode.AntiAlias;
+    using (var pen = new Pen(c, Math.Max(1.2f, s * 0.085f)) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
+    using (var brush = new SolidBrush(c)) {
+      switch (name) {
+        case "home":
+          g.DrawLines(pen, new[] { P(.12f, .48f), P(.5f, .14f), P(.88f, .48f) });
+          g.DrawLines(pen, new[] { P(.22f, .4f), P(.22f, .86f), P(.78f, .86f), P(.78f, .4f) });
+          g.DrawLines(pen, new[] { P(.42f, .86f), P(.42f, .62f), P(.58f, .62f), P(.58f, .86f) });
+          break;
+        case "disc":
+          g.DrawEllipse(pen, x + s * .12f, y + s * .12f, s * .76f, s * .76f);
+          g.DrawEllipse(pen, x + s * .4f, y + s * .4f, s * .2f, s * .2f);
+          g.DrawArc(pen, x + s * .24f, y + s * .24f, s * .52f, s * .52f, 200, 70);
+          break;
+        case "download":
+          g.DrawLine(pen, P(.5f, .12f), P(.5f, .62f));
+          g.DrawLines(pen, new[] { P(.3f, .44f), P(.5f, .64f), P(.7f, .44f) });
+          g.DrawLines(pen, new[] { P(.14f, .66f), P(.14f, .86f), P(.86f, .86f), P(.86f, .66f) });
+          break;
+        case "refresh":
+          g.DrawArc(pen, x + s * .16f, y + s * .16f, s * .68f, s * .68f, -60, 290);
+          g.FillPolygon(brush, new[] { P(.86f, .1f), P(.88f, .4f), P(.6f, .32f) });
+          break;
+        case "folder":
+          g.DrawLines(pen, new[] { P(.1f, .8f), P(.1f, .22f), P(.4f, .22f), P(.48f, .32f), P(.9f, .32f), P(.9f, .8f), P(.1f, .8f) });
+          g.DrawLine(pen, P(.1f, .44f), P(.9f, .44f));
+          break;
+        case "dlc":
+          g.DrawRectangle(pen, x + s * .14f, y + s * .14f, s * .72f, s * .72f);
+          g.DrawLine(pen, P(.5f, .32f), P(.5f, .68f));
+          g.DrawLine(pen, P(.32f, .5f), P(.68f, .5f));
+          break;
+        case "drive":
+          using (var path = Th.Round(new RectangleF(x + s * .1f, y + s * .3f, s * .8f, s * .4f), s * .08f)) g.DrawPath(pen, path);
+          g.FillEllipse(brush, x + s * .66f, y + s * .46f, s * .09f, s * .09f);
+          break;
+        case "check":
+          g.DrawEllipse(pen, x + s * .1f, y + s * .1f, s * .8f, s * .8f);
+          Th.Tick(g, c, x + s * .5f, y + s * .5f, s * .42f, pen.Width);
+          break;
+        case "tag":
+          g.DrawPolygon(pen, new[] { P(.14f, .14f), P(.5f, .14f), P(.88f, .52f), P(.52f, .88f), P(.14f, .5f) });
+          g.FillEllipse(brush, x + s * .27f, y + s * .27f, s * .11f, s * .11f);
+          break;
+        case "play":
+          g.FillPolygon(brush, new[] { P(.22f, .12f), P(.86f, .5f), P(.22f, .88f) });
+          break;
+        case "desktop":
+          using (var path = Th.Round(new RectangleF(x + s * .1f, y + s * .16f, s * .8f, s * .52f), s * .06f)) g.DrawPath(pen, path);
+          g.DrawLine(pen, P(.5f, .68f), P(.5f, .84f));
+          g.DrawLine(pen, P(.32f, .86f), P(.68f, .86f));
+          break;
+        case "help":
+          g.DrawEllipse(pen, x + s * .1f, y + s * .1f, s * .8f, s * .8f);
+          g.DrawArc(pen, x + s * .36f, y + s * .26f, s * .28f, s * .26f, 180, 230);
+          g.DrawLine(pen, P(.5f, .52f), P(.5f, .6f));
+          g.FillEllipse(brush, x + s * .455f, y + s * .68f, s * .09f, s * .09f);
+          break;
+        case "snow":
+          for (int i = 0; i < 3; i++) {
+            double a = i * Math.PI / 3;
+            float dx = (float)Math.Cos(a) * s * .38f, dy = (float)Math.Sin(a) * s * .38f;
+            g.DrawLine(pen, x + s * .5f - dx, y + s * .5f - dy, x + s * .5f + dx, y + s * .5f + dy);
+          }
+          break;
+        case "peak":
+          g.DrawLines(pen, new[] { P(.08f, .82f), P(.38f, .26f), P(.56f, .56f), P(.68f, .4f), P(.92f, .82f), P(.08f, .82f) });
+          break;
+      }
+    }
+    g.SmoothingMode = smooth;
   }
 }
 
@@ -540,74 +672,47 @@ class Painted : Control {
     SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
              ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
   }
+  protected Color Behind { get { return Parent != null ? Parent.BackColor : Th.Bg; } }
 }
 
-// Header artwork: night gradient, peaks with snow caps and a board trail (original art).
-class Hero : Painted {
-  protected override void OnPaint(PaintEventArgs e) {
-    var g = e.Graphics;
-    g.SmoothingMode = SmoothingMode.AntiAlias;
-    float w = Width, h = Height;
-    Func<float, float, PointF> P = (x, y) => new PointF(x * w, y * h);
-
-    using (var bg = new LinearGradientBrush(new RectangleF(0, 0, w, h), Th.Caption, Th.Bg, 90f))
-      g.FillRectangle(bg, 0, 0, w, h);
+// Night peaks with snow caps, stars and a board trail (original art), filling r.
+static class Art {
+  public static void Mountains(Graphics g, RectangleF r) {
+    float w = r.Width, h = r.Height;
+    Func<float, float, PointF> P = (x, y) => new PointF(r.X + x * w, r.Y + y * h);
     using (var glow = new GraphicsPath()) {
-      glow.AddEllipse(w * 0.52f, -h * 0.9f, w * 0.62f, h * 2.1f);
+      glow.AddEllipse(r.X + w * 0.25f, r.Y - h * 0.55f, w * 0.9f, h * 1.6f);
       using (var b = new PathGradientBrush(glow)) {
-        b.CenterColor = Color.FromArgb(60, Th.Accent);
+        b.CenterColor = Color.FromArgb(70, Th.Accent);
         b.SurroundColors = new[] { Color.FromArgb(0, Th.Accent) };
         g.FillPath(b, glow);
       }
     }
     var rnd = new Random(11);
-    for (int i = 0; i < 46; i++) {
-      float sx = w * (0.42f + 0.58f * (float)rnd.NextDouble()), sy = h * 0.55f * (float)rnd.NextDouble();
-      float sz = Th.Scale * (rnd.Next(2) == 0 ? 1.2f : 2f);
-      using (var b = new SolidBrush(Color.FromArgb(rnd.Next(50, 170), 220, 240, 255))) g.FillEllipse(b, sx, sy, sz, sz);
+    for (int i = 0; i < 60; i++) {
+      float sx = r.X + w * (float)rnd.NextDouble(), sy = r.Y + h * 0.6f * (float)rnd.NextDouble();
+      float sz = Th.Scale * (rnd.Next(3) == 0 ? 2f : 1.2f);
+      using (var b = new SolidBrush(Color.FromArgb(rnd.Next(50, 190), 220, 232, 255))) g.FillEllipse(b, sx, sy, sz, sz);
     }
-
-    var back = new[] { P(.40f, 1.02f), P(.53f, .46f), P(.60f, .60f), P(.71f, .17f), P(.80f, .44f),
-                       P(.88f, .30f), P(1.02f, .56f), P(1.02f, 1.02f) };
-    using (var b = new LinearGradientBrush(new RectangleF(0, h * .17f, w, h * .85f),
-                                           Color.FromArgb(34, 88, 116), Color.FromArgb(14, 30, 44), 90f))
+    var back = new[] { P(-.02f, 1.02f), P(.2f, .46f), P(.32f, .6f), P(.5f, .2f), P(.66f, .46f),
+                       P(.8f, .3f), P(1.02f, .58f), P(1.02f, 1.02f) };
+    using (var b = new LinearGradientBrush(new RectangleF(r.X, r.Y + h * .2f, w, h * .82f),
+                                           Color.FromArgb(46, 74, 150), Color.FromArgb(16, 24, 56), 90f))
       g.FillPolygon(b, back);
-    var front = new[] { P(.49f, 1.02f), P(.64f, .52f), P(.70f, .64f), P(.83f, .25f), P(.95f, .62f),
-                        P(1.02f, .48f), P(1.02f, 1.02f) };
-    using (var b = new LinearGradientBrush(new RectangleF(0, h * .25f, w, h * .78f),
-                                           Color.FromArgb(96, 206, 240), Color.FromArgb(16, 54, 78), 90f))
+    var front = new[] { P(.1f, 1.02f), P(.36f, .54f), P(.46f, .66f), P(.68f, .28f), P(.88f, .64f),
+                        P(1.02f, .5f), P(1.02f, 1.02f) };
+    using (var b = new LinearGradientBrush(new RectangleF(r.X, r.Y + h * .28f, w, h * .75f),
+                                           Color.FromArgb(120, 168, 255), Color.FromArgb(22, 36, 84), 90f))
       g.FillPolygon(b, front);
-    using (var snow = new SolidBrush(Color.FromArgb(240, 248, 253)))
-    using (var dimSnow = new SolidBrush(Color.FromArgb(170, 220, 236, 245))) {
-      Cap(g, dimSnow, P(.71f, .17f), P(.60f, .60f), P(.80f, .44f), .30f);
-      Cap(g, dimSnow, P(.53f, .46f), P(.40f, 1.02f), P(.60f, .60f), .22f);
-      Cap(g, snow, P(.83f, .25f), P(.70f, .64f), P(.95f, .62f), .34f);
-      Cap(g, snow, P(.64f, .52f), P(.49f, 1.02f), P(.70f, .64f), .26f);
+    using (var snow = new SolidBrush(Color.FromArgb(240, 246, 255)))
+    using (var dimSnow = new SolidBrush(Color.FromArgb(160, 214, 228, 255))) {
+      Cap(g, dimSnow, P(.5f, .2f), P(.32f, .6f), P(.66f, .46f), .3f);
+      Cap(g, dimSnow, P(.2f, .46f), P(-.02f, 1.02f), P(.32f, .6f), .2f);
+      Cap(g, snow, P(.68f, .28f), P(.46f, .66f), P(.88f, .64f), .34f);
+      Cap(g, snow, P(.36f, .54f), P(.1f, 1.02f), P(.46f, .66f), .24f);
     }
-    using (var pen = new Pen(Color.FromArgb(215, 245, 251, 255), Th.D(3)) { StartCap = LineCap.Round, EndCap = LineCap.Round })
-      g.DrawBezier(pen, P(.57f, 1.0f), P(.70f, .72f), P(.79f, 1.04f), P(.98f, .74f));
-    using (var line = new LinearGradientBrush(new RectangleF(0, h - 2, w, 2), Th.Accent, Color.FromArgb(0, Th.Accent), 0f))
-      g.FillRectangle(line, 0, h - Th.D(2), w, Th.D(2));
-
-    g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-    using (var title = new Font("Segoe UI Black", 32f, FontStyle.Italic))
-    using (var pill = Th.Semi(9f))
-    using (var sub = Th.F(10.5f, FontStyle.Regular))
-    using (var white = new SolidBrush(Th.Text))
-    using (var accent = new SolidBrush(Th.Accent))
-    using (var dim = new SolidBrush(Th.Dim)) {
-      float x = Th.D(36), y = Th.D(20);
-      g.DrawString("SSX", title, white, x, y);
-      SizeF ts = g.MeasureString("SSX", title);
-      SizeF ps = g.MeasureString("PC PORT", pill);
-      var pr = new RectangleF(x + ts.Width + Th.D(4), y + ts.Height / 2 - ps.Height / 2 - Th.D(3),
-                              ps.Width + Th.D(14), ps.Height + Th.D(6));
-      using (var path = Th.Round(pr, pr.Height / 2))
-      using (var pen = new Pen(Th.Accent, Th.Scale * 1.4f)) g.DrawPath(pen, path);
-      g.DrawString("PC PORT", pill, accent, pr.X + Th.D(7), pr.Y + Th.D(3));
-      g.DrawString("Native Windows version, recompiled on your PC from your own Xbox 360 disc", sub, dim,
-                   x + Th.D(3), y + ts.Height + Th.D(2));
-    }
+    using (var pen = new Pen(Color.FromArgb(220, 246, 250, 255), Th.D(3)) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+      g.DrawBezier(pen, P(.3f, 1.0f), P(.5f, .74f), P(.64f, 1.04f), P(.96f, .76f));
   }
 
   static PointF Lerp(PointF a, PointF b, float t) { return new PointF(a.X + (b.X - a.X) * t, a.Y + (b.Y - a.Y) * t); }
@@ -619,52 +724,371 @@ class Hero : Painted {
   }
 }
 
-class StepRail : Painted {
-  public string[] Items = new string[0];
+// The left column: logo, the pages, and the status card.
+class Sidebar : Painted {
+  public string[] Items = { "Overview", "Game files", "Installation" };
+  public string[] Glyphs = { "home", "disc", "download" };
+  public bool[] Allowed = { true, true, false };
   public int Current;
+  public string Status = "", Version = "";
+  public Color StatusColor = Th.Good;
+  public Action<int> Picked;
+  public Action OpenRepo;
+  int hover = -1;
+  bool linkHover;
+
+  Rectangle ItemRect(int i) { return new Rectangle(Th.D(14), Th.D(150) + i * Th.D(52), Width - Th.D(28), Th.D(44)); }
+  Rectangle StatusRect { get { return new Rectangle(Th.D(14), Height - Th.D(158), Width - Th.D(28), Th.D(86)); } }
+  Rectangle LinkRect { get { return new Rectangle(Th.D(16), Height - Th.D(42), Width - Th.D(28), Th.D(20)); } }
+
+  int ItemAt(Point p) {
+    for (int i = 0; i < Items.Length; i++) if (Allowed[i] && ItemRect(i).Contains(p)) return i;
+    return -1;
+  }
+
+  protected override void OnMouseMove(MouseEventArgs e) {
+    int h = ItemAt(e.Location);
+    bool l = LinkRect.Contains(e.Location);
+    Cursor = h >= 0 || l ? Cursors.Hand : Cursors.Default;
+    if (h != hover || l != linkHover) { hover = h; linkHover = l; Invalidate(); }
+    base.OnMouseMove(e);
+  }
+  protected override void OnMouseLeave(EventArgs e) { hover = -1; linkHover = false; Invalidate(); base.OnMouseLeave(e); }
+  protected override void OnMouseDown(MouseEventArgs e) {
+    base.OnMouseDown(e);
+    if (e.Button != MouseButtons.Left) return;
+    int i = ItemAt(e.Location);
+    if (i >= 0) { if (Picked != null) Picked(i); return; }
+    if (LinkRect.Contains(e.Location)) { if (OpenRepo != null) OpenRepo(); return; }
+    if (e.Y < Th.D(130)) Th.DragWindow(this);
+  }
 
   protected override void OnPaint(PaintEventArgs e) {
     var g = e.Graphics;
-    g.Clear(Th.Rail);
+    using (var b = new LinearGradientBrush(ClientRectangle, Color.FromArgb(12, 19, 44), Th.Rail, 90f)) g.FillRectangle(b, ClientRectangle);
     g.SmoothingMode = SmoothingMode.AntiAlias;
-    using (var pen = new Pen(Th.Border)) g.DrawLine(pen, Width - 1, 0, Width - 1, Height);
-    using (var f = Th.Semi(8f)) TextRenderer.DrawText(g, "SETUP", f, new Point(Th.D(28), Th.D(28)), Th.Faint);
+    using (var pen = new Pen(Color.FromArgb(28, 39, 76))) g.DrawLine(pen, Width - 1, 0, Width - 1, Height);
 
-    float cx = Th.D(41), r = Th.D(13);
-    for (int i = 0; i < Items.Length; i++) {
-      float cy = Th.D(80) + i * Th.D(58);
-      bool done = i < Current, cur = i == Current;
-      if (i < Items.Length - 1)
-        using (var pen = new Pen(done ? Color.FromArgb(150, Th.Accent) : Th.Border, Th.D(2)))
-          g.DrawLine(pen, cx, cy + r + Th.D(4), cx, cy + Th.D(58) - r - Th.D(4));
-      var circle = new RectangleF(cx - r, cy - r, 2 * r, 2 * r);
-      if (done) {
-        using (var b = new SolidBrush(Th.Accent)) g.FillEllipse(b, circle);
-        Th.Tick(g, Th.Ink, cx, cy, r * 0.95f, Th.Scale * 2.2f);
-      } else {
-        using (var b = new SolidBrush(cur ? Color.FromArgb(40, Th.Accent) : Th.Rail)) g.FillEllipse(b, circle);
-        using (var pen = new Pen(cur ? Th.Accent : Th.Border, Th.Scale * 1.8f)) g.DrawEllipse(pen, circle);
-        using (var f = Th.Semi(9f))
-          TextRenderer.DrawText(g, (i + 1).ToString(), f, Rectangle.Round(circle), cur ? Th.Accent : Th.Faint,
-                                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+    // Logo: the icon over a soft glow, then the name.
+    int icon = Th.D(48);
+    using (var glow = new GraphicsPath()) {
+      glow.AddEllipse(Width / 2f - icon, Th.D(22) - icon / 3f, icon * 2f, icon * 1.6f);
+      using (var b = new PathGradientBrush(glow)) {
+        b.CenterColor = Color.FromArgb(60, Th.Accent);
+        b.SurroundColors = new[] { Color.FromArgb(0, Th.Accent) };
+        g.FillPath(b, glow);
       }
+    }
+    Bitmap bmp = Th.AppIcon(64);
+    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+    if (bmp != null) g.DrawImage(bmp, (Width - icon) / 2, Th.D(20), icon, icon);
+    using (var title = new Font("Segoe UI Black", 15f, FontStyle.Italic))
+      TextRenderer.DrawText(g, "SSX", title, new Rectangle(0, Th.D(72), Width, Th.D(30)), Th.Text,
+                            TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding);
+    using (var caps = Th.Semi(7.5f))
+      TextRenderer.DrawText(g, "P C   P O R T", caps, new Rectangle(0, Th.D(104), Width, Th.D(16)), Th.Sky,
+                            TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding);
+
+    for (int i = 0; i < Items.Length; i++) {
+      Rectangle r = ItemRect(i);
+      bool cur = i == Current, hot = i == hover && !cur;
+      if (cur) {
+        for (int k = 3; k >= 1; k--) {
+          var halo = RectangleF.Inflate(r, k * Th.Scale * 1.5f, k * Th.Scale * 1.5f);
+          using (var path = Th.Round(halo, Th.D(10) + k * 1.5f * Th.Scale))
+          using (var b = new SolidBrush(Color.FromArgb(14, Th.Accent))) g.FillPath(b, path);
+        }
+        using (var path = Th.Round(r, Th.D(10)))
+        using (var b = new LinearGradientBrush(r, Th.Accent, Color.FromArgb(36, 84, 200), 0f))
+        using (var pen = new Pen(Color.FromArgb(150, 140, 190, 255), Th.Scale)) {
+          g.FillPath(b, path);
+          g.DrawPath(pen, path);
+        }
+      } else if (hot) {
+        using (var path = Th.Round(r, Th.D(10)))
+        using (var b = new SolidBrush(Th.Surface)) g.FillPath(b, path);
+      }
+      Color c = cur ? Color.White : !Allowed[i] ? Color.FromArgb(70, 82, 118) : hot ? Th.Text : Th.Dim;
+      Glyph.Draw(g, Glyphs[i], new RectangleF(r.X + Th.D(14), r.Y + Th.D(12), Th.D(20), Th.D(20)), c);
       using (var f = cur ? Th.Semi(10.5f) : Th.F(10.5f, FontStyle.Regular))
-        TextRenderer.DrawText(g, Items[i], f, new Rectangle(Th.D(66), (int)(cy - r), Width - Th.D(70), (int)(2 * r)),
-                              cur ? Th.Text : done ? Th.Dim : Th.Faint, TextFormatFlags.VerticalCenter);
+        TextRenderer.DrawText(g, Items[i], f, new Rectangle(r.X + Th.D(46), r.Y, r.Width - Th.D(46), r.Height), c,
+                              TextFormatFlags.VerticalCenter);
+    }
+
+    // Status card, with a faint wave in the status colour.
+    Rectangle s = StatusRect;
+    using (var path = Th.Round(s, Th.D(12))) {
+      using (var b = new SolidBrush(Th.Surface)) g.FillPath(b, path);
+      g.SetClip(path);
+      using (var wave = new GraphicsPath()) {
+        wave.AddBezier(s.X, s.Bottom - Th.D(18), s.X + s.Width * .35f, s.Bottom - Th.D(34),
+                       s.X + s.Width * .6f, s.Bottom - Th.D(4), s.Right, s.Bottom - Th.D(26));
+        wave.AddLine(s.Right, s.Bottom - Th.D(26), s.Right, s.Bottom);
+        wave.AddLine(s.Right, s.Bottom, s.X, s.Bottom);
+        wave.CloseFigure();
+        using (var b = new SolidBrush(Color.FromArgb(26, StatusColor))) g.FillPath(b, wave);
+      }
+      g.ResetClip();
+      using (var pen = new Pen(Th.Border, Th.Scale)) g.DrawPath(pen, path);
+    }
+    float dot = Th.D(7);
+    using (var b = new SolidBrush(StatusColor)) g.FillEllipse(b, s.X + Th.D(16), s.Y + Th.D(18), dot, dot);
+    using (var caps = Th.Semi(7.5f)) Th.Caps(g, "Status", caps, Th.Faint, s.X + Th.D(30), s.Y + Th.D(14));
+    using (var f = Th.Semi(11.5f))
+      TextRenderer.DrawText(g, Status, f, new Rectangle(s.X + Th.D(14), s.Y + Th.D(36), s.Width - Th.D(24), Th.D(28)),
+                            StatusColor, TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+
+    using (var f = Th.F(8.5f, FontStyle.Regular)) {
+      TextRenderer.DrawText(g, Version, f, new Point(Th.D(16), Height - Th.D(64)), Th.Faint, TextFormatFlags.NoPadding);
+      TextRenderer.DrawText(g, "View on GitHub", f, LinkRect, linkHover ? Th.Sky : Th.Faint,
+                            TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
     }
   }
 }
 
+// The top of the page: a small line, the page's title and, on the overview, a pill.
+class Header : Painted {
+  public string Kicker = "Your game", Title = "SSX", Pill;
+  public Color PillDot = Th.Good;
+
+  protected override void OnMouseDown(MouseEventArgs e) {
+    base.OnMouseDown(e);
+    if (e.Button == MouseButtons.Left) Th.DragWindow(this);
+  }
+
+  protected override void OnPaint(PaintEventArgs e) {
+    var g = e.Graphics;
+    g.Clear(Th.Bg);
+    g.SmoothingMode = SmoothingMode.AntiAlias;
+    int x = Th.D(26);
+    using (var caps = Th.Semi(7.5f)) Th.Caps(g, Kicker, caps, Th.Faint, x, Th.D(16));
+    using (var title = Th.Bold(17f)) {
+      TextRenderer.DrawText(g, Title, title, new Point(x - Th.D(2), Th.D(30)), Th.Text, TextFormatFlags.NoPadding);
+      if (Pill == null) return;
+      int tw = TextRenderer.MeasureText(g, Title, title, Size.Empty, TextFormatFlags.NoPadding).Width;
+      using (var caps = Th.Semi(7.5f)) {
+        string text = Pill.ToUpperInvariant();
+        int pw = TextRenderer.MeasureText(g, text, caps, Size.Empty, TextFormatFlags.NoPadding).Width;
+        var r = new RectangleF(x + tw + Th.D(12), Th.D(35), pw + Th.D(36), Th.D(24));
+        Th.Panel(g, r, r.Height / 2, Th.Surface, Th.Border);
+        TextRenderer.DrawText(g, text, caps, new Point((int)r.X + Th.D(12), (int)r.Y + Th.D(6)), Th.Text, TextFormatFlags.NoPadding);
+        float d = Th.D(8);
+        using (var glow = new SolidBrush(Color.FromArgb(60, PillDot))) g.FillEllipse(glow, r.Right - Th.D(20) - 2, r.Y + r.Height / 2 - d / 2 - 2, d + 4, d + 4);
+        using (var b = new SolidBrush(PillDot)) g.FillEllipse(b, r.Right - Th.D(20), r.Y + r.Height / 2 - d / 2, d, d);
+      }
+    }
+  }
+}
+
+// Minimize and close, top right (the window has no title bar).
+class WinButton : Painted {
+  public bool IsClose;
+  bool hover;
+  public WinButton() { Cursor = Cursors.Hand; }
+  protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
+  protected override void OnMouseLeave(EventArgs e) { hover = false; Invalidate(); base.OnMouseLeave(e); }
+  protected override void OnClick(EventArgs e) {
+    base.OnClick(e);
+    Form f = FindForm();
+    if (f == null) return;
+    if (IsClose) f.Close(); else f.WindowState = FormWindowState.Minimized;
+  }
+  protected override void OnPaint(PaintEventArgs e) {
+    var g = e.Graphics;
+    g.Clear(hover ? (IsClose ? Color.FromArgb(232, 17, 35) : Th.Surface2) : Behind);
+    g.SmoothingMode = SmoothingMode.AntiAlias;
+    float cx = Width / 2f, cy = Height / 2f, k = Th.D(5);
+    using (var pen = new Pen(hover ? Color.White : Th.Dim, Th.Scale * 1.1f)) {
+      if (IsClose) { g.DrawLine(pen, cx - k, cy - k, cx + k, cy + k); g.DrawLine(pen, cx - k, cy + k, cx + k, cy - k); }
+      else g.DrawLine(pen, cx - k, cy, cx + k, cy);
+    }
+  }
+}
+
+class Chip {
+  public string Glyph, Label, Value;
+  public Color Color;
+  public Chip(string glyph, string label, string value, Color color) { Glyph = glyph; Label = label; Value = value; Color = color; }
+}
+
+// The big card at the top of the overview: artwork on the right, the game's name and chips on the left.
+class HeroCard : Painted {
+  public string Kicker = "", Title = "SSX", Sub = "", Body = "";
+  public Chip[] Chips = new Chip[0];
+
+  protected override void OnPaint(PaintEventArgs e) {
+    var g = e.Graphics;
+    g.Clear(Behind);
+    g.SmoothingMode = SmoothingMode.AntiAlias;
+    var rect = new RectangleF(0, 0, Width - 1, Height - 1);
+    Color left = Color.FromArgb(17, 27, 62);
+    using (var path = Th.Round(rect, Th.D(14))) {
+      using (var b = new LinearGradientBrush(rect, Color.FromArgb(20, 34, 78), Color.FromArgb(12, 19, 46), 35f)) g.FillPath(b, path);
+      g.SetClip(path);
+      Art.Mountains(g, new RectangleF(Width * .38f, 0, Width * .62f, Height));
+      var fade = new RectangleF(Width * .36f, 0, Width * .3f, Height);
+      using (var b = new LinearGradientBrush(fade, left, Color.FromArgb(0, left), 0f)) g.FillRectangle(b, fade.X + 1, 0, fade.Width - 2, Height);
+      using (var b = new SolidBrush(left)) g.FillRectangle(b, 0, 0, fade.X + 2, Height);
+      g.ResetClip();
+      using (var pen = new Pen(Th.Border, Th.Scale)) g.DrawPath(pen, path);
+    }
+    int x = Th.D(26);
+    using (var caps = Th.Semi(7.5f)) Th.Caps(g, Kicker, caps, Th.Sky, x, Th.D(22));
+    using (var title = new Font("Segoe UI Black", 30f, FontStyle.Italic))
+      TextRenderer.DrawText(g, Title, title, new Point(x - Th.D(3), Th.D(36)), Th.Text, TextFormatFlags.NoPadding);
+    using (var f = Th.Semi(11.5f))
+      TextRenderer.DrawText(g, Sub, f, new Point(x, Th.D(88)), Th.Text, TextFormatFlags.NoPadding);
+    using (var f = Th.F(9f, FontStyle.Regular))
+      TextRenderer.DrawText(g, Body, f, new Rectangle(x, Th.D(112), (int)(Width * .56f), Th.D(20)), Th.Dim,
+                            TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+
+    int cx = x, cy = Height - Th.D(64), ch = Th.D(44);
+    using (var caps = Th.Semi(7f))
+    using (var value = Th.Semi(10f)) {
+      foreach (Chip c in Chips) {
+        int tw = Math.Max(TextRenderer.MeasureText(g, c.Label.ToUpperInvariant(), caps, Size.Empty, TextFormatFlags.NoPadding).Width,
+                          TextRenderer.MeasureText(g, c.Value, value, Size.Empty, TextFormatFlags.NoPadding).Width);
+        var r = new RectangleF(cx, cy, Th.D(56) + tw, ch);
+        Th.Panel(g, r, Th.D(9), Color.FromArgb(230, 16, 25, 56), Th.Border);
+        var box = new RectangleF(r.X + Th.D(8), r.Y + Th.D(7), Th.D(30), Th.D(30));
+        Th.Panel(g, box, Th.D(7), Th.Surface2, Th.Border);
+        Glyph.Draw(g, c.Glyph, RectangleF.Inflate(box, -Th.D(7), -Th.D(7)), c.Color == Th.Text ? Th.Sky : c.Color);
+        Th.Caps(g, c.Label, caps, Th.Faint, (int)r.X + Th.D(46), (int)r.Y + Th.D(7));
+        TextRenderer.DrawText(g, c.Value, value, new Point((int)r.X + Th.D(46), (int)r.Y + Th.D(21)), c.Color, TextFormatFlags.NoPadding);
+        cx = (int)r.Right + Th.D(10);
+      }
+    }
+  }
+}
+
+// A small card with an icon, a label, a value and a line under it.
+class Tile : Painted {
+  public string Glyph = "", Label = "", Value = "", Sub = "";
+  public Color ValueColor = Th.Text;
+
+  protected override void OnPaint(PaintEventArgs e) {
+    var g = e.Graphics;
+    g.Clear(Behind);
+    g.SmoothingMode = SmoothingMode.AntiAlias;
+    var rect = new RectangleF(0, 0, Width - 1, Height - 1);
+    using (var path = Th.Round(rect, Th.D(12))) {
+      using (var b = new SolidBrush(Th.Surface)) g.FillPath(b, path);
+      g.SetClip(path);
+      using (var wave = new GraphicsPath()) {
+        wave.AddBezier(Width * .45f, Height, Width * .65f, Height * .55f, Width * .8f, Height * .95f, Width, Height * .5f);
+        wave.AddLine(Width, Height * .5f, Width, Height);
+        wave.CloseFigure();
+        using (var b = new SolidBrush(Color.FromArgb(10, 160, 190, 255))) g.FillPath(b, wave);
+      }
+      g.ResetClip();
+      using (var pen = new Pen(Th.Border, Th.Scale)) g.DrawPath(pen, path);
+    }
+    var box = new RectangleF(Th.D(14), (Height - Th.D(36)) / 2f, Th.D(36), Th.D(36));
+    Th.Panel(g, box, Th.D(8), Th.Surface2, Th.Border);
+    global::Glyph.Draw(g, Glyph, RectangleF.Inflate(box, -Th.D(9), -Th.D(9)), Th.Sky);
+    int x = Th.D(62), w = Width - x - Th.D(10);
+    using (var caps = Th.Semi(7f)) Th.Caps(g, Label, caps, Th.Faint, x, Th.D(14));
+    using (var f = Th.Semi(11f))
+      TextRenderer.DrawText(g, Value, f, new Rectangle(x, Th.D(28), w, Th.D(22)), ValueColor,
+                            TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+    using (var f = Th.F(8f, FontStyle.Regular))
+      TextRenderer.DrawText(g, Sub, f, new Rectangle(x, Th.D(51), w, Th.D(16)), Th.Faint,
+                            TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+  }
+}
+
+// A rounded card that holds controls: a title with an icon, and optionally a list or text.
+class CardPanel : Panel {
+  public string Title = "", Glyph, Body;
+  public string[] Items;
+  public Color Tone = Th.Sky;
+  readonly Font bodyFont = Th.F(9.5f, FontStyle.Regular);
+
+  public CardPanel() {
+    SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+             ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+    BackColor = Th.Surface;
+  }
+
+  public int Top0 { get { return Th.D(58); } }
+
+  protected override void OnPaint(PaintEventArgs e) {
+    var g = e.Graphics;
+    g.Clear(Parent != null ? Parent.BackColor : Th.Bg);
+    g.SmoothingMode = SmoothingMode.AntiAlias;
+    Th.Panel(g, new RectangleF(0, 0, Width - 1, Height - 1), Th.D(12), Th.Surface, Th.Border);
+    int x = Th.D(20);
+    if (Glyph != null) {
+      var circle = new RectangleF(Th.D(18), Th.D(16), Th.D(30), Th.D(30));
+      using (var b = new SolidBrush(Th.Surface2)) g.FillEllipse(b, circle);
+      using (var pen = new Pen(Th.Border, Th.Scale)) g.DrawEllipse(pen, circle);
+      this.DrawGlyph(g, RectangleF.Inflate(circle, -Th.D(7), -Th.D(7)));
+      x = Th.D(58);
+    }
+    using (var f = Th.Bold(9.5f)) Th.Caps(g, Title, f, Th.Text, x, Th.D(22));
+    int inner = Width - Th.D(40), y = Top0;
+    if (Body != null)
+      TextRenderer.DrawText(g, Body, bodyFont, new Rectangle(Th.D(20), y, inner, Height - y), Th.Dim, TextFormatFlags.WordBreak);
+    if (Items == null) return;
+    foreach (string item in Items) {
+      int h = TextRenderer.MeasureText(item, bodyFont, new Size(inner - Th.D(28), 1000), TextFormatFlags.WordBreak).Height;
+      float r = Th.D(9), cy = y + bodyFont.Height / 2f;
+      using (var b = new SolidBrush(Color.FromArgb(40, Tone))) g.FillEllipse(b, Th.D(20), cy - r, 2 * r, 2 * r);
+      Th.Tick(g, Tone, Th.D(20) + r, cy, r * 0.95f, Th.Scale * 1.7f);
+      TextRenderer.DrawText(g, item, bodyFont, new Rectangle(Th.D(48), y, inner - Th.D(28), h), Th.Text, TextFormatFlags.WordBreak);
+      y += h + Th.D(10);
+    }
+  }
+
+  void DrawGlyph(Graphics g, RectangleF r) { global::Glyph.Draw(g, Glyph, r, Tone); }
+}
+
+// A square button with an icon, a name and a state line (the overview's shortcuts).
+class ShortcutTile : Painted {
+  public string Glyph = "", Label = "", State = "";
+  public Color StateColor = Th.Faint;
+  bool hover;
+  public ShortcutTile() { Cursor = Cursors.Hand; }
+  protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
+  protected override void OnMouseLeave(EventArgs e) { hover = false; Invalidate(); base.OnMouseLeave(e); }
+  protected override void OnPaint(PaintEventArgs e) {
+    var g = e.Graphics;
+    g.Clear(Behind);
+    g.SmoothingMode = SmoothingMode.AntiAlias;
+    Th.Panel(g, new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f), Th.D(10),
+             hover ? Th.Surface3 : Th.Surface2, hover ? Th.Accent : Th.Border);
+    using (var f = Th.Semi(9f)) {
+      var flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding;
+      int lh = TextRenderer.MeasureText(g, Label, f, new Size(Width - Th.D(12), 1000), flags).Height;
+      int top = (Height - Th.D(22) - (Th.D(34) + lh)) / 2;
+      global::Glyph.Draw(g, Glyph, new RectangleF((Width - Th.D(26)) / 2f, top, Th.D(26), Th.D(26)), Th.Sky);
+      TextRenderer.DrawText(g, Label, f, new Rectangle(Th.D(6), top + Th.D(34), Width - Th.D(12), lh), Th.Text, flags);
+    }
+    if (State.Length > 0)
+      using (var caps = Th.Semi(7f))
+        TextRenderer.DrawText(g, State.ToUpperInvariant(), caps, new Rectangle(0, Height - Th.D(22), Width, Th.D(16)), StateColor,
+                              TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding);
+  }
+}
+
+enum ButtonKind { Primary, Secondary, Pill, Play }
+
 class FlatButton : Button {
-  public bool Primary;
+  public ButtonKind Kind;
+  public string Glyph;
   bool hover, down;
 
   public FlatButton(string text, bool primary) {
     Text = text;
-    Primary = primary;
+    Kind = primary ? ButtonKind.Primary : ButtonKind.Secondary;
     SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
     Cursor = Cursors.Hand;
     Font = Th.Semi(10f);
+  }
+
+  public bool Primary {
+    get { return Kind == ButtonKind.Primary || Kind == ButtonKind.Play; }
+    set { if (value != Primary) Kind = value ? ButtonKind.Primary : ButtonKind.Secondary; }
   }
 
   protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
@@ -677,29 +1101,47 @@ class FlatButton : Button {
     var g = e.Graphics;
     g.Clear(Parent != null ? Parent.BackColor : Th.Bg);
     g.SmoothingMode = SmoothingMode.AntiAlias;
-    Color fill, border, text;
-    if (!Enabled) {
-      fill = Th.Surface; border = Th.Surface2; text = Th.Faint;
-    } else if (Primary) {
-      fill = down ? Th.AccentDown : hover ? Th.AccentHover : Th.Accent; border = fill; text = Th.Ink;
-    } else {
-      fill = down ? Th.Surface : hover ? Th.Surface3 : Th.Surface2; border = hover ? Th.Accent : Th.Border; text = Th.Text;
-    }
     var rect = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-    using (var path = Th.Round(rect, Th.D(7)))
-    using (var b = new SolidBrush(fill))
-    using (var pen = new Pen(border, Th.Scale)) {
-      g.FillPath(b, path);
-      g.DrawPath(pen, path);
+    float radius = Kind == ButtonKind.Pill ? rect.Height / 2 : Kind == ButtonKind.Play ? Th.D(12) : Th.D(9);
+    Color text = Th.Text;
+    using (var path = Th.Round(rect, radius)) {
+      if (!Enabled) {
+        using (var b = new SolidBrush(Th.Surface)) g.FillPath(b, path);
+        using (var pen = new Pen(Th.Surface2, Th.Scale)) g.DrawPath(pen, path);
+        text = Color.FromArgb(86, 98, 136);
+      } else if (Primary) {
+        Color top = down ? Th.AccentDown : hover ? Th.AccentHover : Color.FromArgb(70, 136, 255);
+        Color bottom = down ? Color.FromArgb(28, 78, 190) : hover ? Th.Accent : Color.FromArgb(40, 100, 230);
+        if (Kind == ButtonKind.Play)
+          for (int k = 3; k >= 1; k--) {
+            var halo = RectangleF.Inflate(rect, k * Th.Scale * 1.5f, k * Th.Scale * 1.5f);
+            using (var hp = Th.Round(halo, radius + k * 1.5f * Th.Scale))
+            using (var b = new SolidBrush(Color.FromArgb(hover ? 26 : 16, Th.Accent))) g.FillPath(b, hp);
+          }
+        using (var b = new LinearGradientBrush(rect, top, bottom, 90f)) g.FillPath(b, path);
+        using (var pen = new Pen(Color.FromArgb(140, 160, 200, 255), Th.Scale)) g.DrawPath(pen, path);
+        text = Color.White;
+      } else {
+        using (var b = new SolidBrush(down ? Th.Surface : hover ? Th.Surface3 : Th.Surface2)) g.FillPath(b, path);
+        using (var pen = new Pen(hover ? Th.Accent : Th.Border, Th.Scale)) g.DrawPath(pen, path);
+      }
     }
     if (Focused && ShowFocusCues) {
       var ring = RectangleF.Inflate(rect, -Th.D(3), -Th.D(3));
-      using (var path = Th.Round(ring, Th.D(5)))
-      using (var pen = new Pen(Primary ? Color.FromArgb(120, Th.Ink) : Color.FromArgb(150, Th.Accent), Th.Scale))
-        g.DrawPath(pen, path);
+      using (var path = Th.Round(ring, Math.Max(1, radius - Th.D(3))))
+      using (var pen = new Pen(Color.FromArgb(150, Primary ? Color.White : Th.Accent), Th.Scale)) g.DrawPath(pen, path);
     }
-    TextRenderer.DrawText(g, Text, Font, ClientRectangle, text,
-                          TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+    Font font = Kind == ButtonKind.Play ? null : Font;
+    using (var play = Kind == ButtonKind.Play ? Th.Bold(13f) : null) {
+      if (font == null) font = play;
+      string label = Kind == ButtonKind.Play ? Text.ToUpperInvariant() : Text;
+      int tw = TextRenderer.MeasureText(g, label, font, Size.Empty, TextFormatFlags.NoPadding).Width;
+      int gs = Glyph == null ? 0 : Kind == ButtonKind.Play ? Th.D(16) : Th.D(15), gap = Glyph == null ? 0 : Th.D(9);
+      int x = (Width - tw - gs - gap) / 2;
+      if (Glyph != null) global::Glyph.Draw(g, Glyph, new RectangleF(x, (Height - gs) / 2f, gs, gs), text);
+      TextRenderer.DrawText(g, label, font, new Rectangle(x + gs + gap, 0, tw + Th.D(4), Height), text,
+                            TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+    }
   }
 }
 
@@ -724,10 +1166,10 @@ class Check : CheckBox {
     float s = Th.D(20);
     var box = new RectangleF(1, (Height - s) / 2, s, s);
     using (var path = Th.Round(box, Th.D(5))) {
-      using (var b = new SolidBrush(Checked ? Th.Accent : Th.Surface)) g.FillPath(b, path);
-      using (var pen = new Pen(Checked || hover || Focused ? Th.Accent : Th.Border, Th.Scale * 1.4f)) g.DrawPath(pen, path);
+      using (var b = new SolidBrush(Checked ? Th.Accent : Th.Bg)) g.FillPath(b, path);
+      using (var pen = new Pen(Checked || hover || Focused ? Th.AccentHover : Th.Border, Th.Scale * 1.4f)) g.DrawPath(pen, path);
     }
-    if (Checked) Th.Tick(g, Th.Ink, box.X + s / 2, box.Y + s / 2, s * 0.62f, Th.Scale * 2.2f);
+    if (Checked) Th.Tick(g, Color.White, box.X + s / 2, box.Y + s / 2, s * 0.62f, Th.Scale * 2.2f);
     int tx = (int)s + Th.D(12);
     TextRenderer.DrawText(g, Text, Font, new Rectangle(tx, 0, Width - tx, Height), Th.Text,
                           TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
@@ -740,9 +1182,9 @@ class Field : Panel {
 
   public Field() {
     DoubleBuffered = true;
-    BackColor = Th.Surface;
+    BackColor = Th.Bg;
     Box.BorderStyle = BorderStyle.None;
-    Box.BackColor = Th.Surface;
+    Box.BackColor = Th.Bg;
     Box.ForeColor = Th.Text;
     Box.Font = Th.F(10.5f, FontStyle.Regular);
     Controls.Add(Box);
@@ -764,88 +1206,7 @@ class Field : Panel {
     var g = e.Graphics;
     g.Clear(Parent != null ? Parent.BackColor : Th.Bg);
     g.SmoothingMode = SmoothingMode.AntiAlias;
-    using (var path = Th.Round(new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f), Th.D(7)))
-    using (var b = new SolidBrush(Th.Surface))
-    using (var pen = new Pen(Box.Focused ? Th.Accent : Th.Border, Th.Scale * 1.2f)) {
-      g.FillPath(b, path);
-      g.DrawPath(pen, path);
-    }
-  }
-}
-
-// Rounded panel with a coloured edge, a title and wrapped body text, or a list of items.
-class Card : Painted {
-  public string Title = "", Body = "";
-  // Instead of Body: one item per row, each with a dot.
-  public string[] Items;
-  public Color Tone = Th.Accent;
-  readonly Font titleFont = Th.Semi(10.5f), bodyFont = Th.F(10f, FontStyle.Regular);
-
-  public int FitHeight(int width) {
-    int inner = width - Th.D(44);
-    int t = TextRenderer.MeasureText(Title, titleFont, new Size(inner, 1000), TextFormatFlags.WordBreak).Height;
-    return Th.D(18) + t + Th.D(6) + BodyHeight(inner) + Th.D(18);
-  }
-
-  int ItemHeight(string item, int inner) {
-    return TextRenderer.MeasureText(item, bodyFont, new Size(inner - Th.D(18), 1000), TextFormatFlags.WordBreak).Height;
-  }
-
-  int BodyHeight(int inner) {
-    if (Items == null) return TextRenderer.MeasureText(Body, bodyFont, new Size(inner, 1000), TextFormatFlags.WordBreak).Height;
-    int h = 0;
-    foreach (string item in Items) h += ItemHeight(item, inner) + Th.D(8);
-    return h - Th.D(8);
-  }
-
-  protected override void OnPaint(PaintEventArgs e) {
-    var g = e.Graphics;
-    g.Clear(Parent != null ? Parent.BackColor : Th.Bg);
-    g.SmoothingMode = SmoothingMode.AntiAlias;
-    using (var path = Th.Round(new RectangleF(0, 0, Width - 1, Height - 1), Th.D(10))) {
-      using (var b = new SolidBrush(Th.Surface)) g.FillPath(b, path);
-      g.SetClip(path);
-      using (var b = new SolidBrush(Tone)) g.FillRectangle(b, 0, 0, Th.D(4), Height);
-      g.ResetClip();
-      using (var pen = new Pen(Color.FromArgb(70, Tone), Th.Scale)) g.DrawPath(pen, path);
-    }
-    int x = Th.D(24), inner = Width - Th.D(44);
-    int th = TextRenderer.MeasureText(Title, titleFont, new Size(inner, 1000), TextFormatFlags.WordBreak).Height;
-    TextRenderer.DrawText(g, Title, titleFont, new Rectangle(x, Th.D(18), inner, th), Tone, TextFormatFlags.WordBreak);
-    if (Items == null) {
-      TextRenderer.DrawText(g, Body, bodyFont, new Rectangle(x, Th.D(24) + th, inner, Height), Th.Text,
-                            TextFormatFlags.WordBreak);
-      return;
-    }
-    int y = Th.D(24) + th;
-    float r = Th.Scale * 2.5f;
-    foreach (string item in Items) {
-      int h = ItemHeight(item, inner);
-      float cy = y + bodyFont.Height / 2f;
-      using (var b = new SolidBrush(Tone)) g.FillEllipse(b, x + Th.D(3), cy - r, 2 * r, 2 * r);
-      TextRenderer.DrawText(g, item, bodyFont, new Rectangle(x + Th.D(18), y, inner - Th.D(18), h), Th.Text,
-                            TextFormatFlags.WordBreak);
-      y += h + Th.D(8);
-    }
-  }
-}
-
-class Bullets : Painted {
-  public string[] Items = new string[0];
-  readonly Font font = Th.F(10.5f, FontStyle.Regular);
-
-  protected override void OnPaint(PaintEventArgs e) {
-    var g = e.Graphics;
-    g.Clear(Th.Bg);
-    g.SmoothingMode = SmoothingMode.AntiAlias;
-    for (int i = 0; i < Items.Length; i++) {
-      int y = i * Th.D(30);
-      float r = Th.D(9), cy = y + Th.D(15);
-      using (var b = new SolidBrush(Color.FromArgb(45, Th.Accent))) g.FillEllipse(b, 0, cy - r, 2 * r, 2 * r);
-      Th.Tick(g, Th.Accent, r, cy, r * 0.95f, Th.Scale * 1.8f);
-      TextRenderer.DrawText(g, Items[i], font, new Rectangle(Th.D(30), y, Width - Th.D(30), Th.D(30)), Th.Text,
-                            TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
-    }
+    Th.Panel(g, new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f), Th.D(9), Th.Bg, Box.Focused ? Th.Accent : Th.Border);
   }
 }
 
@@ -857,7 +1218,7 @@ class StageList : Painted {
 
   protected override void OnPaint(PaintEventArgs e) {
     var g = e.Graphics;
-    g.Clear(Th.Bg);
+    g.Clear(Behind);
     g.SmoothingMode = SmoothingMode.AntiAlias;
     for (int i = 0; i < Items.Length; i++) {
       int y = i * Th.D(34);
@@ -866,22 +1227,22 @@ class StageList : Painted {
       bool done = i < Current, cur = i == Current;
       Color textColor = Th.Faint;
       if (done) {
-        using (var b = new SolidBrush(Th.Accent)) g.FillEllipse(b, circle);
-        Th.Tick(g, Th.Ink, cx, cy, r, Th.Scale * 1.9f);
+        using (var b = new SolidBrush(Th.Good)) g.FillEllipse(b, circle);
+        Th.Tick(g, Th.Rail, cx, cy, r, Th.Scale * 1.9f);
         textColor = Th.Dim;
       } else if (cur && Failed) {
         using (var b = new SolidBrush(Th.Bad)) g.FillEllipse(b, circle);
-        using (var pen = new Pen(Th.Ink, Th.Scale * 1.9f)) {
+        using (var pen = new Pen(Th.Rail, Th.Scale * 1.9f)) {
           float k = r * 0.38f;
           g.DrawLine(pen, cx - k, cy - k, cx + k, cy + k);
           g.DrawLine(pen, cx - k, cy + k, cx + k, cy - k);
         }
         textColor = Th.Bad;
       } else if (cur) {
-        using (var pen = new Pen(Th.Accent, Th.Scale * 1.8f)) g.DrawEllipse(pen, circle);
+        using (var pen = new Pen(Th.AccentHover, Th.Scale * 1.8f)) g.DrawEllipse(pen, circle);
         int a = 110 + (int)(110 * Math.Sin(Pulse * 0.25));
         float k = r * 0.48f;
-        using (var b = new SolidBrush(Color.FromArgb(a, Th.Accent))) g.FillEllipse(b, cx - k, cy - k, 2 * k, 2 * k);
+        using (var b = new SolidBrush(Color.FromArgb(a, Th.AccentHover))) g.FillEllipse(b, cx - k, cy - k, 2 * k, 2 * k);
         textColor = Th.Text;
       } else {
         using (var pen = new Pen(Th.Border, Th.Scale * 1.6f)) g.DrawEllipse(pen, circle);
@@ -900,11 +1261,11 @@ class Bar : Painted {
 
   protected override void OnPaint(PaintEventArgs e) {
     var g = e.Graphics;
-    g.Clear(Th.Bg);
+    g.Clear(Behind);
     g.SmoothingMode = SmoothingMode.AntiAlias;
     float h = Height - 1;
     using (var track = Th.Round(new RectangleF(0, 0, Width - 1, h), h / 2))
-    using (var b = new SolidBrush(Th.Surface2)) g.FillPath(b, track);
+    using (var b = new SolidBrush(Th.Bg)) g.FillPath(b, track);
     float fw = Math.Max(h, (Width - 1) * Math.Min(1f, Value));
     if (Value <= 0) return;
     var fill = new RectangleF(0, 0, fw, h);
@@ -913,7 +1274,7 @@ class Bar : Painted {
         using (var b = new SolidBrush(Th.Bad)) g.FillPath(b, path);
         return;
       }
-      using (var b = new LinearGradientBrush(new RectangleF(0, 0, fw + 1, h), Color.FromArgb(38, 140, 196), Th.Accent, 0f))
+      using (var b = new LinearGradientBrush(new RectangleF(0, 0, fw + 1, h), Th.AccentDown, Color.FromArgb(110, 175, 255), 0f))
         g.FillPath(b, path);
       if (Value < 1f) {
         float band = Th.D(140), x = (Phase * Th.D(7)) % (fw + band) - band;
@@ -931,21 +1292,29 @@ class Bar : Painted {
   }
 }
 
-class Badge : Painted {
+// The bar along the bottom: the game's icon, name and status line, and the page's buttons.
+class BottomBar : Panel {
+  public BottomBar() {
+    SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+             ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+    BackColor = Color.FromArgb(11, 17, 40);
+  }
   protected override void OnPaint(PaintEventArgs e) {
     var g = e.Graphics;
-    g.Clear(Th.Bg);
+    g.Clear(BackColor);
     g.SmoothingMode = SmoothingMode.AntiAlias;
-    var r = new RectangleF(1, 1, Width - 3, Height - 3);
-    using (var b = new LinearGradientBrush(r, Th.AccentHover, Color.FromArgb(38, 140, 196), 60f)) g.FillEllipse(b, r);
-    Th.Tick(g, Th.Ink, Width / 2f, Height / 2f, Width * 0.42f, Th.Scale * 3.2f);
+    using (var pen = new Pen(Color.FromArgb(28, 39, 76))) g.DrawLine(pen, 0, 0, Width, 0);
+    int icon = Th.D(44);
+    Bitmap bmp = Th.AppIcon(64);
+    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+    if (bmp != null) g.DrawImage(bmp, Th.D(24), (Height - icon) / 2, icon, icon);
+    using (var f = Th.Bold(11.5f))
+      TextRenderer.DrawText(g, "SSX", f, new Point(Th.D(80), Height / 2 - Th.D(20)), Th.Text, TextFormatFlags.NoPadding);
   }
 }
 
 class InstallerForm : Form {
   const string RepoUrl = "https://github.com/AmarilloNL/ssx-recomp";
-
-  [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 
   internal static readonly string[] Stages = {
     "Unpack the port's source code", "Check your ISO", "Install the build tools",
@@ -969,10 +1338,12 @@ class InstallerForm : Form {
     return name;
   }
 
-  readonly StepRail rail = new StepRail();
+  readonly Sidebar sidebar = new Sidebar();
+  readonly Header header = new Header();
   readonly Panel[] pages = new Panel[4];
   readonly FlatButton backButton = new FlatButton("Back", false);
   readonly FlatButton nextButton = new FlatButton("Next", true);
+  readonly FlatButton updateButton = new FlatButton("Check for updates", false) { Kind = ButtonKind.Pill, Glyph = "refresh" };
 
   readonly Field isoField = new Field();
   readonly Field folderField = new Field();
@@ -991,7 +1362,17 @@ class InstallerForm : Form {
   readonly StageList stageList = new StageList();
   readonly TextBox logBox = new TextBox();
 
+  // The overview (game built): the big card, the four tiles and the desktop shortcut's tile.
+  readonly HeroCard playHero = new HeroCard();
+  readonly Tile gameTile = new Tile { Glyph = "disc", Label = "Game" };
+  readonly Tile dlcTile = new Tile { Glyph = "dlc", Label = "DLC" };
+  readonly Tile storageTile = new Tile { Glyph = "drive", Label = "Storage" };
+  readonly Tile folderTile = new Tile { Glyph = "folder", Label = "SSX folder" };
+  readonly ShortcutTile shortcutTile = new ShortcutTile { Glyph = "desktop", Label = "Desktop shortcut" };
+
+  // The status line in the bottom bar.
   Label doneSub;
+  // Whether to make the desktop shortcut (the overview's tile; made on Play or when the window closes).
   readonly Check shortcutCheck = new Check("Create a desktop shortcut");
   // The SSX folder: where this exe is (Install.Folder).
   readonly string folder;
@@ -1007,21 +1388,21 @@ class InstallerForm : Form {
   bool uacOpen;
   Stopwatch clock = new Stopwatch();
   Process buildProcess;
-  bool running, failed, cancelled, shortcutMade;
+  bool running, failed, cancelled, shortcutMade, buildStarted;
   // No game in the folder when this build started: a first install.
   bool firstBuild;
   // A middle dot between the parts of a subtitle: version or build time, then the folder.
   static readonly string Dot = "  " + (char)0xB7 + "  ";
   int page;
 
-  // folder: the SSX folder. With the game built there the window opens on the Play page, or with
-  // setup on the Your game page (rebuild: and starts building at once); otherwise on Welcome.
+  // folder: the SSX folder. With the game built there the window opens on the overview, or with
+  // setup on the Game files page (rebuild: and starts building at once); otherwise on Welcome.
   public InstallerForm(string folder, bool setup, bool rebuild) {
     this.folder = folder;
     Text = "SSX PC Port";
     AutoScaleMode = AutoScaleMode.None;
-    ClientSize = new Size(Th.D(900), Th.D(690));
-    FormBorderStyle = FormBorderStyle.FixedSingle;
+    ClientSize = new Size(Th.D(1100), Th.D(700));
+    FormBorderStyle = FormBorderStyle.None;
     MaximizeBox = false;
     StartPosition = FormStartPosition.CenterScreen;
     BackColor = Th.Bg;
@@ -1029,31 +1410,46 @@ class InstallerForm : Form {
     Font = Th.F(10f, FontStyle.Regular);
     Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);  // ssx.ico, embedded at compile time
 
-    int heroH = Th.D(140), railW = Th.D(220), footH = Th.D(64);
-    int contentH = ClientSize.Height - heroH - footH;
-    Controls.Add(new Hero { Bounds = new Rectangle(0, 0, ClientSize.Width, heroH) });
-    rail.Items = new[] { "Welcome", "Your game", "Install", "Play" };
-    rail.Bounds = new Rectangle(0, heroH, railW, contentH);
-    Controls.Add(rail);
+    int sideW = Th.D(220), headH = Th.D(76), footH = Th.D(80);
+    int contentW = ClientSize.Width - sideW, contentH = ClientSize.Height - headH - footH;
+    sidebar.Bounds = new Rectangle(0, 0, sideW, ClientSize.Height);
+    sidebar.Version = "SSX PC Port " + Install.AppVersion;
+    sidebar.Picked = delegate(int i) {
+      if (i == 0) ShowPage(Install.Built(folder) ? 3 : 0);
+      else if (i == 1) { MakeShortcut(); ShowPage(1); }
+      else ShowPage(2);
+    };
+    sidebar.OpenRepo = delegate { Process.Start(RepoUrl); };
+    Controls.Add(sidebar);
+
+    header.Bounds = new Rectangle(sideW, 0, contentW, headH);
+    var close = new WinButton { IsClose = true, Bounds = new Rectangle(contentW - Th.D(46), 0, Th.D(46), Th.D(32)) };
+    var minimize = new WinButton { Bounds = new Rectangle(contentW - Th.D(92), 0, Th.D(46), Th.D(32)) };
+    updateButton.Bounds = new Rectangle(contentW - Th.D(92) - Th.D(14) - Th.D(178), Th.D(22), Th.D(178), Th.D(38));
+    updateButton.Font = Th.Semi(9.5f);
+    updateButton.Click += delegate { MakeShortcut(); CheckForUpdates(updateButton); };
+    header.Controls.AddRange(new Control[] { close, minimize, updateButton });
+    Controls.Add(header);
 
     for (int i = 0; i < pages.Length; i++) {
-      pages[i] = new Panel { Bounds = new Rectangle(railW, heroH, ClientSize.Width - railW, contentH),
-                             BackColor = Th.Bg, Visible = false };
+      pages[i] = new Panel { Bounds = new Rectangle(sideW, headH, contentW, contentH), BackColor = Th.Bg, Visible = false };
       Controls.Add(pages[i]);
     }
     BuildWelcome(pages[0]);
     BuildGame(pages[1]);
     BuildInstall(pages[2]);
     BuildDone(pages[3]);
-    BuildFooter(heroH + contentH, footH);
+    BuildBottom(new Rectangle(sideW, ClientSize.Height - footH, contentW, footH));
     string iso = Install.IsoOf(folder);
     if (iso != null) isoField.Box.Text = iso;
 
     timer.Interval = 80;
     timer.Tick += delegate { OnTick(); };
     if (!Install.Built(folder)) {
+      doneSub.Text = "Not installed yet" + Dot + folder;
       ShowPage(0);
     } else if (setup) {
+      ShowPlayStatus();
       ShowPage(1);
       // After an update: rebuild right away from the ISO the game was built from.
       if (rebuild && iso != null) Shown += delegate { if (Valid()) StartBuild(); };
@@ -1065,184 +1461,235 @@ class InstallerForm : Form {
 
   void ShowPlayStatus() {
     doneSub.Text = Install.NeedsRebuild(folder)
-        ? "Version " + Install.AppVersion + " isn't built yet: click Add DLC / rebuild, then Rebuild."
+        ? "Version " + Install.AppVersion + " isn't built yet: click Install / Manage, then Rebuild."
         : "Version " + Install.AppVersion + Dot + folder;
+  }
+
+  [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+  // Dark scroll bars for the log (Windows 10 1809 and later; older ones keep the light ones).
+  [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)] static extern int SetWindowTheme(IntPtr hwnd, string app, string idList);
+
+  // No title bar, but still a window Windows can minimize from the taskbar, with a shadow.
+  protected override CreateParams CreateParams {
+    get {
+      CreateParams cp = base.CreateParams;
+      cp.Style |= 0x00020000 | 0x00080000;  // WS_MINIMIZEBOX, WS_SYSMENU
+      cp.ClassStyle |= 0x00020000;          // CS_DROPSHADOW
+      return cp;
+    }
   }
 
   protected override void OnHandleCreated(EventArgs e) {
     base.OnHandleCreated(e);
     try {
       int on = 1;
-      DwmSetWindowAttribute(Handle, 20, ref on, 4);  // dark title bar
-      int color = Th.Caption.R | (Th.Caption.G << 8) | (Th.Caption.B << 16);
-      DwmSetWindowAttribute(Handle, 35, ref color, 4);  // caption colour (Windows 11)
+      DwmSetWindowAttribute(Handle, 20, ref on, 4);  // dark (for the taskbar preview and system menus)
+      int round = 2;
+      DwmSetWindowAttribute(Handle, 33, ref round, 4);  // rounded corners (Windows 11)
     } catch (Exception) { }
   }
 
-  int PageWidth { get { return pages[0].Width - 2 * Th.D(40); } }
+  int PageX { get { return Th.D(24); } }
+  int PageWidth { get { return pages[0].Width - 2 * PageX; } }
 
   void BuildWelcome(Panel p) {
-    int x = Th.D(40), w = PageWidth;
-    p.Controls.Add(Th.Label("Welcome", Th.Semi(17f), Th.Text, x, Th.D(26), w, Th.D(40)));
-    p.Controls.Add(Th.Label("This sets up a native Windows version of SSX (2012). The game's Xbox 360 code is " +
-                            "recompiled to run directly on your PC: no emulator involved.",
-                            Th.F(10.5f, FontStyle.Regular), Th.Dim, x, Th.D(70), w, Th.D(46)));
-    p.Controls.Add(new Bullets {
-      Items = new[] { "Up to 300 fps, or match your monitor's refresh rate",
+    int x = PageX, w = PageWidth, gap = Th.D(14);
+    var hero = new HeroCard {
+      Kicker = "The native PC version", Title = "SSX", Sub = "Recompiled on your PC, from your own disc.",
+      Body = "The Xbox 360 code is rebuilt to run directly on Windows: no emulator.",
+      Chips = new[] { new Chip("download", "Installation", "Not installed yet", Th.Warn),
+                      new Chip("disc", "You need", "Your own SSX disc image", Th.Text) },
+      Bounds = new Rectangle(x, Th.D(4), w, Th.D(210)) };
+    p.Controls.Add(hero);
+
+    int y = hero.Bottom + gap, half = (w - gap) / 2, h = p.Height - y - Th.D(12);
+    var features = new CardPanel {
+      Title = "What you get", Glyph = "snow",
+      Items = new[] { "Up to 300 fps, or your monitor's refresh rate",
                       "Drawn at your screen's resolution, up to 4K",
-                      "Settings menu in game: F1, or Back + Start on a controller",
-                      "Keyboard and controller, DLC from your console, and your own music" },
-      Bounds = new Rectangle(x, Th.D(122), w, Th.D(120)) });
-    var card = new Card {
-      Title = "You need your own copy of the game",
+                      "Settings in game: F1, or Back + Start on a controller",
+                      "Keyboard and controller, your DLC and your own music" },
+      Bounds = new Rectangle(x, y, half, h) };
+    p.Controls.Add(features);
+
+    var own = new CardPanel {
+      Title = "Your own copy of the game", Glyph = "disc", Tone = Th.Warn,
       Body = "This installer contains no game code, graphics, music or other EA content, and downloads none. " +
              "You need SSX (USA) for Xbox 360, dumped to an ISO from your own disc.",
-      Tone = Th.Warn };
-    card.Bounds = new Rectangle(x, Th.D(254), w, card.FitHeight(w));
-    p.Controls.Add(card);
+      Bounds = new Rectangle(x + half + gap, y, w - half - gap, h) };
     // The setup installs Microsoft's build tools when they're missing: say whose license that accepts.
     const string tools = "A PC without Microsoft's Visual Studio Build Tools gets them installed: by installing " +
                          "SSX you accept the Visual Studio license terms.";
-    var license = new LinkLabel { Text = tools, Font = Th.F(9.5f, FontStyle.Regular), BackColor = Th.Bg,
-                                  ForeColor = Th.Faint, LinkColor = Th.Accent, ActiveLinkColor = Th.AccentHover,
-                                  Bounds = new Rectangle(x, card.Bottom + Th.D(14), w, Th.D(40)) };
+    var license = new LinkLabel { Text = tools, Font = Th.F(8.5f, FontStyle.Regular), BackColor = Th.Surface,
+                                  ForeColor = Th.Faint, LinkColor = Th.Sky, ActiveLinkColor = Th.AccentHover,
+                                  Bounds = new Rectangle(Th.D(20), h - Th.D(56), own.Width - Th.D(40), Th.D(40)) };
     license.LinkArea = new LinkArea(tools.IndexOf("Visual Studio license terms"), "Visual Studio license terms".Length);
     license.LinkClicked += delegate { Process.Start("https://visualstudio.microsoft.com/license-terms/"); };
-    p.Controls.Add(license);
+    own.Controls.Add(license);
+    p.Controls.Add(own);
   }
 
   void BuildGame(Panel p) {
-    int x = Th.D(40), w = PageWidth;
-    p.Controls.Add(Th.Label("Your game", Th.Semi(17f), Th.Text, x, Th.D(26), w, Th.D(40)));
-    p.Controls.Add(Th.Label("Pick the ISO you made from your own SSX disc. SSX is built in the folder this program is in.",
-                            Th.F(10.5f, FontStyle.Regular), Th.Dim, x, Th.D(70), w, Th.D(24)));
+    int x = PageX, w = PageWidth;
+    var iso = new CardPanel { Title = "Your copy of SSX", Glyph = "disc", Bounds = new Rectangle(x, Th.D(4), w, Th.D(150)) };
+    isoHint = AddPathRow(iso, "The disc image (.iso) you made from your own disc, or default.xex in the extracted disc.",
+                         isoField, "Browse...", BrowseIso);
+    p.Controls.Add(iso);
 
-    isoHint = AddPathRow(p, "Your SSX: disc image (.iso) or extracted default.xex", isoField, Th.D(104), "Browse...", BrowseIso);
     // The folder is where ssx-recomp.exe is: to use another, move ssx-recomp.exe there.
-    folderHint = AddPathRow(p, "SSX folder", folderField, Th.D(198), "Open",
+    var where = new CardPanel { Title = "SSX folder", Glyph = "folder", Bounds = new Rectangle(x, iso.Bottom + Th.D(14), w, Th.D(150)) };
+    folderHint = AddPathRow(where, "SSX is built in the folder this program is in, and keeps its saves there.", folderField, "Open",
                             delegate { Process.Start(new ProcessStartInfo("explorer.exe", "\"" + folder + "\"")); });
     folderField.Box.Text = folder;
     folderField.Box.ReadOnly = true;
     folderField.Cursor = folderField.Box.Cursor = Cursors.Default;
-
-    int dlcY = Th.D(292), addW = Th.D(112);
-    string caption = "DLC and title update (optional)";
-    var captionFont = Th.Semi(10f);
-    int captionW = TextRenderer.MeasureText(caption, captionFont).Width;
-    p.Controls.Add(Th.Label(caption, captionFont, Th.Text, x, dlcY + Th.D(8), captionW, Th.D(24)));
-    var where = new LinkLabel { Text = "Where do I find these?", Font = Th.F(9.5f, FontStyle.Regular), BackColor = Th.Bg,
-                                LinkColor = Th.Accent, ActiveLinkColor = Th.Accent, AutoSize = true,
-                                Location = new Point(x + captionW + Th.D(8), dlcY + Th.D(9)) };
-    where.LinkClicked += delegate { Process.Start(RepoUrl + "#adding-dlc"); };
     p.Controls.Add(where);
-    var addDlc = new FlatButton("Add files...", false) { Bounds = new Rectangle(x + w - addW, dlcY, addW, Th.D(36)) };
+
+    var dlc = new CardPanel { Title = "DLC and title update", Glyph = "dlc",
+                              Bounds = new Rectangle(x, where.Bottom + Th.D(14), w, Th.D(150)) };
+    int inner = w - Th.D(40), addW = Th.D(124);
+    var optional = Th.Label("Optional. Copied off your own Xbox 360.", Th.F(9.5f, FontStyle.Regular), Th.Dim,
+                            Th.D(20), Th.D(58), inner - addW - Th.D(10), Th.D(22));
+    dlc.Controls.Add(optional);
+    var help = new LinkLabel { Text = "Where do I find these?", Font = Th.F(9.5f, FontStyle.Regular), BackColor = Th.Surface,
+                               LinkColor = Th.Sky, ActiveLinkColor = Th.AccentHover, AutoSize = true,
+                               LinkBehavior = LinkBehavior.HoverUnderline,
+                               Location = new Point(Th.D(20) + TextRenderer.MeasureText(optional.Text, optional.Font).Width, Th.D(58)) };
+    help.LinkClicked += delegate { Process.Start(RepoUrl + "#adding-dlc"); };
+    dlc.Controls.Add(help);
+    var addDlc = new FlatButton("Add files...", false) { Glyph = "dlc", Bounds = new Rectangle(Th.D(20) + inner - addW, Th.D(14), addW, Th.D(36)) };
     addDlc.Click += BrowseDlc;
-    p.Controls.Add(addDlc);
+    dlc.Controls.Add(addDlc);
     // Three lines: the help text, or up to six package names and what happens with them.
-    dlcHint = Th.Label("", Th.F(9.5f, FontStyle.Regular), Th.Faint, x + Th.D(2), dlcY + Th.D(40), w, Th.D(60));
+    dlcHint = Th.Label("", Th.F(9.5f, FontStyle.Regular), Th.Faint, Th.D(20), Th.D(86), inner, Th.D(54));
     dlcHint.AutoEllipsis = true;
-    p.Controls.Add(dlcHint);
+    dlc.Controls.Add(dlcHint);
     SetHint(dlcHint, DlcHelp, Th.Faint);
+    Th.Adopt(dlc);
+    p.Controls.Add(dlc);
 
     UpdateHints();
   }
 
-  Label AddPathRow(Panel p, string caption, Field field, int y, string button, EventHandler browse) {
-    int x = Th.D(40), w = PageWidth, browseW = Th.D(112), fieldH = Th.D(40);
-    p.Controls.Add(Th.Label(caption, Th.Semi(10f), Th.Text, x, y, w, Th.D(24)));
-    field.Bounds = new Rectangle(x, y + Th.D(26), w - browseW - Th.D(10), fieldH);
+  // A card's line of text, its field with a button, and a hint under them.
+  Label AddPathRow(CardPanel card, string caption, Field field, string button, EventHandler browse) {
+    int x = Th.D(20), w = card.Width - 2 * x, browseW = Th.D(112), fieldH = Th.D(40);
+    card.Controls.Add(Th.Label(caption, Th.F(9.5f, FontStyle.Regular), Th.Dim, x, Th.D(52), w, Th.D(22)));
+    field.Bounds = new Rectangle(x, Th.D(78), w - browseW - Th.D(10), fieldH);
     field.Box.TextChanged += delegate { UpdateHints(); UpdateFooter(); };
-    p.Controls.Add(field);
-    var browseButton = new FlatButton(button, false) {
-      Bounds = new Rectangle(x + w - browseW, y + Th.D(26), browseW, fieldH) };
+    card.Controls.Add(field);
+    var browseButton = new FlatButton(button, false) { Bounds = new Rectangle(x + w - browseW, Th.D(78), browseW, fieldH) };
     browseButton.Click += browse;
-    p.Controls.Add(browseButton);
-    var hint = Th.Label("", Th.F(9.5f, FontStyle.Regular), Th.Faint, x + Th.D(2), y + Th.D(70), w, Th.D(22));
-    p.Controls.Add(hint);
+    card.Controls.Add(browseButton);
+    var hint = Th.Label("", Th.F(9f, FontStyle.Regular), Th.Faint, x + Th.D(2), Th.D(124), w, Th.D(20));
+    hint.AutoEllipsis = true;
+    card.Controls.Add(hint);
+    Th.Adopt(card);
     return hint;
   }
 
   void BuildInstall(Panel p) {
-    int x = Th.D(40), w = PageWidth;
-    installTitle = Th.Label("Installing SSX", Th.Semi(17f), Th.Text, x, Th.D(26), w - Th.D(130), Th.D(40));
-    percentLabel = Th.Label("0%", Th.Semi(17f), Th.Accent, x + w - Th.D(130), Th.D(26), Th.D(130), Th.D(40));
+    int x = PageX, w = PageWidth;
+    var card = new CardPanel { Bounds = new Rectangle(x, Th.D(4), w, p.Height - Th.D(16)) };
+    int cx = Th.D(26), cw = w - 2 * cx;
+    installTitle = Th.Label("Installing SSX", Th.Semi(16f), Th.Text, cx, Th.D(20), cw - Th.D(130), Th.D(38));
+    percentLabel = Th.Label("0%", Th.Semi(16f), Th.Sky, cx + cw - Th.D(130), Th.D(20), Th.D(130), Th.D(38));
     percentLabel.TextAlign = ContentAlignment.TopRight;
-    installStatus = Th.Label("", Th.F(10.5f, FontStyle.Regular), Th.Dim, x, Th.D(70), w, Th.D(24));
+    installStatus = Th.Label("", Th.F(10f, FontStyle.Regular), Th.Dim, cx, Th.D(62), cw, Th.D(24));
     installStatus.AutoEllipsis = true;
-    bar.Bounds = new Rectangle(x, Th.D(104), w, Th.D(10));
-    elapsedLabel = Th.Label("", Th.F(9.5f, FontStyle.Regular), Th.Faint, x, Th.D(122), w / 2, Th.D(22));
-    detailsLink = new LinkLabel { Text = "Show details", Font = Th.F(9.5f, FontStyle.Regular), BackColor = Th.Bg,
-                                  LinkColor = Th.Accent, ActiveLinkColor = Th.AccentHover,
+    bar.Bounds = new Rectangle(cx, Th.D(96), cw, Th.D(10));
+    elapsedLabel = Th.Label("", Th.F(9f, FontStyle.Regular), Th.Faint, cx, Th.D(116), cw / 2, Th.D(22));
+    detailsLink = new LinkLabel { Text = "Show details", Font = Th.F(9f, FontStyle.Regular), BackColor = Th.Surface,
+                                  LinkColor = Th.Sky, ActiveLinkColor = Th.AccentHover,
                                   LinkBehavior = LinkBehavior.HoverUnderline, TextAlign = ContentAlignment.TopRight,
-                                  Bounds = new Rectangle(x + w / 2, Th.D(122), w / 2, Th.D(22)) };
+                                  Bounds = new Rectangle(cx + cw / 2, Th.D(116), cw / 2, Th.D(22)) };
     detailsLink.LinkClicked += delegate { ShowLog(!logBox.Visible); };
 
     stageList.Items = Stages;
-    stageList.Bounds = new Rectangle(x, Th.D(156), w, Stages.Length * Th.D(34));
+    stageList.Bounds = new Rectangle(cx, Th.D(152), cw, Stages.Length * Th.D(34));
     logBox.Multiline = true;
     logBox.ReadOnly = true;
     logBox.ScrollBars = ScrollBars.Vertical;
-    logBox.BackColor = Th.Surface;
+    logBox.BackColor = Th.Bg;
     logBox.ForeColor = Th.Dim;
     logBox.BorderStyle = BorderStyle.None;
     logBox.Font = new Font("Consolas", 9f);
-    logBox.Bounds = new Rectangle(x, Th.D(154), w, p.Height - Th.D(166));
+    logBox.HandleCreated += delegate { try { SetWindowTheme(logBox.Handle, "DarkMode_Explorer", null); } catch (Exception) { } };
+    logBox.Bounds = new Rectangle(cx, Th.D(150), cw, card.Height - Th.D(172));
     logBox.Visible = false;
-    p.Controls.AddRange(new Control[] { installTitle, percentLabel, installStatus, bar, elapsedLabel, detailsLink,
-                                        stageList, logBox });
+    card.Controls.AddRange(new Control[] { installTitle, percentLabel, installStatus, bar, elapsedLabel, detailsLink,
+                                           stageList, logBox });
+    Th.Adopt(card);
+    p.Controls.Add(card);
   }
 
   void BuildDone(Panel p) {
-    int x = Th.D(40), w = PageWidth, badge = Th.D(56);
-    p.Controls.Add(new Badge { Bounds = new Rectangle(x, Th.D(28), badge, badge) });
-    p.Controls.Add(Th.Label("SSX is ready", Th.Semi(17f), Th.Text, x + badge + Th.D(18), Th.D(26), w, Th.D(40)));
-    doneSub = Th.Label("", Th.F(10f, FontStyle.Regular), Th.Dim, x + badge + Th.D(20), Th.D(64),
-                       w - badge - Th.D(20), Th.D(24));
-    doneSub.AutoEllipsis = true;
-    p.Controls.Add(doneSub);
+    int x = PageX, w = PageWidth, gap = Th.D(12);
+    playHero.Kicker = "The native PC version";
+    playHero.Sub = "Recompiled on your PC, from your own disc.";
+    playHero.Body = "In game, F1 (or Back + Start) opens the settings and cheats.";
+    playHero.Bounds = new Rectangle(x, Th.D(4), w, Th.D(206));
+    p.Controls.Add(playHero);
 
-    var tips = new Card {
-      Title = "Good to know",
-      Items = new[] { "F1 (or Back + Start) opens the settings: frame rate, resolution, controls.",
-                      "Keep your ISO (or extracted disc) where it is: the game reads its data from it.",
+    int ty = playHero.Bottom + gap, tw = (w - 3 * gap) / 4, th = Th.D(74);
+    Tile[] tiles = { gameTile, dlcTile, storageTile, folderTile };
+    for (int i = 0; i < tiles.Length; i++) {
+      tiles[i].Bounds = new Rectangle(x + i * (tw + gap), ty, i == 3 ? w - 3 * (tw + gap) : tw, th);
+      p.Controls.Add(tiles[i]);
+    }
+
+    int cy = ty + th + gap, ch = p.Height - cy - Th.D(10), sw = Th.D(372);
+    var tips = new CardPanel {
+      Title = "Good to know", Glyph = "help",
+      Items = new[] { "Keep your ISO (or extracted disc) where it is: the game reads its data from it.",
                       "Saves, settings, DLC and music all stay in this folder.",
                       "Check for updates gets the newest version and rebuilds SSX with it." },
-      Tone = Th.Accent };
-    tips.Bounds = new Rectangle(x, Th.D(112), w, tips.FitHeight(w));
+      Bounds = new Rectangle(x, cy, w - sw - gap, ch) };
     p.Controls.Add(tips);
 
-    int y = tips.Bottom + Th.D(18);
-    shortcutCheck.Bounds = new Rectangle(x, y, w, Th.D(30));
-    p.Controls.Add(shortcutCheck);
+    var shortcuts = new CardPanel { Title = "Shortcuts", Glyph = "snow", Bounds = new Rectangle(x + w - sw, cy, sw, ch) };
+    int bx = Th.D(18), bw = (sw - 2 * bx - 2 * Th.D(10)) / 3, by = Th.D(58), bh = ch - by - Th.D(16);
+    var open = new ShortcutTile { Glyph = "folder", Label = "Open the SSX folder", Bounds = new Rectangle(bx, by, bw, bh) };
+    open.Click += delegate { Process.Start(new ProcessStartInfo("explorer.exe", "\"" + InstallFolder() + "\"")); };
+    shortcutTile.Bounds = new Rectangle(bx + bw + Th.D(10), by, bw, bh);
+    shortcutTile.Click += delegate { shortcutCheck.Checked = !shortcutCheck.Checked; ShowShortcutState(); };
+    var guide = new ShortcutTile { Glyph = "help", Label = "Guide and help", State = "GitHub", Bounds = new Rectangle(bx + 2 * (bw + Th.D(10)), by, bw, bh) };
+    guide.Click += delegate { Process.Start(RepoUrl); };
+    shortcuts.Controls.AddRange(new Control[] { open, shortcutTile, guide });
+    p.Controls.Add(shortcuts);
+    ShowShortcutState();
+  }
 
-    var play = new FlatButton("Play SSX", true) { Bounds = new Rectangle(x, y + Th.D(46), Th.D(160), Th.D(44)) };
-    play.Font = Th.Semi(11f);
-    play.Click += delegate {
-      MakeShortcut();
-      try {
-        Play();
-        Close();
-      } catch (Exception ex) {
-        MessageBox.Show(this, "SSX couldn't be started: " + ex.Message, "SSX", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-      }
-    };
-    var update = new FlatButton("Check for updates", false) {
-      Bounds = new Rectangle(x + Th.D(172), y + Th.D(46), Th.D(180), Th.D(44)) };
-    update.Click += delegate { MakeShortcut(); CheckForUpdates(update); };
-    var dlc = new FlatButton("Add DLC / rebuild", false) {
-      Bounds = new Rectangle(x + Th.D(364), y + Th.D(46), Th.D(170), Th.D(44)) };
-    dlc.Click += delegate { MakeShortcut(); ShowPage(1); };
-    var open = new LinkLabel { Text = "Open the SSX folder", Font = Th.F(9.5f, FontStyle.Regular), BackColor = Th.Bg,
-                               LinkColor = Th.Accent, ActiveLinkColor = Th.AccentHover,
-                               LinkBehavior = LinkBehavior.HoverUnderline, AutoSize = true,
-                               Location = new Point(x, y + Th.D(104)) };
-    open.LinkClicked += delegate {
-      Process.Start(new ProcessStartInfo("explorer.exe", "\"" + InstallFolder() + "\""));
-    };
-    p.Controls.Add(play);
-    p.Controls.Add(update);
-    p.Controls.Add(dlc);
-    p.Controls.Add(open);
+  void ShowShortcutState() {
+    shortcutTile.State = shortcutCheck.Checked ? "On" : "Off";
+    shortcutTile.StateColor = shortcutCheck.Checked ? Th.Good : Th.Faint;
+    shortcutTile.Invalidate();
+  }
+
+  // The overview's chips and tiles: what this SSX folder has.
+  void RefreshOverview() {
+    bool rebuild = Install.NeedsRebuild(folder);
+    playHero.Chips = new[] {
+      new Chip("tag", "Port version", Install.AppVersion, Th.Text),
+      new Chip("check", "Installation", rebuild ? "Rebuild needed" : "Installed and ready", rebuild ? Th.Warn : Th.Good) };
+    List<string> added = Added(folder);
+    bool update = added.Remove("Title update");
+    gameTile.Value = update ? "Title update" : "Disc version";
+    gameTile.Sub = update ? "Rider levels up to 15" : "SSX (USA), 4541096D";
+    dlcTile.Value = added.Count == 0 ? "None added" : added.Count + (added.Count == 1 ? " pack" : " packs");
+    dlcTile.Sub = added.Count == 0 ? "Add them under Install / Manage" : string.Join(", ", added.ToArray());
+    try {
+      var drive = new DriveInfo(Path.GetPathRoot(folder));
+      storageTile.Value = FormatGb(drive.AvailableFreeSpace >> 30) + " free";
+      storageTile.Sub = "On " + drive.Name.TrimEnd('\\');
+    } catch (Exception) {
+      storageTile.Value = "Unknown";
+      storageTile.Sub = "";
+    }
+    string name = Path.GetFileName(folder.TrimEnd('\\'));
+    folderTile.Value = name.Length > 0 ? name : folder;
+    folderTile.Sub = folder;
+    foreach (Control c in new Control[] { playHero, gameTile, dlcTile, storageTile, folderTile }) c.Invalidate();
   }
 
   // ---- Updates ----------------------------------------------------------------------------
@@ -1306,22 +1753,18 @@ class InstallerForm : Form {
 
   void Ui(Action action) { if (!IsDisposed) BeginInvoke(action); }
 
-  void BuildFooter(int y, int h) {
-    var foot = new Panel { Bounds = new Rectangle(0, y, ClientSize.Width, h), BackColor = Th.Rail };
-    foot.Paint += delegate(object s, PaintEventArgs e) {
-      using (var pen = new Pen(Th.Border)) e.Graphics.DrawLine(pen, 0, 0, foot.Width, 0);
-    };
-    var link = new LinkLabel { Text = "github.com/AmarilloNL/ssx-recomp", Font = Th.F(9.5f, FontStyle.Regular),
-                               BackColor = Th.Rail, LinkColor = Th.Faint, ActiveLinkColor = Th.Accent,
-                               LinkBehavior = LinkBehavior.HoverUnderline, AutoSize = true,
-                               Location = new Point(Th.D(28), (h - Th.D(18)) / 2) };
-    link.LinkClicked += delegate { Process.Start(RepoUrl); };
-    int bw = Th.D(124), bh = Th.D(40), by = (h - bh) / 2;
-    nextButton.Bounds = new Rectangle(ClientSize.Width - Th.D(28) - bw, by, bw, bh);
-    backButton.Bounds = new Rectangle(nextButton.Left - Th.D(12) - Th.D(104), by, Th.D(104), bh);
+  void BuildBottom(Rectangle bounds) {
+    var foot = new BottomBar { Bounds = bounds };
+    int h = bounds.Height;
+    doneSub = Th.Label("", Th.F(9f, FontStyle.Regular), Th.Dim, Th.D(80), h / 2 + Th.D(2), bounds.Width - Th.D(80) - Th.D(420), Th.D(20));
+    doneSub.AutoEllipsis = true;
+    int bw = Th.D(196), bh = Th.D(52);
+    nextButton.Bounds = new Rectangle(bounds.Width - Th.D(24) - bw, (h - bh) / 2, bw, bh);
+    backButton.Bounds = new Rectangle(nextButton.Left - Th.D(14) - Th.D(170), (h - Th.D(44)) / 2, Th.D(170), Th.D(44));
     nextButton.Click += delegate { Next(); };
     backButton.Click += delegate { Back(); };
-    foot.Controls.AddRange(new Control[] { link, backButton, nextButton });
+    foot.Controls.AddRange(new Control[] { doneSub, backButton, nextButton });
+    Th.Adopt(foot);
     Controls.Add(foot);
     AcceptButton = nextButton;
   }
@@ -1331,19 +1774,29 @@ class InstallerForm : Form {
   void ShowPage(int p) {
     page = p;
     if (p == 1 && dlcFiles.Count == 0 && titleUpdateFile == null) ShowAddedHint();
+    if (p == 3) RefreshOverview();
     for (int i = 0; i < pages.Length; i++) pages[i].Visible = i == p;
-    rail.Current = p == 3 ? 4 : p;
-    rail.Invalidate();
+    sidebar.Current = p == 3 ? 0 : p;
+    header.Kicker = p == 1 ? "Setup" : p == 2 ? "Setup" : "Your game";
+    header.Title = p == 1 ? "Game files" : p == 2 ? "Installation" : "SSX";
+    header.Pill = p == 0 || p == 3 ? "Native Windows build" : null;
+    header.PillDot = Install.Built(folder) ? Th.Good : Th.Warn;
+    header.Invalidate();
+    updateButton.Visible = p == 3;
     UpdateFooter();
     if (p == 1 && isoField.Box.Text.Length == 0) isoField.Box.Focus(); else nextButton.Focus();
   }
 
   void UpdateFooter() {
-    backButton.Visible = page == 1 || (page == 2 && failed);
+    backButton.Visible = page == 1 || page == 3 || (page == 2 && failed);
+    backButton.Glyph = page == 3 ? "download" : null;
+    backButton.Text = page == 3 ? "Install / Manage" : "Back";
     nextButton.Enabled = true;
-    nextButton.Primary = true;
+    nextButton.Kind = ButtonKind.Primary;
+    nextButton.Glyph = null;
+    nextButton.Font = Th.Semi(10.5f);
     switch (page) {
-      case 0: nextButton.Text = "Next"; break;
+      case 0: nextButton.Text = "Get started"; break;
       case 1:
         nextButton.Text = !Install.Built(folder) ? "Install" : DlcOnly() ? "Add DLC" : "Rebuild";
         nextButton.Enabled = Valid();
@@ -1352,9 +1805,27 @@ class InstallerForm : Form {
         nextButton.Text = running ? "Cancel" : "Retry";
         nextButton.Primary = !running;
         break;
-      case 3: nextButton.Text = "Close"; nextButton.Primary = false; break;
+      case 3: nextButton.Text = "Play"; nextButton.Kind = ButtonKind.Play; nextButton.Glyph = "play"; break;
     }
     nextButton.Invalidate();
+    backButton.Invalidate();
+    sidebar.Allowed = new[] { !running, !running, running || failed || buildStarted };
+    UpdateStatus();
+  }
+
+  // The sidebar's status card.
+  void UpdateStatus() {
+    string s;
+    Color c;
+    if (running) { s = "Building  " + (int)(bar.Value * 100) + "%"; c = Th.Sky; }
+    else if (failed) { s = cancelled ? "Build cancelled" : "Build failed"; c = Th.Bad; }
+    else if (!Install.Built(folder)) { s = "Not installed"; c = Th.Warn; }
+    else if (Install.NeedsRebuild(folder)) { s = "Rebuild needed"; c = Th.Warn; }
+    else { s = "Ready to play"; c = Th.Good; }
+    if (s == sidebar.Status && c == sidebar.StatusColor) return;
+    sidebar.Status = s;
+    sidebar.StatusColor = c;
+    sidebar.Invalidate();
   }
 
   bool Valid() {
@@ -1441,13 +1912,24 @@ class InstallerForm : Form {
           StartBuild();
         }
         break;
-      case 3: MakeShortcut(); Close(); break;
+      case 3: PlayNow(); break;
+    }
+  }
+
+  void PlayNow() {
+    MakeShortcut();
+    try {
+      Play();
+      Close();
+    } catch (Exception ex) {
+      MessageBox.Show(this, "SSX couldn't be started: " + ex.Message, "SSX", MessageBoxButtons.OK, MessageBoxIcon.Warning);
     }
   }
 
   void Back() {
     if (page == 1) ShowPage(Install.Built(folder) ? 3 : 0);
     else if (page == 2 && !running) ShowPage(1);
+    else if (page == 3) { MakeShortcut(); ShowPage(1); }
   }
 
   void UpdateHints() {
@@ -1580,6 +2062,7 @@ class InstallerForm : Form {
     lock (sync) { stage = 0; stageFrac = 0; tool = null; pendingLog.Length = 0; }
     firstBuild = !Install.Built(folder);
     running = true;
+    buildStarted = true;
     failed = cancelled = false;
     logBox.Clear();
     bar.Failed = stageList.Failed = false;
@@ -1739,6 +2222,7 @@ class InstallerForm : Form {
       bar.Value = Math.Max(bar.Value, value);
       percentLabel.Text = (int)(bar.Value * 100) + "%";
       stageList.Current = s;
+      UpdateStatus();
       // Windows' permission prompt (UAC) for a build tool's installer can open minimized in the
       // taskbar, and the step waits for it: say so while it's open (checked about once a second).
       if (s == 2 && ++uacCheck % 12 == 0) uacOpen = UacPromptOpen();
@@ -1769,6 +2253,7 @@ class InstallerForm : Form {
       // Offered on the first install only: after an update or rebuild the box stays as it was, so
       // Check for updates or Close doesn't point the desktop shortcut at this folder unasked.
       if (firstBuild) shortcutCheck.Checked = true;
+      ShowShortcutState();
       ShowPage(3);
     } else {
       failed = true;
@@ -1829,6 +2314,8 @@ class InstallerForm : Form {
         return;
       }
       StopBuild();
+    } else if (Install.Built(folder)) {
+      MakeShortcut();  // the overview's Desktop shortcut tile, when it's on
     }
     base.OnFormClosing(e);
   }

@@ -25,7 +25,7 @@ class SsxSettingsDialog : public rex::ui::ImGuiDialog {
   static void ConfigureFonts(ImFontAtlas* atlas);
 
   void Toggle();
-  // Opens the menu on the named tab ("Display", "Graphics", "Audio", "Controls").
+  // Opens the menu on the named page ("Display", "Graphics", "Audio", "Controls").
   void Open(const std::string& tab);
 
   struct Choice {
@@ -42,15 +42,24 @@ class SsxSettingsDialog : public rex::ui::ImGuiDialog {
   void Row(const char* label, const char* help);
   bool Combo(const char* label, const char* cvar, const Choice* choices, size_t count);
   bool Checkbox(const char* label, const char* cvar);
-  int TabFlags(const char* name);
+  bool Switch(const char* id, bool* value);
+  bool Button(const char* label, bool primary);
+  bool BeginCard(const char* title, bool rows = true);
+  void EndCard();
+  void DrawSidebar(float width);
+  void DrawMain();
   void PollPad(ImGuiIO& io);
   void DrawFps();
   void DrawBinds();
   void DrawDisplayTab();
+  void DrawScreenRows();
   void DrawGraphicsTab();
+  void DrawRendererRows();
+  void DrawImageRows();
   void DrawAudioTab();
   void DrawControlsTab();
   void DrawProfileTab();
+  void DrawPlayerRows();
   void DrawSnowflakesTab();
   void DrawScaleWarning();
   void DrawQuitConfirm();
@@ -63,8 +72,10 @@ class SsxSettingsDialog : public rex::ui::ImGuiDialog {
   bool open_ = false;
   bool restart_needed_ = false;
   float font_scale_ = 1.0f;
+  float ui_scale_ = 1.0f;  // the menu's size for this screen (1 at 1440p)
+  bool toggle_after_draw_ = false;  // the Close button: closes once the frame is drawn
   int current_tab_ = 0;
   uint16_t pad_buttons_ = 0;  // previous frame, for edge detection
-  std::string select_tab_;  // tab to select on the next frame
+  std::string select_tab_;  // page to select on the next frame
   std::string capturing_;  // cvar of the key binding waiting for a key press
 };
