@@ -924,7 +924,7 @@ void SsxSettingsDialog::DrawCheatsTab() {
     Checkbox("##cheat_uphill", "ssx_cheat_ride_uphill");
     Row("No reverse camera",
         "The avalanche drops use the normal camera behind you, instead of the one looking back up the "
-        "mountain. Turned off during a ride, it applies from the next one.");
+        "mountain. Works straight away, also during a ride.");
     Checkbox("##cheat_no_reverse", "ssx_cheat_no_reverse_camera");
     ImGui::EndTable();
   }
