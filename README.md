@@ -7,60 +7,33 @@
 [![Latest release](https://img.shields.io/github/v/release/AmarilloNL/ssx-recomp?style=for-the-badge&label=installer&color=0aa5e6)](../../releases/latest)
 [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4?style=for-the-badge&logo=windows11&logoColor=white)](#installing)
 [![Linux](https://img.shields.io/badge/Linux-beta-f59e0b?style=for-the-badge&logo=linux&logoColor=white)](#linux)
-[![Direct3D 12](https://img.shields.io/badge/Direct3D-12-7a3cff?style=for-the-badge)](#graphics)
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge)](LICENSE)
 <a href="https://playported.com/ports/1191-ssx/"><img src="https://playported.com/badge.svg" alt="Listed on PlayPorted" height="28"></a>
 
 <a href="https://recomplauncher.com/game/ssx-recomp"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a>
 
-[**⬇️ Download**](../../releases/latest) · [🎬 Gameplay](#gameplay) · [📸 Screenshots](#screenshots) · [✨ Features](#features) · [🛠️ Install](#installing) · [🐧 Linux](#linux) · [🎮 Controls](#playing) · [🖥️ Graphics](#graphics) · [📦 DLC & update](#adding-dlc) · [🎵 Music](#your-music) · [🗺️ Roadmap](#roadmap)
+[**⬇️ Download**](../../releases/latest) · [✨ Features](#features) · [🛠️ Install](#installing) · [🎮 Controls](#playing) · [🖥️ Graphics](#graphics) · [📦 DLC](#adding-dlc) · [🎵 Music](#your-music) · [📝 Changelog](../../releases)
 
 </div>
 
 > [!CAUTION]
-> **You need your own copy of the game.** This repository contains **no game code, graphics,
-> music, video or any other EA content**, and the installer downloads none. You need **SSX (2012)
-> for Xbox 360**, dumped from **your own disc** to an ISO. The PC version is built on your
-> computer from that ISO.
->
-> **ISOs, game files and pre-built executables will not be provided.** Requests or links to
-> pirated copies are removed.
+> **You need your own copy of SSX (USA) for Xbox 360**, dumped from your own disc to an ISO. This
+> repository contains no EA code or content, and none is downloaded. ISOs and pre-built games will
+> not be provided.
 
-A native Windows and Linux build of EA's *SSX* (2012), made by statically recompiling the Xbox 360
-executable to x86-64 with the [ReXGlue SDK](https://github.com/rexglue/rexglue-sdk). The game's
-code runs natively, and its Xbox 360 graphics are drawn with Direct3D 12 (on Linux through
-[vkd3d-proton](https://github.com/HansKristian-Work/vkd3d-proton) and Vulkan).
-
-> [!NOTE]
-> 🆕 **2.0.0 is out:** a [new look](#screenshots) for the setup and the F1 menu, far less stutter on
-> your first rides, and two cheat fixes. See [what's new](../../releases/tag/v2.0.0); **Check for
-> updates** in `ssx-recomp.exe` gets it.
-
-<a id="gameplay"></a>
-
-## 🎬 Gameplay
+SSX's Xbox 360 code, statically recompiled to x86-64 with the
+[ReXGlue SDK](https://github.com/rexglue/rexglue-sdk) and built on your own PC from your ISO.
+Graphics run on Direct3D 12 (Vulkan on Linux).
 
 <div align="center">
 
 [![SSX (2012) Native PC Port at High FPS – Pure Gameplay (No Emulator)](https://img.youtube.com/vi/ibGjbR-AqRo/maxresdefault.jpg)](https://www.youtube.com/watch?v=ibGjbR-AqRo)
 
-▶️ *[SSX (2012) Native PC Port at High FPS – Pure Gameplay (No Emulator)](https://www.youtube.com/watch?v=ibGjbR-AqRo)*
-
-</div>
-
 <a id="screenshots"></a>
 
-## 📸 Screenshots
-
-<div align="center">
-
-<img src="art/screenshot-setup.png" alt="ssx-recomp.exe: the overview of your SSX, with Play, Check for updates and Install / Manage" width="720">
-
-*`ssx-recomp.exe` sets SSX up and is its launcher: Play, Check for updates, and Install / Manage for DLC, the title update and rebuilding.*
+<img src="art/screenshot-setup.png" alt="ssx-recomp.exe: Play, Check for updates and Install / Manage" width="720">
 
 <img src="art/screenshot-f1-display.png" alt="The F1 menu, Display page" width="400"> <img src="art/screenshot-f1-cheats.png" alt="The F1 menu, Cheats page" width="400">
-
-*The settings menu in the game: **F1**, or **Back + Start** on a controller.*
 
 </div>
 
@@ -68,23 +41,14 @@ code runs natively, and its Xbox 360 graphics are drawn with Direct3D 12 (on Lin
 
 ## ✨ Features
 
-| | |
-|---|---|
-| ⚡ **Up to 300 fps** | or match your monitor, at real-time game speed (the original runs at 30) |
-| 🖥️ **Up to 4K** | the [ReGPU renderer](#graphics) draws at your screen's resolution, 720p to 4K |
-| 🧊 **Far less first-ride stutter** | the game's shaders and render pipelines are prepared on the first start, from your own copy of the game |
-| ⚙️ **Settings menu** | in game: **F1**, or **Back + Start** on a controller |
-| ⌨️ **Keyboard & controller** | key rebinding, vibration, deadzone |
-| 🪪 **Your name & picture** | instead of "User" and an empty square (settings → **Profile**) |
-| 💿 **Runs from your ISO** | saves stay in your SSX folder (Linux: `~/.local/share/ssx`) |
-| 📦 **DLC** | Mt. Eddie, Japan and the other packs, from your own console ([how](#adding-dlc)) |
-| 📈 **Title update** | the game's last update, with the gear for levels 11 to 15 ([how](#title-update)), and [riders up to level 15](#level-15) |
-| 🎵 **Your own music** | your music folders as playlists in the game's Music menu, remixed live as you ride ([how](#your-music)) |
-| ❄️ **Snowflake tracker** | how many snowflakes you have on every drop, per range and peak (settings → **Snowflakes**) |
-| 🏂 **Boost meter in freeride** | the boost and tricky meters while you freeride (settings → **Display**) |
-| 🎒 **Gear by type** | View More lists your gear by type, the highest level first (settings → **Display**) |
-| 🏅 **Online-only badges** | the badges that need EA's servers, shown as earned (settings → **Profile**) |
-| 🎮 **Cheats** | infinite boost; Tricky or Super Tricky the whole ride, or no Tricky at all; everything is free (your own credits stay as they are) or +1,000,000 credits; infinite rewinds or none; slow motion while you hold LB; infinite wingsuit lift; armour, oxygen, warmth, the wingsuit, ice axes and batteries that never run out (one switch each); never lose a combo or the multiplier; max gear stats; big head and hands; a glowing suit; ride back up the mountain as far as you like; the normal camera on the avalanche drops (settings → **Cheats**) |
+- ⚡ **Up to 300 fps** and **up to 4K**, at real-time game speed (the original runs at 30)
+- 🧊 **Barely any first-ride stutter**: shaders are prepared on the first start
+- ⚙️ **Settings menu** in game: **F1**, or **Back + Start** on a controller
+- ⌨️ **Keyboard & controller**, with key rebinding, vibration and deadzone
+- 📦 **DLC and the title update** from your own console, with riders up to **level 15**
+- 🎵 **Your own music** as playlists, remixed live as you ride
+- 🪪 **Your name and picture**, a **snowflake tracker**, the **boost meter in freeride**, **gear by type** and the **online-only badges**
+- 🎮 **Cheats**: infinite boost, always Tricky, slow motion, infinite wingsuit lift, gear that never wears out, ride uphill and more
 
 <a id="installing"></a>
 
@@ -92,89 +56,42 @@ code runs natively, and its Xbox 360 graphics are drawn with Direct3D 12 (on Lin
 
 ### 🪟 Windows
 
-1. 💿 Make an ISO of **your own** SSX (USA) Xbox 360 disc (an extracted copy of the disc, the folder
-   with `default.xex`, works too).
-2. ⬇️ Download **`ssx-recomp.exe`** from the [latest release](../../releases/latest) and put it in
-   an empty folder of its own, for example `C:\Games\SSX`. That folder is your SSX folder:
-   the game is built there and everything it keeps stays there.
-3. ▶️ Run it. SmartScreen may warn because it isn't code-signed: click
-   **More info → Run anyway**. Its source is [`installer/SSXInstaller.cs`](installer/SSXInstaller.cs).
-4. ✅ The first time it opens the setup: click **Get started**, select your ISO (or the extracted
-   disc's `default.xex`), optionally click
-   **Add files...** for DLC and the title update from your own console ([which files](#adding-dlc)),
-   and click **Install**.
-5. 🏂 When it's built, click **Play** or use the desktop shortcut.
+1. Download **`ssx-recomp.exe`** from the [latest release](../../releases/latest) and put it in an
+   empty folder, like `C:\Games\SSX`. That folder is your SSX folder.
+2. Run it (SmartScreen: **More info → Run anyway**).
+3. Click **Get started**, pick your ISO (or an extracted disc's `default.xex`), optionally
+   **Add files...** for [DLC and the title update](#adding-dlc), and click **Install**.
+4. After 10–30 minutes, click **Play**. From then on, `ssx-recomp.exe` is the game's launcher.
 
-From then on **`ssx-recomp.exe` is the game's launcher**: it opens on its overview with **Play**,
-**Check for updates** and **Install / Manage** (DLC, the title update, rebuilding). (`ssx-recomp.exe --play`, or any options for the
-game, starts the game straight away.)
+Needs Windows 10/11 x64, about 10 GB free and an internet connection for the first build.
 
-**Or with [RecompLauncher](https://recomplauncher.com/game/ssx-recomp):** install SSX there, drop in
-your ISO (and the title update if you have it) and it builds the game for you, checks your disc
-against Redump, and shows the main settings on the game's page. Updates rebuild the game the same way.
+**Or use [RecompLauncher](https://recomplauncher.com/game/ssx-recomp):** drop in your ISO and it
+builds the game for you.
 
-> [!NOTE]
-> Needs **Windows 10/11 x64**, about **10 GB** free (mostly build tools that other software can
-> share; the game folder itself is about 1 GB), an internet connection and **10–30 minutes** the
-> first time.
->
-> 📁 **Everything stays in your SSX folder**: the build, saves, settings, DLC, music and the shader
-> cache. Nothing goes to `Documents` or the registry; move or back up the folder as a whole. If
-> you played an earlier version, which kept its saves in `Documents\ssx`, the first start copies
-> them (with your DLC and music) into the SSX folder; `Documents\ssx` is left as it was.
->
-> 💿 **Keep your ISO** (or extracted disc): only the game's code is built into the SSX folder; the
-> game reads its data from your ISO every time it starts. If you move or delete it, the game asks
-> for it at the next start: pick the ISO itself, not the `default.xex` in `source\game-dump`.
->
-> ♻️ **Installed with `SSX-Installer.exe` before?** Put `ssx-recomp.exe` in that install folder
-> (`SSX-PC` in your user folder, unless you picked another) and run it: it opens on its overview;
-> click **Install / Manage**, then **Rebuild**, to bring the game up to this version.
->
-> 🔄 **To update, click Check for updates**: it's the only thing that goes online for the port. If
-> there's a newer release, it replaces `ssx-recomp.exe` with that release's and rebuilds SSX (only
-> what changed); your saves and settings stay. Playing never downloads anything.
->
-> 📦 **`ssx-recomp.exe` carries the port's source code**, so building never downloads the port: each
-> release builds exactly its own version. Only build tools and packages the PC doesn't have yet are
-> downloaded (the first time, or when a release needs newer ones), so rebuilding later, for example
-> to add the title update, works offline.
+> [!TIP]
+> - 🔄 **Updating:** click **Check for updates**. Your saves and settings stay.
+> - 💿 **Keep your ISO** where it is: the game reads its data from it every start.
+> - 📁 **Everything stays in your SSX folder** (saves, settings, DLC, music, caches). Back it up or
+>   move it as a whole.
 
 <details>
-<summary><b>What the installer does on your PC</b></summary>
+<summary><b>More about the install</b></summary>
 <br>
 
-Everything happens locally:
-
-- unpacks the port's source code, which `ssx-recomp.exe` carries, into `source`,
-- checks that the ISO is the supported release,
-- installs the build tools that are missing (CMake, Ninja, LLVM and the Visual Studio 2022 Build
-  Tools) through `winget`, or from their official downloads if `winget` isn't available; Windows
-  asks for administrator permission for LLVM and Visual Studio,
-- downloads the prebuilt ReXGlue recompiler SDK and the prebuilt ReGPU renderer (no game code; see
-  [`scripts/build-sdk-package.ps1`](scripts/build-sdk-package.ps1) and
-  [`scripts/build-regpu-package.ps1`](scripts/build-regpu-package.ps1)) and recompiles the game,
-- produces the playable game in `source\dist\SSX` inside your SSX folder.
-
-If something goes wrong, the log is `build-ssx.log` in the `source` folder. Please attach it to an
-issue.
-
-</details>
-
-<details>
-<summary><b>Supported disc</b></summary>
-<br>
-
-| | |
-|---|---|
-| Game | SSX (USA), Xbox 360 |
-| Title ID / Media ID | `4541096D` / `55ABAB6C` |
-| `default.xex` SHA-256 | `F509845401D65A6791C5D28A3E9636A6558DA204F3851028B0B369A44A4B68EA` |
-| Title update (optional) | version 0.0.3.2, see [the title update](#title-update) |
-
-Other regions or versions aren't supported yet, because the recompilation settings are tied to
-these exact executables. Some ISOs named "World" contain this same release; the installer checks
-the file for you.
+- **What it does:** unpacks the port's source (carried inside `ssx-recomp.exe`), checks your ISO,
+  installs missing build tools (CMake, Ninja, LLVM, Visual Studio 2022 Build Tools; Windows asks
+  for permission), downloads the prebuilt ReXGlue SDK and ReGPU renderer (no game code), and
+  builds the game into `source\dist\SSX`. Its source is
+  [`installer/SSXInstaller.cs`](installer/SSXInstaller.cs).
+- **Offline:** only build tools are downloaded, so a later rebuild (for example to add the title
+  update) works offline. Playing never goes online.
+- **Coming from `SSX-Installer.exe` or `Documents\ssx`?** Put `ssx-recomp.exe` in the old install
+  folder (`SSX-PC` in your user folder), run it, then **Install / Manage → Rebuild**. Saves from
+  `Documents\ssx` are copied over on the first start.
+- **Something went wrong?** Attach `source\build-ssx.log` to an issue.
+- **Supported disc:** SSX (USA), title ID `4541096D`, `default.xex` SHA-256
+  `F509845401D65A6791C5D28A3E9636A6558DA204F3851028B0B369A44A4B68EA`. Some "World" ISOs are this
+  same release; the installer checks it for you.
 
 </details>
 
@@ -182,45 +99,25 @@ the file for you.
 
 ### 🐧 Linux (beta)
 
-> [!NOTE]
-> RecompLauncher can't build SSX on Linux yet (its setup step needs Windows): use the installer script below.
+1. Download **`ssx-linux-installer.sh`** from the [latest release](../../releases/latest).
+2. Run `bash ssx-linux-installer.sh --iso ~/Games/SSX.iso` (add `--title-update <file>` for the
+   title update).
+3. When it says **DONE**, start **SSX** from your app menu.
 
-A native Linux version: Vulkan, no Wine or Proton. Like on Windows, it's built on your PC from your
-own ISO, by an installer script:
-
-1. 💿 Make an ISO of **your own** SSX (USA) Xbox 360 disc.
-2. ⬇️ Download **`ssx-linux-installer.sh`** from the [latest release](../../releases/latest).
-3. ▶️ Run it in a terminal (add `--title-update <file>` once for [the title update](#title-update)):
-   ```sh
-   bash ssx-linux-installer.sh --iso ~/Games/SSX.iso
-   ```
-4. 🏂 When it says **DONE**, start **SSX** from your app menu.
-
-> [!NOTE]
-> Needs about **15 GB** free during the build and **20–60 minutes** the first time. The script
-> installs missing build tools with your package manager (it asks for your password through
-> `sudo`). 🔄 **To update, run it again**: your saves and settings stay. 💿 **Keep your ISO** where
-> it is: the game reads its data from it every time it starts.
->
-> **Beta:** tested on **CachyOS** (KDE Plasma on Wayland) with an NVIDIA GTX 1080 and an Xbox
-> controller, where races hold 60 fps. Debian/Ubuntu (`apt`) and Fedora (`dnf`) get their packages
-> installed too, but haven't been tested yet: reports are welcome.
+Needs about 15 GB free and 20–60 minutes the first time; it asks for `sudo` to install build tools.
+Run it again to update. Tested on CachyOS with an NVIDIA GTX 1080; Debian/Ubuntu and Fedora reports
+are welcome.
 
 <details>
 <summary><b>Linux notes</b></summary>
 <br>
 
-- Where this README says `userdata`, Linux uses **`~/.local/share/ssx`** (saves, `dlc`,
-  `music`). Your own music needs `ffmpeg`.
-- The game uses **ReGPU**, as on Windows, drawing at your screen's resolution. If ReGPU can't be
-  built on your PC, the script says so and the game uses the standard renderer, which runs at 1× on
-  Linux (2× made the graphics driver hang in testing), scaled bilinear.
-- Not on Linux yet: the gamer picture.
-- The first start after installing or updating prepares the game's shaders (about a minute), so
-  the first rides barely stutter. What's left is kept for the next start.
-- The port goes to `~/SSX-PC` (`--folder` picks another place); the game is in `source/dist/SSX`.
-  From a git clone, `./scripts/build-ssx-linux.sh --iso ~/Games/SSX.iso` does the same build.
-- If something goes wrong, attach `build-ssx-linux.log` (in `~/SSX-PC/source`) to an issue.
+- Saves, `dlc` and `music` live in `~/.local/share/ssx` (where this README says `userdata`). Your
+  own music needs `ffmpeg`.
+- The port goes to `~/SSX-PC` (`--folder` picks another place). RecompLauncher can't build SSX on
+  Linux yet.
+- Not on Linux yet: the gamer picture. The standard renderer runs at 1× only.
+- If something goes wrong, attach `~/SSX-PC/source/build-ssx-linux.log` to an issue.
 
 </details>
 
@@ -230,79 +127,37 @@ own ISO, by an installer script:
 
 | | |
 |---|---|
-| ⚙️ **Settings** | **F1** / **Esc** (controller: **Back + Start**; the D-pad moves through the settings, **A** changes one, **LB/RB** switch pages, **B** closes); **Quit game** at the bottom |
-| 🎮 **Controller** | as on the console; vibration and deadzone in **F1 → Controls** |
-| ⌨️ **Keyboard** | WASD steer · Space jump · arrow keys = trick stick · Q/E triggers · 1/3 bumpers · Enter start · Tab back |
+| ⚙️ **Settings** | **F1** / **Esc**, or **Back + Start** (D-pad moves, **A** changes, **LB/RB** switch pages, **B** closes) |
+| ⌨️ **Keyboard** | WASD steer · Space jump · arrow keys trick stick · Q/E triggers · 1/3 bumpers · Enter start · Tab back |
 
 > [!TIP]
-> - **More frames:** pick a lower drawing size in **F1 → Graphics → Resolution**.
-> - **Tearing** (a horizontal cut through the picture) on a screen without G-Sync/FreeSync, like a
->   handheld? Turn on **VSync** in **F1 → Display**. It works with any frame rate (with the standard
->   renderer, restart after turning it on).
-> - **The game won't start after changing a setting?** Delete `ssx.toml` next to `ssx.exe`.
-> - **Everything stays in your SSX folder:** saves, DLC, music and the shader cache live in
->   `source\dist\SSX\userdata` (called `userdata` below). Back up or move the folder as a whole.
+> - **Tearing?** Turn on **VSync** in **F1 → Display**.
+> - **More frames?** Lower **F1 → Graphics → Resolution**.
+> - **Won't start after changing a setting?** Delete `ssx.toml` next to `ssx.exe`.
 
 <a id="graphics"></a>
 <a id="regpu"></a>
 
 ## 🖥️ Graphics
 
-The game has two renderers. **ReGPU is the default**; the standard renderer is there as a fallback
-(**F1 → Graphics → Renderer**, then restart).
+**[ReGPU](https://github.com/zer0ducksgiven/ReGPU)** is the default renderer: it draws at your
+screen's resolution (720p to 4K) and runs about 200 fps at 1440p on an RTX 4080 SUPER. The
+**Standard** renderer (1200×640 at 1×, 2× or 3×, with FSR/CAS/FXAA) is the fallback in
+**F1 → Graphics → Renderer**, and the game switches to it by itself if ReGPU can't start.
 
-| | 🚀 **ReGPU** (default) | 🔧 **Standard** |
-|---|---|---|
-| What it is | [ReGPU](https://github.com/zer0ducksgiven/ReGPU), a newer, much smaller Direct3D 12 renderer for recompiled Xbox 360 games | the ReXGlue SDK's own renderer, an emulation of the Xbox 360's graphics chip |
-| Resolution | your screen's: *Match my screen*, 720p, 1080p, 1440p or 4K, changed while the game runs | 1200×640 with a 1×, 2× or 3× scale |
-| Speed (RTX 4080 SUPER) | 1440p about 200 fps (Mount Wakefield's race 130–190), 4K about 110 | 2× about 140 fps; 3× [locked to 30–60](#frame-rate-lock) |
-| Image options | — | AMD FSR 1, CAS, FXAA |
-
-- **Frame rate:** **F1 → Display → Frame rate**: 30 up to 300, or *match your monitor*.
-  When the GPU can't keep up, the game slows its pace a little so frames still come out evenly.
-- **Ultrawide screens** get a 16:9 picture for now. Any other 16:9 size can go in `ssx.toml` as
-  `regpu_resolution = "WIDTHxHEIGHT"`.
-- **If ReGPU can't start** on a PC, the game uses the standard renderer by itself at the next start.
-- **On Linux** ReGPU runs on Vulkan through vkd3d-proton; the standard renderer runs at 1× there.
-- **Tested** mostly on NVIDIA graphics cards. If something looks different from the standard
-  renderer, a screenshot helps a lot (F12 saves one with the renderer's own debug data).
+- **Frame rate:** **F1 → Display**: 30 up to 300, or match your monitor.
+- **Ultrawide** screens get a 16:9 picture for now.
+- Something looks wrong? A screenshot helps a lot (**F12** saves one with debug data).
 
 <a id="frame-rate-lock"></a>
 
 <details>
-<summary><b>Standard renderer: why 3× is locked to 60 fps (and 4× was removed)</b></summary>
+<summary><b>Why the standard renderer's 3× is locked to 60 fps</b></summary>
 <br>
 
-| Scale | Frame rate choices | Default |
-|---|---|---|
-| 1×, 2× | 30, 60, 70, 72, 90, 120, 144, 165, 240, 300 or match your monitor | 60 |
-| 3× | 30, 40, 50, 55, 60 | 60 |
-
-We recommend 2× (or ReGPU). 3× draws about 4K (3600×1920 = 6.9 million pixels, 9 times the 1×
-image), and every pixel goes through the emulation of the Xbox 360's on-chip video memory. On an
-RTX 4080 SUPER the GPU sits at 99% at full clock with the CPU at about 20%: higher rates keep the
-GPU at its limit, the frame rate keeps jumping (it feels like stutter), and on some PCs the
-graphics driver can hang or crash. Tested there, 3× is smooth at every choice, with a short, small
-dip at 60 in the heaviest spots (riding into the cave on The Dagger), and stutters at 70. The
-settings menu warns you when you pick 3×.
-
-Already done to speed it up: shadows are drawn at 1× when scaling (about 15%), full-screen images
-the game reads back are loaded without an extra copy (about 12%), and depth-only passes skip the
-emulated memory's pixel ordering. 4× (4800×2560, 12.3 million pixels) still needed about 18 ms
-per frame and stuttered above 40 fps, so it was removed; on a 1440p screen 3× looks almost the
-same.
-
-</details>
-
-<details>
-<summary><b>How ReGPU is installed</b></summary>
-<br>
-
-SSX loads ReGPU as a ReXGlue GPU plugin (`regpu-plugin/`, adapted from
-[Glue2GPU](https://github.com/zer0ducksgiven/Glue2GPU)). The installer downloads it prebuilt (the
-`regpu-*` releases, made by [`scripts/build-regpu-package.ps1`](scripts/build-regpu-package.ps1):
-ReGPU with this project's `patches/regpu-*.patch`, no game code). Developers build it from source
-with `scripts\build-regpu.ps1` (needs Git and Python 3).
+3× draws about 4K through an emulation of the Xbox 360's video memory. Even an RTX 4080 SUPER sits
+at 99% there: above 60 fps the frame rate jumps around and some drivers hang. 2× (or ReGPU) is
+recommended; 4× was removed for the same reason.
 
 </details>
 
@@ -310,110 +165,44 @@ with `scripts\build-regpu.ps1` (needs Git and Python 3).
 
 ## 📦 DLC and the title update
 
-The base game works without DLC and without the title update. Like the game itself, **neither is
-included**: you need the files from your own Xbox 360, bought or downloaded on your own Xbox Live
-account.
+Neither is included: they come from **your own Xbox 360**. All five DLC packs work (Mount Eddie,
+the Presell Pack, Japan Range, Eddie Pack and Mac Board Pack), and so does title update **0.0.3.2**,
+which adds the gear for levels 11 to 15.
 
-| Package | Size | Contents |
-|---|---|---|
-| 🏔️ SSX Mount Eddie | ~250 MB | the Mt. Eddie region and the classic riders |
-| 🎁 SSX Presell Pack | ~9 MB | the pre-order bonuses: Japan (Mount Fuji), Eddie as a rider, Mac's Ultimate Board |
-| 🗾 SSX Japan Range | ~9 MB | pre-order bonus: Japan (Mount Fuji) |
-| 🧔 SSX Eddie Pack | <1 MB | pre-order bonus: Eddie as a playable rider |
-| 🏂 SSX Mac Board Pack | <1 MB | pre-order bonus: Mac's Ultimate Board |
-| 📈 Title update 0.0.3.2 | ~9 MB | the game's last update ([below](#title-update)) |
-
-All of them work. Japan Range, Eddie Pack and Mac Board Pack are the original pre-order versions:
-with Mount Eddie and the Presell Pack installed, Japan, Eddie and Mac's Ultimate Board are already
-there, so they add nothing new (installing them anyway does no harm).
-
-> [!TIP]
-> **Quick version:** in `ssx-recomp.exe`, click **Install / Manage** (or, the first time, **Get started**), then **Add files...**, and select
-> the files (DLC and the title update together; the picks add up). It shows what each
-> file is, or why it isn't an SSX package. Then click **Add DLC** (**Rebuild** with the title
-> update, **Install** the first time). DLC can also be copied to `userdata\dlc` by hand:
-> the game installs it the next time it starts.
+**To add them:** in `ssx-recomp.exe`, click **Install / Manage → Add files...**, pick the files, then
+**Add DLC** (or **Rebuild** for the title update).
 
 <details>
-<summary><b>Full guide: finding, copying and checking the DLC files</b></summary>
+<summary><b>Getting the files off your console</b></summary>
 <br>
 
-**What the files look like.** Xbox 360 DLC is stored as package files with a long hexadecimal
-name and no extension. SSX's DLC lives in a folder named after the game's title ID and the
-content type "marketplace":
+Copy them from your console's drive with an Xbox 360 file tool (like *FATXplorer*, *Velocity* or
+*Horizon*). Copy the long-named package files themselves, not their folders:
 
-```
-Content\0000000000000000\4541096D\00000002\
-```
+| | Folder on the console |
+|---|---|
+| DLC | `Content\0000000000000000\4541096D\00000002\` |
+| Title update | `Content\0000000000000000\4541096D\000B0000\` (if there are two, use the larger, ~9 MB) |
 
-**Getting them off your console.** Copy the game's DLC from your console's hard drive to a USB
-drive (*Settings → System → Storage*), or connect the console's drive to your PC. Xbox 360
-storage uses its own file system, so use an Xbox 360 file tool (for example *FATXplorer*,
-*Velocity* or *Horizon*) to open it and copy the package files out of the `4541096D\00000002`
-folder. Copy the package files themselves, not the folder.
-
-**Installing them by hand** (`ssx-recomp.exe`'s **Add files...** does the same):
-
-1. Close the game.
-2. Open the folder `userdata\dlc`. The game creates it the first time it starts, or you can
-   create it yourself.
-3. Copy the package files (the long-named files) directly into it, not in a subfolder.
-4. Start the game. On startup it unpacks each new package into
-   `userdata\0000000000000000\4541096D\00000002\`. This happens once per package, and the
-   files in `dlc` can be deleted afterwards.
-
-**Checking it worked.** Mt. Eddie and Japan appear on the world map, and the classic riders and
-Eddie are selectable. The game's log (`logs` folder next to `ssx.exe`) shows a line starting with
-`DLC: installed` for each package. If it says `failed to install`, the file isn't an Xbox 360
-content package: check that you copied the long-named package file, not a folder or an archive.
+DLC can also be copied by hand into `userdata\dlc`; the game installs it at the next start (the log
+in `logs` says `DLC: installed`). Mt. Eddie and Japan then show on the world map.
 
 </details>
 
 <a id="title-update"></a>
-
-### 📈 The title update
-
-SSX's last title update (version 0.0.3.2) adds the gear for levels 11 to 15 to the store. With it,
-the game is built from the updated version of its own code, so everything in this port (frame
-rates, resolution, DLC, your name and picture) works the same.
-
-- **Getting it off your console:** like the DLC, with an Xbox 360 file tool. Installed title
-  updates are in `Content\0000000000000000\4541096D\000B0000\`. If there are two files, use the
-  larger one (about 9 MB, version 0.0.3.2); the smaller one (about 1 MB) is an older update that's
-  already contained in it.
-- **Adding it:** in `ssx-recomp.exe`, **Install / Manage**, **Add files...**, then **Rebuild** (or **Install** the first time). It checks that
-  it's the supported update. Updating later keeps it; you only add it once.
-- **Saves** work with both versions: the update loads saves from the disc version, and the disc
-  version loads saves the update wrote.
-- **Going back to the disc version:** run the builder in your SSX folder with `-NoTitleUpdate`:
-  `powershell -ExecutionPolicy Bypass -File "C:\Games\SSX\source\scripts\build-ssx.ps1" -NoTitleUpdate`
-  (with your own SSX folder instead of `C:\Games\SSX`). It asks for your ISO again.
-
 <a id="level-15"></a>
 
-### 🎚️ Levels 11 to 15
-
-EA raised the level cap of 10 through *tuning updates*: small files the game downloads when you
-sign in to EA's servers. The port can't reach those servers (they go through Xbox Live), so a new
-save would never get one and its riders would stop at level 10, title update or not.
-
-**The port takes care of that itself.** With the [title update](#title-update) installed, it makes
-the game's level tables as long as EA's last tuning update did: the XP for each level, the price
-of access to it, the gear slots, and the stat ranges of the gear. There is nothing to set up, and
-no file from EA is involved.
-
-A level 10 rider is offered access to level 11 on the rider screen, for 1,000,000 credits. After
-buying it, the rider moves up at the end of the next event as soon as they have the XP for it (a
-full XP bar at level 10 is enough). The same goes for every level up to 15, as on the console.
-
 <details>
-<summary><b>Saves that already have EA's tuning update</b></summary>
+<summary><b>The title update and levels 11 to 15</b></summary>
 <br>
 
-A save from a console that has been online since mid-2012 carries EA's tuning update itself, and
-the game keeps using it. The port also keeps such an update aside (`userdata\tuning\update.bin`)
-and gives it to your other saves; a save file put in `userdata\tuning` is picked up the same
-way.
+- **Level cap:** EA raised it from 10 to 15 through online tuning updates the port can't download.
+  With the title update installed, the port applies the same level tables itself: a level 10 rider
+  can buy access to level 11 for 1,000,000 credits, and so on up to 15. A save that already has
+  EA's tuning update keeps using it.
+- **Saves** work with and without the title update.
+- **Back to the disc version:** run `source\scripts\build-ssx.ps1 -NoTitleUpdate` from your SSX
+  folder (it asks for your ISO again).
 
 </details>
 
@@ -421,102 +210,27 @@ way.
 
 ## 🎵 Your own music
 
-SSX can play your own music instead of its soundtrack, and remixes it live as you ride, like on
-the console:
-
-1. Put your music in `userdata\music`, one folder per playlist: for example
-   `music\Chill\` and `music\Punk\`. The folder name is the playlist's name; songs in subfolders
-   count too. In races the game shuffles them. Music files right in `music\` form a playlist called
-   *Music*. MP3, M4A/AAC, WMA, FLAC and WAV work.
+1. Put your music in `userdata\music`, one folder per playlist (like `music\Chill\`). MP3, M4A/AAC,
+   WMA, FLAC and WAV work.
 2. In the game, press **Back** on the main screen, then **Music → Personalize Your Music**.
-3. For race, trick, survive and menu music, pick **Playlist** and then one of your folders.
-   (The game's own text says to create a playlist on the Xbox 360 console: a folder is that here.)
-
-The game's Audio Settings have a volume for your music and a **Remix** switch. New folders show up
-the next time you open the playlist list; no restart needed.
-
-<a id="roadmap"></a>
+3. Pick **Playlist** and one of your folders for race, trick, survive or menu music.
 
 ## 🗺️ Roadmap
 
-The game is playable and is being tested by playing through the whole World Tour.
+**Being worked on:** playing through every region to find bugs, Linux testing on more PCs, and
+installer reliability.
 
-**🔧 Being worked on**
-- 🏔️ **Playing through every region** to find and fix bugs, especially the Deadly Descent
-  mechanics (cold, darkness, oxygen and so on), which depend on details of the original hardware.
-- 🐧 **Linux (beta):** testing on more PCs (AMD and Intel graphics, other distributions).
-- 💻 **Installer reliability** on more PCs, based on the reports in the issues.
-
-**👀 Known issues**
-- A peak label on the world map was once seen drawn as a solid box (Africa). Not reproduced yet;
-  screenshots are welcome.
-- Only SSX (USA) is supported, with or without its last title update (0.0.3.2).
+**Known issues:**
+- Only SSX (USA) is supported, with or without title update 0.0.3.2.
+- Online features (RiderNet, global events, online races) need Xbox Live and don't work. The
+  online-only badges can be shown as earned (**F1 → Profile**).
 - Ultrawide screens get a 16:9 picture.
-- Linux: no gamer picture yet, and the standard renderer runs at 1× only.
-- Online features (RiderNet, global events, online races) don't work: they go through Xbox Live,
-  which the port can't sign in to. EA's SSX servers themselves are still running for the consoles
-  (on Xbox 360 with fewer features than on PS3). The badges that need them can be shown as earned
-  (**F1 → Profile**).
 
-<details>
-<summary><b>✅ Fixed so far</b></summary>
-<br>
-
-- ✅ 2.0.0: a new look for the setup and the F1 menu; the game's shaders and render pipelines
-  are prepared on the first start, so the first rides barely stutter (#17, with @Xarishark);
-  ReGPU's caches are kept in the SSX folder's `userdata` (#26, by @Xarishark); RecompLauncher
-  starts the game through `ssx-recomp.exe` (#27, by @Xarishark); a No reverse camera cheat, and
-  Ride uphill no longer slows you down riding back up the mountain (#21)
-- ✅ A Slow motion cheat: hold LB to slow time down for as long as you hold it (1.9.5)
-- ✅ View More lists your gear by type, then the highest level first (#25); the credits cheat is now
-  Everything is free: the credits shown stay your own, and the store lets you buy anything (1.9.4)
-- ✅ Laptops with two GPUs (built-in graphics next to an NVIDIA or AMD card) run the game on the
-  fast one (1.9.3)
-- ✅ After the build tools change (a newer LLVM, or another Visual Studio installed), the next update
-  builds the game from scratch once instead of mixing files from both (1.9.2)
-- ✅ With No rewinds, the rewind counter shows 0; a tidier setup, whose desktop shortcut box is only
-  ticked on the first install, so updating no longer moves your shortcut to that folder (1.9.1)
-- ✅ Cheats, second round: infinite boost runs down but never empties (Tricky starts as normal),
-  wingsuits steer again with infinite lift, gear meters stay full on screen, new **No rewinds** and
-  **Ride uphill**; the setup says which build tool it's installing and when Windows is waiting for
-  your permission, and reminds you to keep your ISO (1.9.0)
-
-- ✅ The main menu comes about 10 seconds sooner: the game no longer waits for Xbox Live after loading
-  the save; cheats (infinite boost, always Tricky or Super Tricky, no Tricky, infinite credits and
-  rewinds, +1,000,000 credits, infinite wingsuit lift, one switch each for the headlamp and pulse
-  goggles batteries, the wingsuit, armour and ice axes durability, oxygen tanks and cold protection;
-  never lose a combo or the multiplier; max gear stats, big head, big hands, glowing suit);
-  the setup shows the title update and DLC you already added; quitting from F1 right after starting no
-  longer switches to the standard renderer; moving the SSX folder no longer breaks the next rebuild; a folder with only default.xex (like the setup's own copy) is no longer taken as
-  the game, which crashed at start (1.8.0)
-- ✅ Every controller is player 1 (a controller that wasn't first, for example behind a Steam or
-  DS4Windows virtual pad, got stuck at "sign in"), and **Quit game** in the settings menu (1.7.1)
-- ✅ One `ssx-recomp.exe` that sets SSX up and is its launcher: a portable SSX folder (saves from
-  earlier versions come along), **Check for updates**, extracted discs and
-  [RecompLauncher](https://recomplauncher.com/game/ssx-recomp) support (thanks @Xarishark) (1.7.0)
-- ✅ A snowflake tracker, the boost meter in freeride, the online-only badges, a portable install
-  option, VSync with ReGPU at any frame rate, and full frame rates right from the start
-  (thanks @StephenNarcisse) (1.6.0)
-- ✅ A native Linux version (beta), with ReGPU (1.5.0)
-- ✅ Races on ReGPU no longer sink to 40–60 fps: the snow's trail table uploads in about 1 ms
-  instead of 10–20 (1.4.3)
-- ✅ Your own music plays after every restart of an event (1.4.2)
-- ✅ ReGPU is the default renderer, drawing up to 4K (1.4.0)
-- ✅ Levels 11 to 15 without EA's servers ([how it works](#level-15))
-- ✅ The title update (0.0.3.2) from your own console: the gear for levels 11 to 15
-- ✅ All five DLC packs work, and the installer can add them for you (**Add files...**)
-- ✅ Your own name and gamer picture instead of "User" and an empty square
-- ✅ Antarctica's thermal protection (the rider froze in the sun)
-- ✅ Yellow specks on dark rock (Africa's caves)
-- ✅ Flickering yellow/green noise in the flare light on night Deadly Descents (Alaska)
-- ✅ Standard renderer: blocky bands on the snow at 2×, a washed-out image at 2× and 3×, uneven
-  frame pacing at the GPU's limit, and stutter at 3× (now locked to what a fast GPU holds there)
-
-</details>
+What changed in each version is on the [releases page](../../releases).
 
 > [!TIP]
-> **Found a bug?** [Open an issue](../../issues/new) with a screenshot, where it happened (region,
-> peak, event) and, if the game crashed, the newest file from the `logs` folder next to `ssx.exe`.
+> **Found a bug?** [Open an issue](../../issues/new) with a screenshot, where it happened, and, if
+> the game crashed, the newest file from the `logs` folder next to `ssx.exe`.
 
 <details>
 <summary><b>🧑‍💻 Building manually / development</b></summary>
@@ -533,7 +247,10 @@ launcher, hooks). [`PROGRESS.md`](PROGRESS.md) is the development log.
 The builder uses the CMake preset `ssx-player`, which builds against the prebuilt SDK package made
 by [`scripts/build-sdk-package.ps1`](scripts/build-sdk-package.ps1) (the SDK source at a fixed
 commit plus `patches/`). For SDK development, the `ssx-release` preset builds the SDK from source
-in `tools/rexglue-src`.
+in `tools/rexglue-src`. ReGPU is loaded as a ReXGlue GPU plugin (`regpu-plugin/`, adapted from
+[Glue2GPU](https://github.com/zer0ducksgiven/Glue2GPU)); the installer downloads it prebuilt from
+the `regpu-*` releases ([`scripts/build-regpu-package.ps1`](scripts/build-regpu-package.ps1)), and
+`scripts\build-regpu.ps1` builds it from source.
 
 </details>
 
