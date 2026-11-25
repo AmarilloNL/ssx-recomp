@@ -359,9 +359,13 @@ if (-not $clang) { Fail "No suitable clang found: LLVM 20 or newer for Windows (
 Write-Host "  clang: $clang"
 
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-# Visual Studio 2022 (17.0) or newer: older ones (2017, 2019) lack the C++20 headers the SDK
-# uses, like <bit> and <span> (issue #3). They can stay installed next to it.
-$vsFilter = '-products', '*', '-version', '17.0', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64'
+# Visual Studio 2022 17.14 or newer. 2017 and 2019 lack the C++20 headers the SDK uses, like <bit>
+# and <span> (issue #3), and the prebuilt SDK is compiled with 17.14's C++ library, which an older
+# one can't link: "undefined symbol: __std_find_first_of_trivial_pos_1" (issue #30). Older ones can
+# stay installed next to it.
+$vsMin = '17.14'
+$vsReq = 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64'
+$vsFilter = '-products', '*', '-version', $vsMin, '-requires', $vsReq
 function Test-Msvc { (Test-Path $vswhere) -and (& $vswhere @vsFilter -property installationPath) }
 $vsComponents = '--add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 ' +
                 '--add Microsoft.VisualStudio.Component.Windows11SDK.26100'
@@ -376,12 +380,21 @@ function Invoke-VsInstaller([string]$Verb, [string]$Path) {
     try { Start-Process $vsInstaller -ArgumentList $a -Verb RunAs -Wait } catch { Write-Host "  $_" }
 }
 if (-not (Test-Msvc)) {
-    if ((Test-Path $vswhere) -and (& $vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)) {
-        Write-Host "  The Visual Studio found is older than 2022, too old for this build."
+    $oldVs = if (Test-Path $vswhere) { & $vswhere -products * -requires $vsReq -latest -property installationPath }
+    if ($oldVs) {
+        $oldVer = & $vswhere -path $oldVs -property catalog_productDisplayVersion
+        Write-Host "  The Visual Studio found ($oldVer) is older than 2022 $vsMin, too old for this build."
+        # Build Tools are only there for building: bring them up to date. A full Visual Studio is left
+        # as it is, and the Build Tools are installed next to it below.
+        if ((& $vswhere -path $oldVs -property productId) -eq 'Microsoft.VisualStudio.Product.BuildTools') {
+            Invoke-VsInstaller 'update' $oldVs
+        }
     }
-    # Visual Studio 2022 or newer without its C++ tools (another workload, or they were removed): they're
+    # A new enough Visual Studio without its C++ tools (another workload, or they were removed): they're
     # added to it, rather than a second installation next to it.
-    if (Test-Path $vswhere) { Invoke-VsInstaller 'modify' (& $vswhere -products * -version 17.0 -latest -property installationPath) }
+    if ((Test-Path $vswhere) -and -not (Test-Msvc)) {
+        Invoke-VsInstaller 'modify' (& $vswhere -products * -version $vsMin -latest -property installationPath)
+    }
 }
 if (-not (Test-Msvc)) {
     Write-Host "  installing Visual Studio 2022 Build Tools (C++ libraries + Windows SDK)."
@@ -394,7 +407,7 @@ if (-not (Test-Msvc)) {
         try { Start-Process (Get-Download 'https://aka.ms/vs/17/release/vs_BuildTools.exe') -ArgumentList $vsArgs -Verb RunAs -Wait }
         catch { Write-Host "  $_" }
     }
-    if (-not (Test-Msvc)) { Fail "Installing the Visual Studio Build Tools failed. Windows may have asked for administrator permission: allow it, or install them yourself." 30 }
+    if (-not (Test-Msvc)) { Fail "Installing the Visual Studio $vsMin Build Tools failed. Windows may have asked for administrator permission: allow it, or install or update them yourself (Visual Studio Installer, Update)." 30 }
 } else { Write-Host "  Visual Studio C++ build tools: found" }
 # Use the C++ headers and libraries of that installation. Left alone, clang picks a Visual
 # Studio installation by itself (the newest), which may lack them: "could not open
