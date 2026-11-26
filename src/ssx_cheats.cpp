@@ -402,12 +402,18 @@ REX_HOOK_RAW(SSX_FN_FLOW_UPDATE) {
 namespace {
 constexpr uint32_t kFullPoints = 100;
 enum GearStat : uint32_t { kLastGearStat = 25, kGlowing = 30, kBigHead = 34, kBigHands = 35, kBigHeadAndHands = 36 };
+// The board's speed, boost and tricks (stats 0-2) as the outfit had them when the last ride started with Max
+// gear stats on, for F1 to show what the cheat raised. -1: no such ride yet.
+std::atomic<int> gear_before[3] = {-1, -1, -1};
 }  // namespace
+
+int SsxCheatsGearBefore(int stat) { return gear_before[stat].load(); }
 
 REX_EXTERN(SSX_FN_GEAR_STAT_IMP);
 REX_HOOK_RAW(SSX_FN_GEAR_STAT) {
   const uint32_t stat = ctx.r4.u32;
   SSX_FN_GEAR_STAT_IMP(ctx, base);
+  if (stat < std::size(gear_before) && REXCVAR_GET(ssx_cheat_max_gear)) gear_before[stat] = int(ctx.r3.u32 & 0xFF);
   const bool head = REXCVAR_GET(ssx_cheat_big_head), hands = REXCVAR_GET(ssx_cheat_big_hands);
   const bool full = (stat <= kLastGearStat && REXCVAR_GET(ssx_cheat_max_gear)) ||
                     (stat == kGlowing && REXCVAR_GET(ssx_cheat_glowing)) || (stat == kBigHead && head) ||

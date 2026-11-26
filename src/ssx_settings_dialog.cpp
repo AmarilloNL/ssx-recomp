@@ -34,7 +34,8 @@
 #include "ssx_settings.h"
 #include "ssx_snowflakes.h"
 
-void SsxCheatsGiveCredits();  // ssx_cheats.cpp
+void SsxCheatsGiveCredits();        // ssx_cheats.cpp
+int SsxCheatsGearBefore(int stat);  // ssx_cheats.cpp
 
 REXCVAR_DEFINE_BOOL(ssx_show_fps, false, "SSX", "Show the frame rate in the top-left corner");
 
@@ -965,7 +966,14 @@ void SsxSettingsDialog::DrawCheatsTab() {
     Checkbox("##cheat_oxygen", "ssx_cheat_infinite_oxygen");
     Row("Infinite cold protection (solar panels)", "The cold never lowers your core temperature.");
     Checkbox("##cheat_warmth", "ssx_cheat_infinite_warmth");
-    Row("Max gear stats", "From your next ride: board, wingsuit and other gear at their best.");
+    // The game's menus keep showing the outfit's own stats, so this shows what the cheat raised them to.
+    std::string max_gear = "From your next ride: board, wingsuit and other gear at their best.";
+    if (rex::cvar::GetFlagByName("ssx_cheat_max_gear") == "true" && SsxCheatsGearBefore(0) >= 0) {
+      max_gear += "\nLast ride: speed " + std::to_string(SsxCheatsGearBefore(0)) + ", boost " +
+                  std::to_string(SsxCheatsGearBefore(1)) + ", tricks " + std::to_string(SsxCheatsGearBefore(2)) +
+                  " raised to 100.";
+    }
+    Row("Max gear stats", max_gear.c_str());
     Checkbox("##cheat_max_gear", "ssx_cheat_max_gear");
     ImGui::EndTable();
   }
