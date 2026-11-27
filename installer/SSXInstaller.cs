@@ -103,7 +103,7 @@ static class Program {
   // --game (or --iso): the disc image, or the extracted disc's folder or its default.xex.
   // Exit codes: 0 the game is built, 2 wrong options, 1 something unexpected, else the builder's
   // (scripts\build-ssx.ps1): 10-13 the copy of the game, 20-22 the title update, 30-31 the build
-  // tools, 40 a download, 50 the build.
+  // tools, 40 a download, 50 the build, 60 Smart App Control blocked a build tool.
   // --prepare (RecompLauncher's setup step, recomplauncher.json): prints only "progress <0-1> <step>"
   // lines (the build's output still goes to build-ssx.log) and, when it fails, the reason as its
   // last line; a --title-update or --dlc file that isn't there is skipped: the player didn't pick it.
@@ -152,7 +152,9 @@ static class Program {
         return 0;
       }
       // The builder's reason (its ERROR line), last: RecompLauncher shows the last line with the code.
-      Console.WriteLine(progress != null && progress.Error != null
+      Console.WriteLine(code == InstallerForm.SmartAppControlExit
+                            ? InstallerForm.SmartAppControlMessage
+                            : progress != null && progress.Error != null
                             ? progress.Error
                             : "The build failed. The full log is build-ssx.log in " + Path.Combine(folder, "source"));
       return code >= 10 ? code : 50;
@@ -2141,14 +2143,37 @@ class InstallerForm : Form {
     info.StandardErrorEncoding = oem;
     info.WorkingDirectory = source;
     var process = new Process { StartInfo = info };
-    process.OutputDataReceived += delegate(object s, DataReceivedEventArgs a) { onLine(a.Data); };
-    process.ErrorDataReceived += delegate(object s, DataReceivedEventArgs a) { onLine(a.Data); };
+    bool blocked = false;
+    DataReceivedEventHandler read = delegate(object s, DataReceivedEventArgs a) {
+      if (a.Data != null && IsSmartAppControlBlock(a.Data)) blocked = true;
+      onLine(a.Data);
+    };
+    process.OutputDataReceived += read;
+    process.ErrorDataReceived += read;
     process.Start();
     if (started != null) started(process);
     process.BeginOutputReadLine();
     process.BeginErrorReadLine();
     process.WaitForExit();
+    if (process.ExitCode != 0 && blocked) {
+      onLine("");
+      onLine("Windows Smart App Control stopped one of the build tools (error 0xc0e90002). It blocks programs");
+      onLine("that aren't code-signed, and the game is built on this PC. To build SSX, turn it off: Windows Security >");
+      onLine("App & browser control > Smart App Control settings > Off. Then try again. Defender stays on.");
+      return SmartAppControlExit;
+    }
     return process.ExitCode;
+  }
+
+  // Build's exit code when Smart App Control blocked a build tool.
+  internal const int SmartAppControlExit = 60;
+  internal const string SmartAppControlMessage =
+      "Windows Smart App Control blocked the build. Turn it off in Windows Security, then try again.";
+
+  // STATUS_SYSTEM_INTEGRITY_POLICY_VIOLATION, as ninja, cmd or PowerShell print it.
+  internal static bool IsSmartAppControlBlock(string line) {
+    return line.IndexOf("0xc0e90002", StringComparison.OrdinalIgnoreCase) >= 0 ||
+           line.Contains("3236495362") || line.Contains("-1058471934");
   }
 
   void RunBuild(string iso, string folder, string titleUpdate) {
@@ -2157,6 +2182,7 @@ class InstallerForm : Form {
       bool ok = code == 0 && File.Exists(GameExe());
       if (ok) Install.MarkBuilt(folder);
       Finish(ok, ok ? "" : cancelled ? "Installation cancelled."
+                         : code == SmartAppControlExit ? SmartAppControlMessage
                          : "Something went wrong. The full log is saved as build-ssx.log in the source folder.");
     } catch (Exception ex) {
       OnLine(ex.ToString());
