@@ -8,11 +8,12 @@
 [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4?style=for-the-badge&logo=windows11&logoColor=white)](#installing)
 [![Linux](https://img.shields.io/badge/Linux-beta-f59e0b?style=for-the-badge&logo=linux&logoColor=white)](#linux)
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge)](LICENSE)
+[![Discord](https://img.shields.io/badge/Discord-join-5865f2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/5GyEyDJ8BX)
 <a href="https://playported.com/ports/1191-ssx/"><img src="https://playported.com/badge.svg" alt="Listed on PlayPorted" height="28"></a>
 
 <a href="https://recomplauncher.com/game/ssx-recomp"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a>
 
-[⬇️ Download](../../releases/latest) · [🎬 Gameplay](#gameplay) · [✨ Features](#features) · [🛠️ Install](#installing) · [🎮 Controls](#playing) · [🖥️ Graphics](#graphics) · [📦 DLC](#adding-dlc) · [🎵 Music](#your-music) · [🩺 Help](#help) · [🗺️ Roadmap](#roadmap) · [📝 Changelog](../../releases)
+[⬇️ Download](../../releases/latest) · [🎬 Gameplay](#gameplay) · [✨ Features](#features) · [🛠️ Install](#installing) · [🎮 Controls](#playing) · [🖥️ Graphics](#graphics) · [📦 DLC](#adding-dlc) · [🎵 Music](#your-music) · [🩺 Help](#help) · [💬 Discord](https://discord.gg/5GyEyDJ8BX) · [🗺️ Roadmap](#roadmap) · [📝 Changelog](../../releases)
 
 </div>
 
@@ -310,6 +311,7 @@ SSX plays your own music instead of its soundtrack, and remixes it live as you r
 | **The game asks for your ISO** | pick the ISO itself, not the `default.xex` in `source\game-dump` |
 | **The build failed** | [open an issue](../../issues/new) with the build log ([where](#installing)) |
 | **The game crashed or looks wrong** | [open an issue](../../issues/new) with a screenshot and the newest file in `logs` next to `ssx.exe` |
+| **Anything else, or just want to chat** | ask in `#help` on the [Discord](https://discord.gg/5GyEyDJ8BX) |
 
 <a id="roadmap"></a>
 
