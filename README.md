@@ -108,6 +108,8 @@ it builds the game for you.
 | | 🪟 Windows | 🐧 Linux (beta) |
 |---|---|---|
 | **System** | Windows 10 or 11, 64-bit | tested on CachyOS; Debian, Ubuntu and Fedora untested |
+| **Processor** | 4 cores or more; 2-core laptop chips manage about 20 fps | 4 cores or more |
+| **Graphics** | DirectX 12; a GTX 1050 or faster for 60 fps at 720p–1080p | a GTX 1050 or faster, with Vulkan drivers |
 | **Free space** | about 10 GB | about 15 GB |
 | **First build** | 10–30 minutes | 20–60 minutes |
 | **Internet** | for the first build and for updates | for the first build and for updates |
